@@ -162,8 +162,17 @@ def listing_questions(store: Store, case_id: str) -> list[dict]:
     items = [i for i in store.get_items(case_id) if i["status"] != "rejected"]
     item_words = [label_words(i["label"])[0] for i in items]
 
+    # A hair dryer is not a clothes dryer, and a pressure washer is not a washing machine.
+    washer_seen = any(("washer" in w and not w & {"pressure", "power", "dish"}) or {"washing", "machine"} <= w
+                      for w in item_words)
+    dryer_seen = any("dryer" in w and not w & {"hair", "blow", "hand"} for w in item_words)
+
     def have(name: str) -> bool:
         words = label_words(name)[0]
+        if words == {"washer"}:
+            return washer_seen
+        if words == {"dryer"}:
+            return dryer_seen
         return bool(words) and any(words <= w for w in item_words)
 
     out = []

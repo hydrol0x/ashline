@@ -268,3 +268,26 @@ def test_real_style_questions(kit, offline, monkeypatch):
     # The aerial already raised patio furniture as a yard finding, so the patio is not asked about twice.
     assert not any("patio" in t for t in texts)
     assert not any("outdoor storage" in t or "guest house" in t for t in texts)      # in the buildings question
+
+
+def test_a_hair_dryer_does_not_answer_the_laundry_question(kit, offline):
+    import zipfile as z
+    listing = dict(LISTING, resoValues={"hasGarage": True, "structure": {"garageSpaces": 2.0}})
+    with z.ZipFile(kit, "w") as zf:
+        zf.writestr("residential-listings.csv",
+                    "Address,City,ListingId,MatterportModelId,ResidentialListingId,State\n"
+                    "12 Example Ave,Los Angeles,501,fakeA000001,9001,CA\n")
+        zf.writestr("data/residential-listings.jsonl", json.dumps(listing))
+        zf.writestr("data/residential-listing-features.jsonl",
+                    json.dumps(dict(FEATURES, features=REAL_STYLE, highlights=[])))
+    store = Store()
+    seed.seed_home_twin("fam1", sid="fakeA000001", loss_date="2025-01-07", max_faces=16, store=store)
+
+    def laundry_asked():
+        return any("laundry" in q["text"] for q in gap_questions("fam1", store) if q["kind"] == "listing")
+
+    for label in ("hair dryer / styling tool", "cordless pressure washer", "stainless steel dishwasher"):
+        store.add_item("fam1", {"label": label}, source="voice")
+        assert laundry_asked(), label
+    store.add_item("fam1", {"label": "white front-load clothes dryer"}, source="voice")
+    assert not laundry_asked()

@@ -23,13 +23,13 @@ class FakeDetector:
         FakeDetector.calls += 1
         pano, face = str(path)[:-4].rsplit("scan-", 1)[1].split("-f")
         if room_hint and "Living" in room_hint:
-            sofa = ({"label": "grey couch", "category": "furniture", "confidence": 0.4, "bbox": [0, 0, 9, 9]}
+            sofa = ({"label": "green couch", "category": "furniture", "confidence": 0.4, "bbox": [0, 0, 9, 9]}
                     if int(pano) % 2 == 0 else
                     {"label": "green velvet sofa with brass legs", "category": "furniture",
                      "confidence": 0.5, "bbox": [0, 0, 9, 9]})
             return {1: [sofa],
                     2: [{"label": "oak bar stool", "category": "furniture", "confidence": 0.5, "bbox": [0, 0, 5, 5]},
-                        {"label": "oak counter stools with leather seats", "category": "furniture",
+                        {"label": "oak bar stool with leather seat", "category": "furniture",
                          "confidence": 0.5, "bbox": [6, 0, 9, 5]}]}.get(int(face), [])
         if room_hint == "Bedroom" and face == "1":
             return [{"label": "queen bed with white bedding", "category": "furniture", "confidence": 0.5, "bbox": [0, 0, 9, 9]}]
@@ -184,10 +184,91 @@ def test_scan_priors():
     assert merge_threshold(a, family) == 0.90 == merge_threshold(family, family)
 
 
+def test_same_thing_across_viewpoints():
+    from ashline.dedupe import same_thing
+    same = [("green striped bedspread / comforter", "green striped bedspread/quilt"),
+            ("gray blackout curtain panel", "gray blackout window curtain"),
+            ("Acme flat-screen LED TV (approx. 50-inch)", "flat-screen television"),
+            ("striped pillow (left)", "green and white ticking stripe pillow"),
+            ("black air fryer toaster oven", "dark gray air fryer"),           # lighting changes the colour
+            ("cardboard box", "cardboard boxes on top of refrigerator"),
+            ("hanging clothes in closet", "hanging clothing in closet (jacket and denim)"),
+            ("oak and cream bar stool with cane back", "second cream bar stool (partially visible)")]
+    different = [("Moomin plush toy", "Totoro plush toy"),                     # the name is what differs
+                 ("Moomin hanging towel", "Moomin tissue box holder"),         # same brand, different thing
+                 ("red print storage bin", "white fabric storage bin"),
+                 ("TV remote control", "large flat-screen television"),
+                 ("oak TV stand with soundbar", "large wall-mounted flat-screen TV"),
+                 ("steel spray can", "steel rectangular trash can"),
+                 ("blue patterned comforter", "green striped bedspread / comforter"),
+                 ("black countertop microwave", "black air fryer")]
+    for a, b in same:
+        assert same_thing(a, b) and same_thing(b, a), (a, b)
+    for a, b in different:
+        assert not same_thing(a, b) and not same_thing(b, a), (a, b)
+
+
+def _det(item_id, photo_id, label, bbox, category="furniture", room="r1", confidence=0.8):
+    return {"item_id": item_id, "photo_id": photo_id, "label": label, "bbox": bbox, "category": category,
+            "room_id": room, "confidence": confidence}
+
+
+def _faces(*panos):
+    return {f"{p}-f{f}": {"pano_id": p, "face": f, "width": 2048} for p in panos for f in (1, 2, 3, 4)}
+
+
+def test_object_cut_by_a_face_seam_is_counted_once():
+    photos = _faces("p1")
+    items = [
+        _det(1, "p1-f3", "gray reclining loveseat with console", [1200, 1100, 2040, 1650]),   # runs off the right edge
+        _det(2, "p1-f4", "gray sofa cushion (partial)", [0, 1150, 90, 1600]),                # ...and continues on the next face
+        _det(3, "p1-f4", "gray three-seat sofa", [400, 1100, 1300, 1500]),                   # a second sofa, mid-face
+        _det(4, "p1-f4", "floor lamp", [2000, 300, 2048, 1200], category="lighting"),        # cut by the 4|1 seam
+        _det(5, "p1-f1", "tall floor lamp", [0, 280, 60, 1250], category="lighting"),        # wraps round to face 1
+        _det(6, "p1-f1", "side table", [0, 1700, 80, 2000]),                                 # at the seam but far below the lamp
+    ]
+    clusters = {c["canonical_id"]: c for c in cluster_scan_items(items, photos)}
+    assert sorted(sorted(c["member_ids"]) for c in clusters.values()) == [[1, 2], [3], [4, 5], [6]]
+    assert all(c["qty"] == 1 for c in clusters.values())
+    assert 1 in clusters                                    # the full view names the line, not "(partial)"
+    # A different kind of thing at the seam is not joined, whatever the geometry.
+    items[1]["category"] = "decor"
+    assert [1] in [c["member_ids"] for c in cluster_scan_items(items, photos)]
+
+
+def test_two_wide_boxes_at_a_seam_need_matching_labels_and_edges():
+    photos = _faces("p1")
+    bed = [_det(1, "p1-f1", "queen bed with oak headboard", [900, 1000, 2048, 1800]),
+           _det(2, "p1-f2", "queen bed with oak headboard and frame", [0, 980, 1100, 1790])]
+    assert [sorted(c["member_ids"]) for c in cluster_scan_items(bed, photos)] == [[1, 2]]       # one bed on the seam
+    sofas = [_det(1, "p1-f3", "gray leather reclining loveseat", [1200, 1140, 2040, 1660]),
+             _det(2, "p1-f4", "gray leather reclining sofa", [10, 1090, 800, 1490])]
+    assert len(cluster_scan_items(sofas, photos)) == 2                    # two sofas side by side: bottoms differ
+    mixed = [_det(1, "p1-f3", "gray leather reclining loveseat", [1200, 1140, 2040, 1660]),
+             _det(2, "p1-f4", "oak bookcase", [10, 1130, 800, 1650])]
+    assert len(cluster_scan_items(mixed, photos)) == 2                    # lined up, but not the same thing
+
+
+def test_quantity_is_the_most_seen_from_one_panorama():
+    photos = _faces("p1", "p2")
+    items = [_det(i, f"p1-f{i}", "oak bar stool with cane back", [500, 900, 800, 1500]) for i in (1, 2, 3, 4)]
+    items += [_det(5, "p2-f1", "oak bar stool", [100, 900, 300, 1400]),
+              _det(6, "p2-f2", "second oak bar stool (partially visible)", [900, 900, 1100, 1400]),
+              _det(7, "p2-f2", "oak dining table", [300, 900, 800, 1400])]
+    clusters = cluster_scan_items(items, photos)
+    stools = next(c for c in clusters if c["key"] == "stool")
+    assert sorted(stools["member_ids"]) == [1, 2, 3, 4, 5, 6] and stools["qty"] == 4     # 4 stools, seen twice
+    assert len(clusters) == 2
+
+
 def test_item_key_and_clusters():
     assert item_key("green velvet sofa with brass legs") == item_key("grey couch") == "sofa"
     assert item_key("oak counter stools with leather seats") == "stool"
     assert item_key("black french door refrigerator") == "refrigerator"
+    assert item_key("gray blackout curtain panel") == "curtain"                  # "panel" is not the thing
+    assert item_key("striped pillow (left)") == "pillow"                         # remarks in brackets ignored
+    assert item_key("green bedspread / comforter") == "bedspread"                # first of two names
+    assert item_key("pair of black high-top sneakers") == "sneaker"
     items = [{"item_id": 1, "photo_id": "a", "label": "floor lamp", "confidence": 0.5, "room_id": "r1"},
              {"item_id": 2, "photo_id": "b", "label": "tall floor lamp", "confidence": 0.5, "room_id": "r2"}]
     photos = {"a": {"pano_id": "p1"}, "b": {"pano_id": "p2"}}

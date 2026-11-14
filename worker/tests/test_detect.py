@@ -22,7 +22,8 @@ def test_fixture_filter():
     for label in ["oak kitchen cabinet with pendant light", "countertop", "sink", "bamboo blinds on window",
                   "modern living room with green velvet sofa and kitchenette", "steel dishwasher door",
                   "red and grey building with flat roof", "office complex with red and grey buildings",
-                  "boy with a kite in a field", "woman holding a puppy on a beach", "human face"]:
+                  "boy with a kite in a field", "white sedan car parked in driveway", "pendant lantern light fixture",
+                  "stainless steel dishwasher", "woman holding a puppy on a beach", "human face"]:
         assert is_fixture(label), label
     for label in ["black french door refrigerator", "green velvet sofa with brass legs",
                   "toddler car seat", "oak bar stool with leather seat and backrest", "floor lamp",

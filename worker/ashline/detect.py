@@ -172,6 +172,7 @@ FIXTURE_HEADS = {
     "faucets", "faucette", "dispenser", "blades", "netting", "sill", "rod", "car", "wheel",
     # people and what a framed photo shows are not items
     "complex", "lot", "street", "road", "sidewalk", "yard",        # seen through a window
+    "fixture", "dishwasher", "sedan", "suv", "truck", "vehicle",
     "face", "baby", "girl", "boy", "father", "mother", "daughter", "son", "people", "family", "hand",
 }
 CATEGORY_WORDS = [
@@ -206,7 +207,7 @@ def head_phrase(label: str) -> str:
 
 def is_fixture(label: str) -> bool:
     head = head_phrase(label)
-    words = head.split()
+    words = [w for w in head.split() if w not in ("parked", "outside")]     # "white sedan car parked in driveway"
     if not words:
         return True
     return words[-1] in FIXTURE_HEADS or " ".join(words[-2:]) in FIXTURE_HEADS

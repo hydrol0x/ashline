@@ -60,6 +60,7 @@ MIGRATIONS = {
               "last_review_at": "TEXT", "rooms_note": "TEXT"},
     "items": {"price_low": "REAL", "price_mid": "REAL", "price_high": "REAL", "price_source": "TEXT",
               "detail": "TEXT", "reviewed": "INTEGER DEFAULT 0"},
+    "members": {"dm_chat": "TEXT"},
     "photos": {"number": "INTEGER", "batch_id": "TEXT", "taken": "TEXT", "status": "TEXT DEFAULT 'done'",
                "chat_id": "TEXT"},
 }
@@ -171,7 +172,7 @@ class Store:
         return rows
 
     def set_member(self, member_id: int, **fields) -> None:
-        allowed = ("name", "role", "paused", "state", "last_seen", "last_ask", "case_id")
+        allowed = ("name", "role", "paused", "state", "last_seen", "last_ask", "case_id", "dm_chat")
         with self.tx() as db:
             for key, value in fields.items():
                 if key in allowed:

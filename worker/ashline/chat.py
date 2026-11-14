@@ -198,6 +198,8 @@ class Engine:
         if not self.store.get_chat(inbound.chat_id):
             self.store.set_chat(inbound.chat_id, case["case_id"], inbound.is_group)
         self.store.set_member(member["member_id"], last_seen=now.isoformat(), paused=0)   # writing again ends a pause
+        if not inbound.is_group and member.get("dm_chat") != inbound.chat_id:
+            self.store.set_member(member["member_id"], dm_chat=inbound.chat_id)          # where to reach them 1:1
 
         step = member["state"].get("step")
         if step in ("home_name", "address", "use_scan", "loss_date", "rooms") and not inbound.is_group:
@@ -234,7 +236,7 @@ class Engine:
         self.store.set_case(case_id, invite_code=code, owner_token=secrets.token_urlsafe(24),
                             member_token=secrets.token_urlsafe(24))
         member = self.store.add_member(case_id, inbound.sender, inbound.sender_name, role="owner")
-        self.store.set_member(member["member_id"], state={"step": "home_name"})
+        self.store.set_member(member["member_id"], state={"step": "home_name"}, dm_chat=inbound.chat_id)
         self.store.set_chat(inbound.chat_id, case_id, False)
         return [Outbound(inbound.chat_id, INTRO)]
 
@@ -353,7 +355,9 @@ class Engine:
                 inbound.chat_id, "I don't recognise that code. Check it with the person who sent it to you.")]
         existing = self.store.get_member(inbound.sender, case["case_id"])
         if not existing:
-            self.store.add_member(case["case_id"], inbound.sender, inbound.sender_name)
+            joined = self.store.add_member(case["case_id"], inbound.sender, inbound.sender_name)
+            if not inbound.is_group:
+                self.store.set_member(joined["member_id"], dm_chat=inbound.chat_id)
         elif member and member["case_id"] != case["case_id"]:
             pass                                           # also in another case: the code switches them over below
         self.store.set_chat(inbound.chat_id, case["case_id"], inbound.is_group)
@@ -770,9 +774,7 @@ class Engine:
             return []
         if (case.get("last_review_at") or "")[:10] == now.isoformat()[:10]:
             return []                                       # once a day; an unanswered one rolls into tomorrow's
-        chat = next((c for c in self.store.get_chats(case["case_id"]) if not c["is_group"]
-                     and c["chat_id"] == owner["phone"]), None)
-        chat_id = chat["chat_id"] if chat else owner["phone"]
+        chat_id = owner.get("dm_chat") or owner["phone"]
         if not self.store.get_chat(chat_id):
             self.store.set_chat(chat_id, case["case_id"], False)
         return self._review(case, chat_id, owner, now) or []

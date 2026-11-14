@@ -66,6 +66,8 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--name", default=None)
     p.add_argument("--url", default=None, help="public address of the inventory page, for links")
 
+    sub.add_parser("photon", help="run the conversation on Photon 2.0 (iMessage)")
+
     p = sub.add_parser("page", help="print the inventory page links of a case")
     p.add_argument("--case", required=True)
 
@@ -120,6 +122,9 @@ def _run(args, parser) -> None:
             print(json.dumps(record, indent=1))
     elif args.cmd == "chat":
         simulate(args.phone, args.name, args.url)
+    elif args.cmd == "photon":
+        from .bridge_photon import PhotonBridge
+        PhotonBridge().run()
     elif args.cmd == "page":
         store = Store()
         case = store.get_case(args.case)

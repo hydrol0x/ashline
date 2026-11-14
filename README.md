@@ -70,6 +70,11 @@ HOME-1234                        -> join with the code
 /group rivera                    -> talk in the family group chat (Ashline stays quiet unless asked)
 ```
 
+To run it on iMessage through Photon 2.0, set `PHOTON_API_KEY` and `PHOTON_PROJECT_ID` in `.env` and run
+`ashline photon`. It polls the project for messages, so no public webhook is needed; only the
+inventory page has to be reachable (`ASHLINE_PUBLIC_URL`). This bridge was written from Photon's
+documentation and has not been run against a live project yet.
+
 What it does: onboarding in a few messages; relatives join with a code; one acknowledgement and one
 digest per burst of photos; a single photo comes back annotated; repeats are merged and a borderline
 match becomes one "same item?" question; commands (`list`, `how much so far`, `show photo 3`,

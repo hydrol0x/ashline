@@ -68,7 +68,7 @@ def test_aerial_parcel_end_to_end(tmp_path):
     # Detection and overlay use the same collection and layer, or boxes would shift.
     assert detect_call[1]["collection"] == "fake-city-2024" and detect_call[1]["layer"] == "urban"
     assert all(c[1]["collection"] == "fake-city-2024" for c in ortho_calls)
-    assert ortho_calls[0][1]["destination-dimensions"] == "467,1400"      # enlarged render
+    assert ortho_calls[0][1]["destination-dimensions"] == "487,1400"      # enlarged, with a 6 m margin
     drawn = [d.get("label") for d in ortho_calls[0][2]]
     assert drawn[0] is None and "1 car" in drawn                          # parcel outline, then boxes
     assert all("footprint_wkt" not in s for s in out["structures"])

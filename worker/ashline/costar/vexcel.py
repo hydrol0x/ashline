@@ -57,6 +57,7 @@ YARD_ATTRIBUTES = {
 
 ROOF_LABELS = {"solar panels"}
 ANNOTATED_LONG_SIDE = 1400      # pixels; a parcel crop is only a few hundred pixels natively
+RENDER_BUFFER_M = 6             # margin around the parcel in the rendered images
 
 BOX_COLOR = "rgb(0,229,255)"
 PARCEL_COLOR = "rgb(255,204,0)"
@@ -232,15 +233,27 @@ def _capture_date(detect: dict, fallback: str | None) -> str | None:
     return fallback
 
 
-def _render_size(detect: dict) -> dict:
-    """Ask for an enlarged render of the same crop so the labels are readable."""
+def _render_size(detect: dict, area_wkt: str, buffer_m: float) -> dict:
+    """Ask for an enlarged render so the labels are readable.
+
+    The detection image is the bare parcel crop. The render adds `buffer_m` of
+    margin on every side, so labels of boxes at the parcel edge are not cut
+    off; its pixel size is worked out from the crop's size and extent.
+    """
     for image in detect.get("images") or []:
         meta = image.get("metadata") or {}
         width, height = meta.get("width"), meta.get("height")
-        if width and height:
-            scale = ANNOTATED_LONG_SIDE / max(width, height)
-            if scale > 1:
-                return {"destination-dimensions": f"{round(width * scale)},{round(height * scale)}"}
+        if not (width and height):
+            continue
+        west, south, east, north = shapely_wkt.loads(area_wkt).bounds
+        metres_wide = (east - west) * 111_320 * math.cos(math.radians((south + north) / 2))
+        metres_high = (north - south) * 111_320
+        if metres_wide <= 0 or metres_high <= 0:
+            continue
+        new_w = width * (metres_wide + 2 * buffer_m) / metres_wide
+        new_h = height * (metres_high + 2 * buffer_m) / metres_high
+        scale = max(1.0, ANNOTATED_LONG_SIDE / max(new_w, new_h))
+        return {"destination-dimensions": f"{round(new_w * scale)},{round(new_h * scale)}"}
     return {}
 
 
@@ -297,11 +310,11 @@ def aerial_parcel(lat: float, lon: float, case_id: str, before: str | None = Non
     for hit in detections:
         drawing.append({"wkt": hit["bbox_wkt"], "outline-color": BOX_COLOR, "outline-width": 3,
                         "label": f"{hit['n']} {hit['label']}", "label-color": BOX_COLOR, "label-size": 18})
-    size = _render_size(detect)
+    size = _render_size(detect, area_wkt, RENDER_BUFFER_M)
     annotated = folder / "annotated.jpg"
-    annotated.write_bytes(client.ortho({**image_request, **size}, drawing))
+    annotated.write_bytes(client.ortho({**image_request, **size}, drawing, buffer_m=RENDER_BUFFER_M))
     plain = folder / "ortho.jpg"
-    plain.write_bytes(client.ortho({**image_request, **size}))
+    plain.write_bytes(client.ortho({**image_request, **size}, buffer_m=RENDER_BUFFER_M))
 
     result = {
         "covered": True,

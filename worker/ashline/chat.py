@@ -24,6 +24,7 @@ from PIL import Image, ImageOps
 
 from . import config, detect as detect_mod
 from .annotate import annotate, legend, side_by_side
+from .costar.matterport import _month_year
 from .dedupe import item_key, merge_into_inventory
 from .gaps import gap_questions
 from .meter import meter, meter_line
@@ -36,6 +37,7 @@ QUESTION_HOURS = 4                      # an unanswered "same item?" expires aft
 CODE = re.compile(r"\b(HOME-\d{4})\b", re.I)
 ADDRESSED = re.compile(r"^\s*@?ashline\b[,:]?\s*", re.I)
 MEMORY_QUESTIONS = 6                    # a text "call" asks at most this many questions
+REVIEW_AT_ONCE = 30                     # more than this waiting: the review goes one room at a time
 
 INTRO = ("I'm Ashline. I help families rebuild the list of belongings insurance asks for after a fire. "
          "It takes a few minutes at a time, and you can stop whenever. What should I call your home?")
@@ -89,6 +91,33 @@ def parse_money(text: str) -> float | None:
     except ValueError:
         return None
     return value * {"k": 1e3, "thousand": 1e3, "m": 1e6, "million": 1e6}.get(match.group(2) or "", 1)
+
+
+MONTHS = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october",
+          "november", "december"]
+
+
+def parse_date(text: str) -> str | None:
+    """'January 2025', 'Jan 7, 2025', '1/7/2025', '2025-01-07' -> 'YYYY-MM-DD'. A month alone means its first day."""
+    low = text.lower()
+    match = re.search(r"\b(20\d\d)-(\d{1,2})-(\d{1,2})\b", low)
+    if match:
+        year, month, day = (int(g) for g in match.groups())
+    else:
+        match = re.search(r"\b(\d{1,2})/(\d{1,2})/(20\d\d)\b", low)
+        if match:
+            month, day, year = (int(g) for g in match.groups())
+        else:
+            month = next((n for n, name in enumerate(MONTHS, 1) if re.search(rf"\b{name[:3]}[a-z]*\b", low)), None)
+            year = re.search(r"\b(20\d\d)\b", low)
+            if not (month and year):
+                return None
+            day = re.search(r"\b(\d{1,2})(?:st|nd|rd|th)?\b(?!\d)", re.sub(r"20\d\d", "", low))
+            year, day = int(year.group(1)), int(day.group(1)) if day else 1
+    try:
+        return datetime(year, month, day).strftime("%Y-%m-%d")
+    except ValueError:
+        return None
 
 
 def split_rooms(text: str) -> list[str]:
@@ -171,7 +200,7 @@ class Engine:
         self.store.set_member(member["member_id"], last_seen=now.isoformat(), paused=0)   # writing again ends a pause
 
         step = member["state"].get("step")
-        if step in ("home_name", "rooms") and not inbound.is_group:
+        if step in ("home_name", "address", "use_scan", "loss_date", "rooms") and not inbound.is_group:
             return self._continue_onboarding(inbound, member, case, text)
 
         if inbound.attachments:
@@ -215,8 +244,55 @@ class Engine:
             if not re.match(r"(the|our|my)\b", name, re.I):
                 name = f"The {name}"
             self.store.set_case(case["case_id"], name=name[:60])
+            self.store.set_member(member["member_id"], state={"step": "address"})
+            return [Outbound(inbound.chat_id, "What was the address? I'll check whether there's a 3D scan or a sale "
+                                              "listing of the home to start from. You can say skip.")]
+
+        if member["state"]["step"] == "address":
+            found = {"found": False}
+            if text.lower().strip(" .") not in ("skip", "no", "later", "not now"):
+                self.store.set_case(case["case_id"], address=text[:200])
+                try:
+                    found = self.lookup(text)
+                except Exception:                         # the scan index is a bonus: never block onboarding on it
+                    found = {"found": False}
+            if found.get("found"):
+                self.store.set_member(member["member_id"], state={"step": "use_scan", "scan": {
+                    k: found.get(k) for k in ("sid", "lat", "lon", "homes_listing_id", "original_created")}})
+                when = _month_year(found.get("original_created"))
+                size = f" with {found['room_count']} rooms" if found.get("room_count") else ""
+                return [Outbound(inbound.chat_id,
+                                 f"I found a 3D scan of this address{' from ' + when if when else ''}{size}. "
+                                 "Use it as a starting point? It may show staging or a previous owner's things, so "
+                                 "nothing is added until you confirm it.")]
             self.store.set_member(member["member_id"], state={"step": "rooms"})
-            return [Outbound(inbound.chat_id, "Which rooms did it have? A rough list is fine.")]
+            lead = "I don't have a scan of that address, which is normal. " if found.get("reason") and "skip" not in text.lower() \
+                and text.lower().strip(" .") not in ("no", "later", "not now") else ""
+            return [Outbound(inbound.chat_id, lead + "Which rooms did it have? A rough list is fine.")]
+
+        if member["state"]["step"] == "use_scan":
+            scan = member["state"].get("scan") or {}
+            if text.lower().strip(" .!") in ("yes", "y", "ok", "okay", "sure", "yes please", "use it"):
+                # The aerial photo has to be from before the fire, so this one date is asked now.
+                self.store.set_member(member["member_id"], state={"step": "loss_date", "scan": scan})
+                return [Outbound(inbound.chat_id, "When was the fire? A month and year is enough. It lets me use an "
+                                                  "aerial photo of the home from before it. You can say skip.")]
+            self.store.set_member(member["member_id"], state={"step": "rooms"})
+            return [Outbound(inbound.chat_id, "That's fine, we'll leave it. Which rooms did it have? A rough list is fine.")]
+
+        if member["state"]["step"] == "loss_date":
+            scan = member["state"].get("scan") or {}
+            when = parse_date(text)
+            if when:
+                self.store.set_case(case["case_id"], loss_date=when)
+            self.store.set_member(member["member_id"], state={})
+            self.store.set_home(case["case_id"], sid=scan.get("sid"), lat=scan.get("lat"), lon=scan.get("lon"),
+                                homes_listing_id=scan.get("homes_listing_id"))
+            context = self._context(inbound.chat_id)
+            context["seed"] = {"scan": scan, "member_id": member["member_id"]}
+            self._save(inbound.chat_id, context)
+            return [Outbound(inbound.chat_id, "Thank you. I'll go through the scan now; it takes a few minutes and "
+                                              "I'll text you when it's done.")] + self._invite_messages(inbound, case)
 
         rooms = split_rooms(text)
         if rooms and not self.store.get_rooms(case["case_id"]):
@@ -224,17 +300,51 @@ class Engine:
                                                    for n, r in enumerate(rooms, 1)], source="family")
         self.store.set_case(case["case_id"], rooms_note=text[:300])
         self.store.set_member(member["member_id"], state={})
+        out = self._invite_messages(inbound, case)
+        out[0].text = "Thank you. " + out[0].text
+        return out
+
+    def _invite_messages(self, inbound: Inbound, case: dict) -> list[Outbound]:
         case = self.store.get_case(case["case_id"])
         short = re.sub(r"^The ", "", case["name"])
         forward = (f"We're using Ashline to rebuild the {short} inventory. Text {case['invite_code']} to "
                    f"{self.number}, then send any photos from inside the house, from any year.")
         return [
             Outbound(inbound.chat_id,
-                     f"Thank you. Your code is {case['invite_code']}. Make a group chat called \"{short}\", add family "
+                     f"Your code is {case['invite_code']}. Make a group chat called \"{short}\", add family "
                      f"who have photos, and have each of them text {case['invite_code']} to this number once. "
                      "Or forward them the next message. You can also send me photos yourself, any time."),
             Outbound(inbound.chat_id, forward),
         ]
+
+    def lookup(self, address: str) -> dict:
+        """Is there a 3D scan of this address? (Separate so tests and offline use can replace it.)"""
+        from .costar.index import home_lookup
+        return home_lookup(address)
+
+    def _seed_from_scan(self, case: dict, chat_id: str, job: dict, now: datetime) -> list[Outbound]:
+        """Run the home twin seed the owner agreed to, then say what it found. Nothing is confirmed."""
+        from . import seed
+        case_id, scan = case["case_id"], job["scan"]
+        try:
+            seed.seed_home_twin(case_id, sid=scan["sid"], loss_date=case.get("loss_date"), store=self.store)
+        except Exception as exc:
+            return [Outbound(chat_id, f"I couldn't go through the scan just now ({exc}). You can still send photos; "
+                                      "I'll work from those.")]
+        priced = price_items(case_id, self.store, self.pricer)
+        waiting = self.store.get_items(case_id, status="suggested", canonical_only=True)
+        total = sum((i.get("price_mid") or 0) * (i.get("qty") or 1) for i in waiting)
+        rooms = len({i["room_label"] for i in waiting if i.get("room_label")})
+        member = next((m for m in self.store.get_members(case_id) if m["member_id"] == job["member_id"]), None)
+        text = (f"I've gone through the scan: {len(waiting)} possible things in {rooms} room{'s' if rooms != 1 else ''}"
+                + (f", about {money(total)}" if priced["priced"] and total else "")
+                + ". None of it is on the list until you say so. Say review to go through it a room at a time"
+                + (f", or see it all: {self.link(case, member)}" if member else "") + ".")
+        out = [Outbound(chat_id, text)]
+        questions = [q for q in gap_questions(case_id, self.store) if q["kind"] in ("structure", "listing")]
+        if questions:
+            out.append(Outbound(chat_id, questions[0]["text"]))
+        return out
 
     def _join_case(self, inbound: Inbound, code: str, member: dict | None) -> list[Outbound]:
         case = self.store.find_case(invite_code=code)
@@ -299,6 +409,11 @@ class Engine:
         for case in self.store.list_cases():
             for chat in self.store.get_chats(case["case_id"]):
                 context = self._context(chat["chat_id"])
+                job = context.pop("seed", None)
+                if job:                                       # the owner agreed to start from the scan
+                    self._save(chat["chat_id"], context)
+                    out += self._seed_from_scan(case, chat["chat_id"], job, now)
+                    context = self._context(chat["chat_id"])
                 burst = context.get("burst")
                 if burst and now - datetime.fromisoformat(burst["last_at"]) >= timedelta(seconds=self.batch_seconds):
                     context.pop("burst")
@@ -622,6 +737,15 @@ class Engine:
         fresh = [i for i in waiting if not i.get("reviewed")] or waiting
         if not fresh:
             return None
+        room_note = ""
+        if len(fresh) > REVIEW_AT_ONCE:                     # too many for one message: one room at a time
+            by_room: dict[str, list[dict]] = {}
+            for item in fresh:
+                by_room.setdefault(item.get("room_label") or "Unsorted", []).append(item)
+            room, fresh = max(by_room.items(), key=lambda kv: sum((i.get("price_mid") or 0) * (i.get("qty") or 1)
+                                                                  for i in kv[1]))
+            left = len(by_room) - 1
+            room_note = f"{room}: " + (f"({left} more room{'s' if left != 1 else ''} after this.) " if left else "")
         fresh.sort(key=lambda i: -((i.get("price_mid") or 0) * (i.get("qty") or 1)))
         people = sorted({("the 3D scan" if i["added_by"] == "scan" else i["added_by"]) for i in fresh if i.get("added_by")})
         total = sum((i.get("price_mid") or 0) * (i.get("qty") or 1) for i in fresh)
@@ -634,7 +758,7 @@ class Engine:
         self.store.set_case(case_id, last_review_at=now.isoformat())
         top = " · ".join(f"{n} {i['label']}" for n, i in enumerate(fresh[:5], 1))
         more = f" · and {len(fresh) - 5} more" if len(fresh) > 5 else ""
-        text = (f"{len(fresh)} new item{'s' if len(fresh) != 1 else ''}"
+        text = (room_note + f"{len(fresh)} new item{'s' if len(fresh) != 1 else ''}"
                 + (f" from {_join(people)}" if people else "") + (f", about {money(total)}" if total else "")
                 + f". Reply OK to add all, or tell me what's wrong (\"remove 4\"). {top}{more}. "
                 + f"See them: {self.link(case, member)}")

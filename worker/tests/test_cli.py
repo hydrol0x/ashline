@@ -83,3 +83,40 @@ def test_detector_failure_is_one_line(offline, capsys, monkeypatch):
     with pytest.raises(SystemExit) as exit_info:
         cli.main(["seed", "--case", "demo", "--sid", "fakeA000001"])
     assert exit_info.value.code == 1 and "ANTHROPIC_API_KEY" in capsys.readouterr().err
+
+
+def test_chat_simulator_and_page_links(offline, capsys, monkeypatch, tmp_path):
+    import re
+
+    from PIL import Image
+    picture = tmp_path / "living.jpg"
+    Image.new("RGB", (640, 480), (90, 90, 90)).save(picture)
+
+    class Sees:
+        def detect(self, path, room_hint=None, rooms=None):
+            return [{"label": "blue velvet sofa", "category": "furniture", "confidence": 0.8, "bbox": [50, 200, 400, 420],
+                     "room": "Living room"}]
+
+    monkeypatch.setattr(seed.detect_mod, "get_detector", Sees)
+    said = []
+
+    def script():
+        yield from ["hi", "Example home", "skip", "living room and kitchen", "/as +15550002 Maya", "HOME-0000"]
+        yield re.search(r"HOME-\d{4}", " ".join(said)).group(0)               # the code Mom was given
+        yield from [f"/photo {picture} {tmp_path / 'missing.jpg'}", "/wait", "/group example", "see you at six",
+                    "/group off", "/nonsense", "/quit", "never sent"]
+
+    cli.simulate("+15550001", "Mom", "https://ashline.example", lines=script(), out=said.append)
+    text = " ".join(said)
+    assert "Ashline → +15550001: I'm Ashline." in text and "Your code is HOME-" in text
+    assert "(you are now Maya)" in text and "don't recognise that code" in text and "You've joined the Example home" in text
+    assert "could not read" in text and "Ashline → +15550002: Got it, looking at it." in text
+    assert "1 blue velvet sofa" in text and "[attached: " in text and "annotated/fam-1.jpg" in text
+    assert "(talking in the group example)" in text and "see you at six" not in text      # silence in the group
+    assert "/photo a.jpg b.jpg" in text and "never sent" not in text
+
+    from ashline.store import Store
+    case_id = Store().get_member("+15550001")["case_id"]
+    cli.main(["page", "--case", case_id])
+    out = capsys.readouterr().out
+    assert out.startswith("owner:  http://127.0.0.1:8000/p/") and "family: http://127.0.0.1:8000/p/" in out

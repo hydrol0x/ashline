@@ -63,6 +63,7 @@ class Family:
     def setup(self):
         self.say(MOM, "hi", name="Mom")
         self.say(MOM, "The Rivera home")
+        self.say(MOM, "skip")
         out = self.say(MOM, "living room, kitchen, 3 bedrooms and a garage")
         self.code = re.search(r"HOME-\d{4}", out[0].text).group(0)
         self.case_id = self.store.get_member(MOM)["case_id"]
@@ -84,10 +85,13 @@ def test_owner_onboarding_takes_three_messages():
     assert texts(f.say(MOM, "hi", name="Mom")) == [
         "I'm Ashline. I help families rebuild the list of belongings insurance asks for after a fire. It takes a few "
         "minutes at a time, and you can stop whenever. What should I call your home?"]
-    assert texts(f.say(MOM, "The Rivera home")) == ["Which rooms did it have? A rough list is fine."]
+    assert texts(f.say(MOM, "The Rivera home")) == [
+        "What was the address? I'll check whether there's a 3D scan or a sale listing of the home to start from. "
+        "You can say skip."]
+    assert texts(f.say(MOM, "skip")) == ["Which rooms did it have? A rough list is fine."]
     out = f.say(MOM, "living room, kitchen, 3 bedrooms and a garage")
     code = re.search(r"HOME-\d{4}", out[0].text).group(0)
-    assert f'Make a group chat called "Rivera home"' in out[0].text
+    assert out[0].text.startswith("Thank you. Your code is ") and f'Make a group chat called "Rivera home"' in out[0].text
     assert out[1].text == (f"We're using Ashline to rebuild the Rivera home inventory. Text {code} to +1 555 010 0000, "
                            "then send any photos from inside the house, from any year.")
     case = f.store.get_case(f.store.get_member(MOM)["case_id"])
@@ -299,6 +303,13 @@ def test_delete_my_case(fam):
     assert fam.store.get_members(fam.case_id) == []
 
 
+def test_parse_date():
+    from ashline.chat import parse_date
+    assert [parse_date(t) for t in ("January 2025", "Jan 7, 2025", "it was the 7th of january 2025", "1/7/2025",
+                                    "2025-01-07", "last winter", "skip", "13/40/2025")] == [
+        "2025-01-01", "2025-01-07", "2025-01-07", "2025-01-07", "2025-01-07", None, None, None]
+
+
 def test_helpers():
     assert split_rooms("Living room, kitchen, two bathrooms and a garage") == [
         "Living room", "Kitchen", "Bathroom", "Bathroom 2", "Garage"]
@@ -314,3 +325,87 @@ def test_helpers():
     image.save(buf, format="JPEG", exif=exif)
     assert normalize_photo(buf.getvalue())["taken"] == "2019-11-28"
     assert normalize_photo(b"nope") is None
+
+
+class ScanDetector:
+    """For scan faces: a bed in every bedroom view, a sofa and two stools in the living room."""
+    def detect(self, path, room_hint=None, rooms=None):
+        if str(path).endswith("f1.jpg") and room_hint and "Living" in room_hint:
+            return [{"label": "green velvet sofa", "category": "furniture", "confidence": 0.8, "bbox": [0, 0, 30, 30]},
+                    {"label": "oak bar stool", "category": "furniture", "confidence": 0.8, "bbox": [31, 0, 40, 30]},
+                    {"label": "oak bar stool", "category": "furniture", "confidence": 0.8, "bbox": [41, 0, 50, 30]}]
+        if str(path).endswith("f1.jpg") and room_hint == "Bedroom":
+            return [{"label": "queen bed", "category": "furniture", "confidence": 0.8, "bbox": [0, 0, 30, 30]}]
+        return []
+
+
+def test_onboarding_from_the_scan_of_the_address(index, monkeypatch):
+    from ashline import seed
+    from ashline.costar import index as index_mod
+    from fakes import FakeMatterport, FakeVexcel
+    monkeypatch.setattr(index_mod, "_INDEX", index)
+    monkeypatch.setattr(seed.matterport, "MatterportClient", FakeMatterport)
+    monkeypatch.setattr(seed.vexcel, "VexcelClient", FakeVexcel)
+    monkeypatch.setattr(seed.detect_mod, "get_detector", ScanDetector)
+
+    f = Family()
+    f.say(MOM, "hi", name="Mom")
+    f.say(MOM, "Rivera home")
+    out = f.say(MOM, "12 Example Ave, Los Angeles")
+    assert out[0].text == ("I found a 3D scan of this address from March 2026 with 14 rooms. Use it as a starting "
+                           "point? It may show staging or a previous owner's things, so nothing is added until you "
+                           "confirm it.")
+    assert texts(f.say(MOM, "yes")) == ["When was the fire? A month and year is enough. It lets me use an aerial "
+                                        "photo of the home from before it. You can say skip."]
+    out = f.say(MOM, "January 2025")
+    assert out[0].text.startswith("Thank you. I'll go through the scan now") and "Your code is HOME-" in out[1].text
+    case_id = f.store.get_member(MOM)["case_id"]
+    assert f.store.get_case(case_id)["loss_date"] == "2025-01-01"
+    assert f.store.get_items(case_id) == []                                # nothing yet: it runs on the next tick
+
+    out = f.wait(5)
+    assert out[0].chat_id == MOM
+    assert out[0].text.startswith("I've gone through the scan: 3 possible things in 2 rooms, about $")
+    assert "None of it is on the list until you say so." in out[0].text and "/p/" in out[0].text
+    assert out[1].text.startswith("The aerial photo from August 2024 shows a second building on the lot")
+    items = f.store.get_items(case_id, canonical_only=True)
+    assert all(i["status"] == "suggested" and i["source"] == "scan" and i["price_mid"] for i in items)
+    assert [r["name"] for r in f.store.get_rooms(case_id)][:2] == ["Living Room / Dining Room", "Garage"]
+    assert f.store.get_home(case_id)["sid"] == "fakeA000001"
+    assert f.wait(5) == []                                                 # the job runs once
+
+    review = f.say(MOM, "review")[0].text
+    assert review.startswith("3 new items from the 3D scan, about $") and "2 × " not in review
+    assert f.say(MOM, "ok")[0].text.startswith("Added 3 items.")
+
+
+def test_no_scan_for_the_address_is_normal(index, monkeypatch):
+    from ashline.costar import index as index_mod
+    monkeypatch.setattr(index_mod, "_INDEX", index)
+    f = Family()
+    f.say(MOM, "hi")
+    f.say(MOM, "Rivera home")
+    assert texts(f.say(MOM, "1 Nowhere Ln, Pacific Palisades")) == [
+        "I don't have a scan of that address, which is normal. Which rooms did it have? A rough list is fine."]
+    assert f.store.get_case(f.store.get_member(MOM)["case_id"])["address"] == "1 Nowhere Ln, Pacific Palisades"
+
+    g = Family()
+    g.engine.lookup = lambda address: {"found": True, "sid": "x", "original_created": "2026-03-04", "room_count": 9}
+    g.say(DAD, "hi")
+    g.say(DAD, "Rivera home")
+    g.say(DAD, "12 Example Ave")
+    assert texts(g.say(DAD, "no thanks")) == ["That's fine, we'll leave it. Which rooms did it have? A rough list is fine."]
+
+
+def test_a_long_review_goes_one_room_at_a_time(fam):
+    for n in range(40):
+        room = "Garage" if n < 25 else "Kitchen"
+        item_id = fam.store.add_item(fam.case_id, {"label": f"thing {n}", "category": "tools", "room_label": room},
+                                     source="scan", added_by="scan")
+        fam.store.update_item(fam.case_id, item_id, price_low=50, price_mid=100 if room == "Garage" else 10, price_high=150)
+    first = fam.say(MOM, "review")[0].text
+    assert first.startswith("Garage: (1 more room after this.) 25 new items from the 3D scan, about $2,500.")
+    assert fam.say(MOM, "ok")[0].text.startswith("Added 25 items.")
+    second = fam.say(MOM, "review")[0].text
+    assert second.startswith("15 new items from the 3D scan, about $150.")       # few enough for one message
+    assert len([i for i in fam.store.get_items(fam.case_id) if i["status"] == "confirmed"]) == 25

@@ -48,6 +48,39 @@ appliances) becomes questions. Without the kit that step is skipped.
 `seed` is safe to run again: scan photos, detections and aerial results are cached per case, and
 answers the family already gave are kept. Run it once before the demo to precompute the demo home.
 
+## Talking to Ashline
+
+The conversation lives in `worker/ashline/chat.py` and does not depend on the messaging channel. A
+bridge posts each incoming message to `POST /inbound` and sends the replies it gets back; `POST /tick`
+(or the worker's own timer, when `ASHLINE_BRIDGE_URL` is set) produces the messages that come later:
+the digest after a burst of photos, and the owner's daily review.
+
+To try it without any messaging service:
+
+```bash
+ashline chat --as +15550001 --name Mom
+```
+
+```text
+hi                               -> names the home, asks the address, the rooms, gives an invite code
+/as +15550002 Maya               -> become a relative
+HOME-1234                        -> join with the code
+/photo ~/Pictures/thanksgiving.jpg
+/wait                            -> the quiet window passes; the annotated photo comes back
+/group rivera                    -> talk in the family group chat (Ashline stays quiet unless asked)
+```
+
+What it does: onboarding in a few messages; relatives join with a code; one acknowledgement and one
+digest per burst of photos; a single photo comes back annotated; repeats are merged and a borderline
+match becomes one "same item?" question; commands (`list`, `how much so far`, `show photo 3`,
+`review`, `OK`, `remove 4`, `undo`, `export`, `pause`, `call me`, `delete my case`); a review for the
+owner, one room at a time when a lot is waiting; and a memory conversation by text. In a group chat
+it answers photos, messages addressed to it, replies to its own question and command words, and
+otherwise says nothing.
+
+If the address has a 3D scan, onboarding offers to start from it and asks when the fire was, so the
+aerial photo comes from before it.
+
 ## Inventory page
 
 ```bash

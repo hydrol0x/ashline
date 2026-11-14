@@ -5,11 +5,17 @@
 - `GET /p/<token>`: the family's private page. The link is long and unguessable; there is no
   login. The owner's link shows export and remove; a member's link does not.
 - The page is rendered from the case store on every request, so it is always live.
+- `POST /inbound`: a message from the messaging bridge; the replies are in the response.
+- `POST /tick`: run what is due (photo digests, the daily review). With ASHLINE_BRIDGE_URL set
+  the worker ticks by itself and posts the messages to the bridge's /outbound.
 """
 from __future__ import annotations
 
+import asyncio
+import base64
 import hashlib
 import io
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -262,7 +268,86 @@ def create_app(store_factory=Store) -> FastAPI:
                             headers={"Content-Disposition": f'attachment; filename="{name}.pdf"'})
         raise HTTPException(status_code=404)
 
+    # ------------------------------------------------------------ messaging bridge (build spec 6.1)
+    def engine():
+        from .chat import Engine
+        return Engine(store_factory())
+
+    def check_secret(request: Request) -> None:
+        secret = config.env("ASHLINE_INBOUND_SECRET")
+        if secret and request.headers.get("x-ashline-secret") != secret:
+            raise HTTPException(status_code=401, detail="Wrong or missing X-Ashline-Secret.")
+
+    @app.post("/inbound")
+    async def inbound(request: Request):
+        """A message from the bridge. Replies come back in the response body.
+
+        Body: {chat_id, sender_phone, sender_name?, text?, is_group?, attachments?: [{filename?, bytes_b64}]}.
+        `chat_id` is the group chat's id, or the sender's phone for a 1:1 chat.
+        """
+        check_secret(request)
+        body = await request.json()
+        sender = str(body.get("sender_phone") or "").strip()
+        if not sender:
+            raise HTTPException(status_code=400, detail="sender_phone is required.")
+        from .chat import Inbound
+        files = []
+        for n, attachment in enumerate(body.get("attachments") or []):
+            try:
+                files.append((attachment.get("filename") or f"attachment-{n}",
+                              base64.b64decode(attachment.get("bytes_b64") or "")))
+            except (ValueError, TypeError):
+                continue
+        message = Inbound(chat_id=str(body.get("chat_id") or body.get("case_id") or sender), sender=sender,
+                          text=str(body.get("text") or ""), attachments=files, is_group=bool(body.get("is_group")),
+                          sender_name=body.get("sender_name"))
+        replies = await asyncio.to_thread(lambda: engine().handle(message))
+        return {"messages": [wire(m) for m in replies]}
+
+    @app.post("/tick")
+    async def tick(request: Request):
+        """Run what is due (photo digests, the daily review) and return the messages to send."""
+        check_secret(request)
+        replies = await asyncio.to_thread(lambda: engine().tick())
+        return {"messages": [wire(m) for m in replies]}
+
     return app
 
 
+def wire(message) -> dict:
+    """An outbound message as JSON for the bridge: {to, text, image_b64?, files?}."""
+    out = {"to": message.chat_id, "text": message.text}
+    if message.image and Path(message.image).exists():
+        out["image_b64"] = base64.b64encode(Path(message.image).read_bytes()).decode()
+    files = [{"name": Path(f).name, "bytes_b64": base64.b64encode(Path(f).read_bytes()).decode()}
+             for f in message.files if Path(f).exists()]
+    if files:
+        out["files"] = files
+    return out
+
+
+async def _ticker(app: FastAPI) -> None:
+    """With a bridge configured, push what `tick` produces to its /outbound endpoint."""
+    import requests
+    bridge = (config.env("ASHLINE_BRIDGE_URL") or "").rstrip("/")
+    every = float(config.env("ASHLINE_TICK_SECONDS") or 10)
+    while True:
+        await asyncio.sleep(every)
+        try:
+            from .chat import Engine
+            for message in await asyncio.to_thread(lambda: Engine().tick()):
+                await asyncio.to_thread(lambda m=message: requests.post(f"{bridge}/outbound", json=wire(m), timeout=60))
+        except Exception as exc:                              # keep ticking: one bad case must not stop the rest
+            print(f"ashline ticker: {exc}")
+
+
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    task = asyncio.create_task(_ticker(app)) if config.env("ASHLINE_BRIDGE_URL") else None
+    yield
+    if task:
+        task.cancel()
+
+
 app = create_app()
+app.router.lifespan_context = _lifespan

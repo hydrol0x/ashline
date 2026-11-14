@@ -137,3 +137,33 @@ def test_ago():
     now = datetime(2026, 11, 14, 12, 0, tzinfo=timezone.utc)
     assert [_ago(t, now) for t in ("2026-11-14T11:59:30+00:00", "2026-11-14T11:40:00+00:00", "2026-11-14T09:00:00+00:00",
                                    "2026-11-12T12:00:00+00:00", None)] == ["just now", "20 min ago", "3 hours ago", "2 days ago", "just now"]
+
+
+def test_inbound_runs_the_conversation(case, monkeypatch):
+    import base64
+    client, store, _ = case
+    first = client.post("/inbound", json={"sender_phone": "+15557777", "sender_name": "Ana", "text": "hi"}).json()
+    assert first["messages"][0]["to"] == "+15557777" and first["messages"][0]["text"].startswith("I'm Ashline.")
+    assert client.post("/inbound", json={"text": "hi"}).status_code == 400
+
+    buf = io.BytesIO()
+    Image.new("RGB", (640, 480), (100, 100, 100)).save(buf, format="JPEG")
+    store.add_member("fam1", "+15550002", "Maya")
+    store.set_chat("+15550002", "fam1")
+    sent = client.post("/inbound", json={"chat_id": "+15550002", "sender_phone": "+15550002", "text": "",
+                                         "attachments": [{"filename": "a.jpg", "bytes_b64": base64.b64encode(buf.getvalue()).decode()},
+                                                         {"bytes_b64": "!!not base64!!"}]}).json()
+    assert [m["text"] for m in sent["messages"]] == ["Got it, looking at it."]
+    assert store.get_photo("fam1", number=2)["status"] == "queued"
+    assert client.post("/tick").json() == {"messages": []}                       # still inside the quiet window
+
+    listed = client.post("/inbound", json={"sender_phone": "+15550002", "text": "list"}).json()["messages"][0]
+    assert listed["text"].endswith("/p/member-token") and "image_b64" not in listed
+    shown = client.post("/inbound", json={"sender_phone": "+15550002", "text": "show photo 1"}).json()["messages"][0]
+    assert Image.open(io.BytesIO(base64.b64decode(shown["image_b64"]))).size == (800, 600)
+
+    monkeypatch.setenv("ASHLINE_INBOUND_SECRET", "s3cret")
+    assert client.post("/inbound", json={"sender_phone": "+1", "text": "hi"}).status_code == 401
+    assert client.post("/tick").status_code == 401
+    ok = client.post("/inbound", json={"sender_phone": "+15550002", "text": "help"}, headers={"X-Ashline-Secret": "s3cret"})
+    assert ok.status_code == 200

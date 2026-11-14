@@ -28,7 +28,8 @@ run it). `.env` is git-ignored; nothing in this package prints or stores a key.
 
 ```bash
 ashline lookup "12 Example Ave, Los Angeles, CA 90001"   # is there a scan for this address?
-ashline seed --case demo                                 # address from ASHLINE_DEMO_ADDRESS in .env
+ashline seed --case demo                                 # home from ASHLINE_DEMO_SID in .env
+ashline seed --case fam1 --address "12 Example Ave, Los Angeles, CA 90001" --loss-date 2025-01-07
 ashline questions --case demo                            # voice-call questions from the gaps
 ashline export --case demo --include-suggested           # cases/demo/inventory.csv
 ashline kit-info                                         # what is inside the CoStar kit
@@ -97,7 +98,7 @@ repo is public, so:
 - `cases/`, `.cache/`, any copy of `models_index.csv` and the kit are git-ignored. The scan index
   is fetched at runtime.
 - No real address, scan id, floor plan or scan image belongs in code, tests, the README or the
-  Devpost page. Tests use made-up data only. The demo home's address lives in `.env`.
+  Devpost page. Tests use made-up data only. The demo home's scan id or address lives in `.env`.
 - State on stage that the demo home is a stand-in.
 
 Exports are estimates for planning, not legal advice; confirm with your adjuster.

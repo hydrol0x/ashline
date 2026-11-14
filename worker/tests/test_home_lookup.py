@@ -86,3 +86,10 @@ def test_parse_address_parts():
     assert p.street == ("s", "demo", "ave") and p.rest == frozenset({"los", "angeles", "ca"})
     assert split_street(p.street) == ("s", ("demo",), "ave", "")
     assert split_street(("s", "blvd")) == ("", ("s",), "blvd", "")
+
+
+def test_lookup_by_scan_id(index):
+    res = home_lookup(sid="fakeB000001", index=index)
+    assert res["found"] and res["match"] == "sid" and res["original_created"] == "2025-05-05"
+    assert home_lookup(sid="fakeF000001", index=index)["found"] is False      # commercial scan
+    assert home_lookup(sid="nope", index=index)["found"] is False

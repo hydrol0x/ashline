@@ -1,7 +1,8 @@
 """Command line for the home twin seed.
 
     ashline lookup "<address>"
-    ashline seed --case demo                 # address from ASHLINE_DEMO_ADDRESS in .env
+    ashline seed --case demo                 # home from ASHLINE_DEMO_SID or ASHLINE_DEMO_ADDRESS in .env
+    ashline seed --case demo --sid <scan id>
     ashline seed --case fam1 --address "..." --loss-date 2025-01-07
     ashline questions --case demo
     ashline export --case demo --include-suggested
@@ -27,12 +28,14 @@ def main(argv: list[str] | None = None) -> None:
 
     p = sub.add_parser("lookup", help="find the 3D scan for an address")
     p.add_argument("address", nargs="?")
+    p.add_argument("--sid", help="look a scan up by its id instead")
     p.add_argument("--lat", type=float)
     p.add_argument("--lon", type=float)
 
     p = sub.add_parser("seed", help="run the home twin seed for a case")
     p.add_argument("--case", required=True)
     p.add_argument("--address")
+    p.add_argument("--sid", help="scan id from models_index.csv, instead of an address")
     p.add_argument("--lat", type=float)
     p.add_argument("--lon", type=float)
     p.add_argument("--loss-date")
@@ -54,12 +57,25 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--case", required=True)
 
     args = parser.parse_args(argv)
+    try:
+        _run(args, parser)
+    except config.MissingKey as exc:
+        parser.exit(2, f"{exc}\nLooked for .env in: {', '.join(str(p) for p in config._dotenv_paths())}\n")
+
+
+def _run(args, parser) -> None:
     if args.cmd == "lookup":
-        print(json.dumps(home_lookup(args.address, args.lat, args.lon), indent=1))
+        print(json.dumps(home_lookup(args.address, args.lat, args.lon, sid=args.sid), indent=1))
     elif args.cmd == "seed":
-        address = args.address or (None if args.lat is not None else config.env("ASHLINE_DEMO_ADDRESS"))
+        address, sid = args.address, args.sid
+        if not (address or sid or args.lat is not None):      # nothing given: fall back to the demo home in .env
+            sid, address = config.env("ASHLINE_DEMO_SID"), config.env("ASHLINE_DEMO_ADDRESS")
+        if not (address or sid or args.lat is not None):
+            parser.exit(2, "No home given. Pass --address, --sid or --lat/--lon, or set ASHLINE_DEMO_SID "
+                           "or ASHLINE_DEMO_ADDRESS in .env.\n"
+                           f"Looked for .env in: {', '.join(str(p) for p in config._dotenv_paths())}\n")
         result = seed_home_twin(args.case, address, args.lat, args.lon, args.loss_date,
-                                run_detection=not args.no_detect, max_faces=args.max_faces)
+                                run_detection=not args.no_detect, max_faces=args.max_faces, sid=sid)
         print(json.dumps(result, indent=1))
     elif args.cmd == "questions":
         for q in gap_questions(args.case):

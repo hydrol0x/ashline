@@ -102,13 +102,15 @@ def outside(case_id: str, lat: float, lon: float, loss_date: str | None = None,
 
 def seed_home_twin(case_id: str, address: str | None = None, lat: float | None = None,
                    lon: float | None = None, loss_date: str | None = None, run_detection: bool = True,
-                   max_faces: int = 40, store: Store | None = None) -> dict:
-    """Run the whole seed for a case. Safe to call again: API results are cached per case."""
+                   max_faces: int = 40, store: Store | None = None, sid: str | None = None) -> dict:
+    """Run the whole seed for a case. Safe to call again: API results are cached per case.
+
+    The home is found by `address`, by `lat`/`lon`, or directly by scan id `sid`.
+    """
     store = store or Store()
     loss_date = loss_date or config.env("ASHLINE_LOSS_DATE")
-    store.upsert_case(case_id, address=address, loss_date=loss_date)
-
-    found = home_lookup(address, lat, lon)
+    found = home_lookup(address, lat, lon, sid=sid)
+    store.upsert_case(case_id, address=address or found.get("address"), loss_date=loss_date)
     result: dict = {"case_id": case_id, "lookup": found}
     if found["found"]:
         store.set_home(case_id, sid=found["sid"], lat=found["lat"], lon=found["lon"],

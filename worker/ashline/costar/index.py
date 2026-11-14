@@ -260,7 +260,7 @@ class HomeIndex:
 def _result(row: dict, match: str, distance_m: float | None = None, others: int = 0) -> dict:
     return {
         "found": True,
-        "match": match,                       # "address" or "nearest"
+        "match": match,                       # "address", "nearest" or "sid"
         "sid": row.get("sid"),
         "address": row.get("address") or row.get("name"),
         "lat": row["_lat"],
@@ -286,7 +286,7 @@ def get_index() -> HomeIndex:
 
 
 def home_lookup(address: str | None = None, lat: float | None = None, lon: float | None = None,
-                index: HomeIndex | None = None) -> dict:
+                index: HomeIndex | None = None, sid: str | None = None) -> dict:
     """Find the 3D scan of a home by address text or by lat/lon.
 
     Returns {found: True, sid, lat, lon, homes_listing_id, pano_count, room_count,
@@ -294,6 +294,11 @@ def home_lookup(address: str | None = None, lat: float | None = None, lon: float
     addresses have no scan; Ashline then carries on with family photos only.
     """
     index = index or get_index()
+    if sid:                                   # a known scan id, e.g. the demo home
+        row = index.by_sid(sid.strip())
+        if row:
+            return _result(row, "sid")
+        return {"found": False, "reason": "No residential scan with this id in the index."}
     if address and address.strip():
         rows = index.by_address(address)
         if rows:

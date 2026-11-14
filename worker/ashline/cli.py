@@ -53,8 +53,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--include-suggested", action="store_true")
 
     sub.add_parser("kit-info", help="list what is inside the CoStar kit (settles its format)")
-    p = sub.add_parser("listing", help="CoStar listing for a homes_listing_id")
-    p.add_argument("listing_id")
+    p = sub.add_parser("listing", help="CoStar listing behind a scan")
+    p.add_argument("listing_id", nargs="?", help="homes_listing_id from the scan index")
+    p.add_argument("--sid", help="scan id")
+    p.add_argument("--shape", action="store_true", help="print only field names and types, no values")
 
     p = sub.add_parser("delete", help="delete every stored row of a case")
     p.add_argument("--case", required=True)
@@ -93,8 +95,12 @@ def _run(args, parser) -> None:
         from .costar.listing import kit_info
         print(json.dumps(kit_info(), indent=1))
     elif args.cmd == "listing":
-        from .costar.listing import listing_record
-        print(json.dumps(listing_record(args.listing_id), indent=1))
+        from .costar.listing import listing_record, shape
+        record = listing_record(args.listing_id, sid=args.sid)
+        if args.shape and record.get("found"):
+            print("\n".join(shape({"listing": record["listing"], "features": record["features"]})))
+        else:
+            print(json.dumps(record, indent=1))
     elif args.cmd == "delete":
         Store().delete_case(args.case)
         print(f"case {args.case} deleted")

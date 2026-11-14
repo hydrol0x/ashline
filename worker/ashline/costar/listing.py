@@ -1,10 +1,12 @@
 """listing_record (optional): the CoStar residential listing behind a scan.
 
-NOT VERIFIED against the real kit: no kit link or password was available when
-this was written. Staff described the kit as a zip of JSONL with field docs
-inside; the Matterport quickstart reads a `residential-listings.csv` from it.
-So this code looks at what is actually in the zip and handles both, and
-`kit_info()` prints the file list and columns to settle the question.
+Kit layout, as listed by `kit_info()` on the real kit (14 Nov 2026): both
+descriptions were right. `residential-listings.csv` is a small index that maps
+a scan to its listing ids, the records themselves are JSONL under `data/`, and
+field documentation sits in `models/` and `schemas/`.
+
+The join code below follows that layout but has only been run on a made-up
+kit of the same shape, not on the real records.
 
 The kit is "hackathon use only". Never commit it or anything read from it.
 """
@@ -100,18 +102,80 @@ def kit_info() -> dict:
     return info
 
 
-def listing_record(homes_listing_id: str) -> dict:
-    """The residential listing row whose id equals homes_listing_id, or found=False."""
+INDEX_CSV = "residential-listings.csv"                       # MatterportModelId <-> listing ids
+LISTINGS = "data/residential-listings.jsonl"                 # the full listing records
+FEATURES = "data/residential-listing-features.jsonl"         # features and highlights per listing
+# Parts of a listing record that are large and of no use for a contents inventory.
+BULKY = {"media", "agents", "offices", "history", "permissionLevels", "openHouses", "mls", "attachments"}
+
+
+def _same(value, wanted: set) -> bool:
+    return isinstance(value, (str, int)) and not isinstance(value, bool) and str(value).strip() in wanted
+
+
+def _find(kit: zipfile.ZipFile, member: str, keys: tuple, wanted: set) -> dict | None:
+    """First record of `member` whose value under one of `keys` is in `wanted`."""
+    if member not in kit.namelist():
+        return None
+    for row in _rows(kit, member):
+        if isinstance(row, dict) and any(_same(row.get(k), wanted) for k in keys):
+            return row
+    return None
+
+
+def shape(value, path: str = "", out: list | None = None, limit: int = 200) -> list[str]:
+    """Key paths and value types of a record, without any values: safe to share."""
+    out = [] if out is None else out
+    if len(out) >= limit:
+        return out
+    if isinstance(value, dict):
+        for key in sorted(value):
+            shape(value[key], f"{path}.{key}" if path else key, out, limit)
+    elif isinstance(value, list):
+        out.append(f"{path}: list[{len(value)}]")
+        if value:
+            shape(value[0], f"{path}[]", out, limit)
+    else:
+        out.append(f"{path}: {type(value).__name__}")
+    return out
+
+
+def listing_record(homes_listing_id: str | None = None, sid: str | None = None) -> dict:
+    """The CoStar residential listing behind a scan.
+
+    Verified layout (kit of 14 Nov 2026): `residential-listings.csv` maps a scan
+    (MatterportModelId) to ListingId and ResidentialListingId; the full record is
+    in `data/residential-listings.jsonl` and its features in
+    `data/residential-listing-features.jsonl`. Give the scan id, the listing id
+    from the scan index, or both. Returns {found, ids, listing, features}.
+    """
     kit = open_kit()
     if kit is None:
         return {"found": False, "reason": "CoStar kit not configured."}
-    wanted = str(homes_listing_id).strip()
+    wanted = {str(v).strip() for v in (homes_listing_id, sid) if v}
+    if not wanted:
+        return {"found": False, "reason": "Give a scan id or a listing id."}
     try:
-        for member in _residential_members(kit):
-            for row in _rows(kit, member):
-                if isinstance(row, dict) and any(str(v).strip() == wanted for v in row.values()
-                                                 if isinstance(v, (str, int))):
-                    return {"found": True, "file": member, "listing": row}
+        index_row = _find(kit, INDEX_CSV, ("MatterportModelId", "ListingId", "ResidentialListingId"), wanted)
+        ids = set(wanted) - ({str(sid)} if sid else set())
+        if index_row:
+            ids |= {str(index_row[k]).strip() for k in ("ListingId", "ResidentialListingId") if index_row.get(k)}
+        listing = _find(kit, LISTINGS, ("residentialListingId", "id"), ids) if ids else None
+        if listing is None and index_row is None:
+            # An older or different kit layout: fall back to any listing file with a matching value.
+            for member in _residential_members(kit):
+                for row in _rows(kit, member):
+                    if isinstance(row, dict) and any(_same(v, wanted) for v in row.values()):
+                        return {"found": True, "file": member, "ids": sorted(wanted), "listing": row, "features": None}
+            return {"found": False, "reason": "No listing for this scan or listing id in the kit."}
+        if listing is not None:
+            ids |= {str(listing[k]) for k in ("id", "residentialListingId") if listing.get(k) is not None}
+        features = _find(kit, FEATURES, ("id", "residentialListingId"), ids)
     except RuntimeError as exc:         # zipfile raises RuntimeError on a wrong password
         return {"found": False, "reason": f"Could not read the kit: {exc}. Type the zip password by hand."}
-    return {"found": False, "reason": "No listing with this id in the kit."}
+    return {
+        "found": True,
+        "ids": {"index": index_row, "matched": sorted(ids)},
+        "listing": {k: v for k, v in (listing or {}).items() if k not in BULKY} or None,
+        "features": features,
+    }

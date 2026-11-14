@@ -33,6 +33,7 @@ ashline seed --case fam1 --address "12 Example Ave, Los Angeles, CA 90001" --los
 ashline questions --case demo                            # voice-call questions from the gaps
 ashline export --case demo --include-suggested           # cases/demo/inventory.csv
 ashline kit-info                                         # what is inside the CoStar kit
+ashline listing --sid <scan id>                          # the CoStar listing behind a scan
 ```
 
 `seed` is safe to run again: scan photos, detections and aerial results are cached per case, and
@@ -46,7 +47,7 @@ answers the family already gave are kept. Run it once before the demo to precomp
 | `scan_rooms` | `ashline/costar/matterport.py` | Room list with dimensions, furnished flag and the photographer's capture notes. |
 | `scan_photos` | `ashline/costar/matterport.py` | Picks about 10 of a scan's ~45 panoramas (big, valuable rooms first) and saves their four horizon faces, each tagged with scan, panorama, face and room. |
 | `aerial_parcel` | `ashline/costar/vexcel.py` | Parcel, buildings, yard findings and an annotated aerial image from the last flight **before the loss date**. |
-| `listing_record` | `ashline/costar/listing.py` | Optional CoStar listing join. Not verified against the real kit. |
+| `listing_record` | `ashline/costar/listing.py` | The CoStar listing behind a scan: scan id to listing ids through the kit's index CSV, then the full record and its features from the kit's JSONL files. |
 
 Around them: `detect.py` (item detection, build spec 6.3), `dedupe.py` (scan priors for 6.4),
 `gaps.py` (voice-call questions, 6.7), `export.py` (CSV with `source` and evidence date, 6.8),
@@ -110,7 +111,9 @@ Checked with real calls on Nov 14, 2026. These differ from the track's quickstar
   attributes, which the tool also returns.
 - **Images**: scan faces are served from `cdn-2.matterport.com` through signed, expiring links.
   They are downloaded at once and the links are never stored.
-- **Not checked**: the CoStar kit (format and listing join), because no kit link was available.
+- **CoStar kit**: it holds both formats. `residential-listings.csv` is a small index (scan id, listing ids,
+  address); the records are JSONL under `data/`, with field docs in `models/` and `schemas/`.
+  `ashline kit-info` lists it; `ashline listing --sid <scan id> --shape` shows a record's fields without values.
 
 ## Data rules
 

@@ -1,0 +1,28 @@
+# Secrets
+.env
+.env.*
+!.env.example
+
+# CoStar / Matterport / Vexcel data: hackathon use only, must never be published.
+# Scan images, floor plans, addresses, scan ids, the kit and the scan index all
+# live under these paths and are fetched or built at runtime.
+cases/
+.cache/
+demo/seeded/
+models_index.csv
+*costar*kit*.zip
+mp_out/
+output/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+uv.lock
+
+# Node
+node_modules/
+
+.DS_Store

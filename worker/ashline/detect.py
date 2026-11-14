@@ -44,7 +44,11 @@ Return ONLY a JSON array, between 0 and 30 objects, each:
 `box` is the item's bounding box on a 0-1000 grid, origin top-left, x to the right, y down.
 Give each physical object its own entry (four bar stools = four entries)."""
 
-MIN_BOX_FRACTION = 0.0015       # drop boxes under 0.15% of the image
+# A vision model names what it lists, and small named things are real items (a remote, a
+# kettle, a stool seen from across the room), so only degenerate boxes are dropped there.
+MIN_BOX_FRACTION = 0.0001       # 0.01% of the image
+# The local model returns unnamed slivers, so its regions need to be bigger to count.
+MIN_REGION_FRACTION = 0.0015    # 0.15% of the image
 MERGE_IOU = 0.7
 
 
@@ -232,7 +236,7 @@ def clean_regions(labels: list[str], boxes: list[list[float]], width: int, heigh
     for label, box in zip(labels, boxes):
         x0, y0, x1, y1 = (float(v) for v in box)
         fraction = (x1 - x0) * (y1 - y0) / (width * height)
-        if fraction < MIN_BOX_FRACTION or fraction > MAX_SCENE_FRACTION or is_fixture(label):
+        if fraction < MIN_REGION_FRACTION or fraction > MAX_SCENE_FRACTION or is_fixture(label):
             continue
         items.append({
             "label": label.strip(),

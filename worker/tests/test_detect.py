@@ -6,15 +6,17 @@ def test_parse_items_scales_boxes_and_tolerates_fences():
 ```json
 [{"label": "Blue velvet loveseat", "category": "furniture", "brand_guess": null, "confidence": 0.9, "box": [100, 500, 600, 900]},
  {"label": "blue velvet loveseat", "category": "furniture", "confidence": 0.6, "box": [110, 505, 600, 900]},
- {"label": "tiny thing", "category": "decor", "confidence": 0.9, "box": [0, 0, 10, 10]},
+ {"label": "degenerate box", "category": "decor", "confidence": 0.9, "box": [0, 0, 5, 5]},
+ {"label": "TV remote", "category": "electronics", "confidence": 0.8, "box": [400, 400, 420, 410]},
  {"label": "Soundbar", "category": "gadgets", "brand_guess": "Sonos", "confidence": "high", "box": [900, 100, 700, 200]},
  {"label": "", "box": [0, 0, 500, 500]}, {"label": "no box"}, "junk"]
 ```"""
     items = parse_items(text, 2048, 1024)
-    assert [i["label"] for i in items] == ["Blue velvet loveseat", "Soundbar"]     # duplicate, sliver, junk dropped
+    # The duplicate, the degenerate box and the junk are dropped; a small named item is kept.
+    assert [i["label"] for i in items] == ["Blue velvet loveseat", "TV remote", "Soundbar"]
     assert items[0]["bbox"] == [205, 512, 1229, 922]
-    assert items[1]["bbox"] == [1434, 102, 1843, 205]          # corners put in order
-    assert items[1]["category"] == "other" and items[1]["brand_guess"] == "Sonos" and items[1]["confidence"] == 0.5
+    assert items[2]["bbox"] == [1434, 102, 1843, 205]          # corners put in order
+    assert items[2]["category"] == "other" and items[2]["brand_guess"] == "Sonos" and items[2]["confidence"] == 0.5
     assert parse_items("no json here", 10, 10) == [] and parse_items("[not json]", 10, 10) == []
 
 

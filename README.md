@@ -76,6 +76,21 @@ Left unset, it uses `claude` when an Anthropic key is set, then `vlm`, then `flo
 are cached per case; `ashline seed --case demo --redetect` throws the cache away and runs the
 current detector again.
 
+### Merging repeats
+
+Neighbouring panoramas see the same objects, so the same sofa is detected several times, in
+different words. Detections are merged in three steps (`dedupe.py`, `merge_claude.py`):
+
+1. An object cut by the seam between two faces of one panorama is joined back into one.
+2. Detections of the same object from different panoramas of a room are grouped. With an Anthropic
+   key this is one text-only request per room (`ASHLINE_MERGER=claude`); without one, word-matching
+   rules are used (`ASHLINE_MERGER=rules`). The seed summary's `merged_by` says which ran.
+3. A line's quantity is the most of its objects seen from any single panorama.
+
+The model only groups ids. A line's wording is always one of the original detections and the
+quantity is always computed by rule, so the merge can combine lines but cannot invent an item or
+raise a count. Answers are cached per case.
+
 ## What the CoStar APIs actually do
 
 Checked with real calls on Nov 14, 2026. These differ from the track's quickstarts:

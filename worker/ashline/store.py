@@ -57,7 +57,7 @@ MIGRATIONS = {
     "home": {"listing": "TEXT"},
     "cases": {"name": "TEXT", "invite_code": "TEXT", "owner_token": "TEXT", "member_token": "TEXT",
               "coverage_limit": "REAL", "coverage_skipped": "INTEGER DEFAULT 0", "review_hour": "INTEGER DEFAULT 18",
-              "last_review_at": "TEXT", "rooms_note": "TEXT"},
+              "last_review_at": "TEXT", "rooms_note": "TEXT", "reminders": "TEXT"},
     "items": {"price_low": "REAL", "price_mid": "REAL", "price_high": "REAL", "price_source": "TEXT",
               "detail": "TEXT", "reviewed": "INTEGER DEFAULT 0"},
     "members": {"dm_chat": "TEXT"},
@@ -124,7 +124,7 @@ class Store:
 
     def set_case(self, case_id: str, **fields) -> None:
         allowed = ("name", "invite_code", "owner_token", "member_token", "coverage_limit", "coverage_skipped",
-                   "review_hour", "last_review_at", "loss_date", "address", "rooms_note")
+                   "review_hour", "last_review_at", "loss_date", "address", "rooms_note", "reminders")
         with self.tx() as db:
             db.execute("INSERT OR IGNORE INTO cases (case_id, created_at) VALUES (?, ?)", (case_id, _now()))
             for key, value in fields.items():

@@ -409,3 +409,57 @@ def test_a_long_review_goes_one_room_at_a_time(fam):
     second = fam.say(MOM, "review")[0].text
     assert second.startswith("15 new items from the 3D scan, about $150.")       # few enough for one message
     assert len([i for i in fam.store.get_items(fam.case_id) if i["status"] == "confirmed"]) == 25
+
+
+def test_family_sets_a_price_and_splits_a_merge(fam):
+    fam.say(MAYA, "", [photo(640)])
+    fam.wait()
+    fam.say(MAYA, "", [photo(648), photo(656)])            # the sofa is seen again and merged
+    fam.wait()
+    fam.say(MOM, "review")
+    numbered = fam.store.get_chat(MOM)["context"]["list"]
+    sofa_n = next(n for n, i in numbered.items() if "sofa" in fam.store.get_item(fam.case_id, i)["label"])
+    assert texts(fam.say(MOM, f"{sofa_n} was $2,400")) == [
+        "Set the blue velvet sofa to $2,400, marked as a price set by the family."]
+    sofa = fam.store.get_item(fam.case_id, numbered[sofa_n])
+    assert (sofa["price_low"], sofa["price_mid"], sofa["price_high"], sofa["price_source"]) == (2400, 2400, 2400, "set by family")
+    assert texts(fam.say(MOM, "undo")) == ["Undone: that item is back to how it was."]
+    assert fam.store.get_item(fam.case_id, numbered[sofa_n])["price_source"] == "category default"
+
+    lines = lambda: len(fam.store.get_items(fam.case_id, canonical_only=True))
+    before = lines()
+    assert texts(fam.say(MOM, f"split {sofa_n}")) == ["Split into 2 separate items. Say undo if that was a mistake."]
+    assert lines() == before + 1
+    assert texts(fam.say(MOM, "undo")) == ["Undone: those are one item again."] and lines() == before
+    other = next(n for n in numbered if n != sofa_n)
+    assert "nothing to split" in fam.say(MOM, f"split {other}")[0].text
+
+
+def test_one_directed_ask_a_day(fam):
+    fam.say(MAYA, "", [photo(640), photo(648)])
+    out = fam.wait()
+    assert re.fullmatch(r"Maya, there's nothing from the (kitchen|bedroom|garage)( \d)? yet\. "
+                        r"Any birthday or holiday photos taken there\?", texts(out)[-1])
+    fam.say(MAYA, "", [photo(656), photo(672)])
+    out = fam.wait()
+    assert len(out) == 1 and "Any birthday" not in out[0].text                  # already asked today
+    fam.now += timedelta(days=1)
+    fam.say(MAYA, "", [photo(664), photo(672)])
+    asked = [t for t in texts(fam.wait()) if "photos taken there" in t]
+    assert asked == [] or "kitchen only has 1 item so far" in asked[0] or "bedroom" in asked[0]
+
+
+def test_deadline_reminders_and_weekly_nudge(fam):
+    fam.store.set_case(fam.case_id, coverage_limit=400000, loss_date="2026-10-15")       # due 2027-01-23
+    at = lambda d: datetime.fromisoformat(d + "T18:00:00+00:00")
+    assert fam.engine.tick(at("2026-11-20")) == []                                       # 64 days left, seen this week
+    out = fam.engine.tick(at("2026-11-24"))                                              # 60 days left
+    assert texts(out) == ["A gentle reminder: proof of loss is due in 60 days. You're at $0 of $160k documented."]
+    assert fam.engine.tick(at("2026-11-24")) == []                                       # once
+    assert "due in 30 days" in fam.engine.tick(at("2026-12-24"))[0].text
+    assert fam.engine.tick(at("2026-12-27")) == []                                       # reminded 3 days ago
+    nudge = fam.engine.tick(at("2026-12-31"))                                            # a week of silence
+    assert texts(nudge) == ["You're at $0 of $160k. Even a few more photos would help, whenever you feel up to it."]
+    assert fam.engine.tick(at("2027-01-02")) == []                                       # at most one a week
+    fam.say(MOM, "pause")
+    assert fam.engine.tick(at("2027-01-13")) == []                                       # 10 days left, but paused

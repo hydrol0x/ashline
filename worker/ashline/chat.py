@@ -38,6 +38,8 @@ CODE = re.compile(r"\b(HOME-\d{4})\b", re.I)
 ADDRESSED = re.compile(r"^\s*@?ashline\b[,:]?\s*", re.I)
 MEMORY_QUESTIONS = 6                    # a text "call" asks at most this many questions
 REVIEW_AT_ONCE = 30                     # more than this waiting: the review goes one room at a time
+DIRECTED_ASK_BELOW = 5                  # a room with fewer items than this is worth asking about
+DEADLINE_DAYS = (60, 30, 10)            # proof-of-loss reminders, and nothing else
 
 INTRO = ("I'm Ashline. I help families rebuild the list of belongings insurance asks for after a fire. "
          "It takes a few minutes at a time, and you can stop whenever. What should I call your home?")
@@ -427,7 +429,31 @@ class Engine:
                 if question.get("expires_at") and question["expires_at"] <= now.isoformat():
                     self.store.close_question(question["question_id"], "expired")     # both stay as suggestions
             out += self._daily_review(case, now)
+            out += self._reminders(case, now)
         return out
+
+    def _reminders(self, case: dict, now: datetime) -> list[Outbound]:
+        """Proof-of-loss reminders at 60, 30 and 10 days, and at most one nudge a week after silence."""
+        import json
+        owner = self._owner(case["case_id"])
+        if not owner or owner.get("paused") or not owner.get("dm_chat") or now.hour != int(case.get("review_hour") or 18):
+            return []
+        sent = json.loads(case.get("reminders") or "{}")
+        m = meter(case["case_id"], self.store, today=now.date())
+        text = None
+        if m["days_left"] in DEADLINE_DAYS and m["days_left"] not in sent.get("deadline", []):
+            sent.setdefault("deadline", []).append(m["days_left"])
+            text = f"A gentle reminder: proof of loss is due in {m['days_left']} days. " + meter_line(m).split(" Proof of loss")[0]
+        else:
+            quiet_since = max(owner.get("last_seen") or "", sent.get("last") or "")       # never two in one week
+            if quiet_since and now - datetime.fromisoformat(quiet_since) >= timedelta(days=7) and m["target"]:
+                text = (f"You're at {money(m['documented'])} of {money(m['target'])}. Even a few more photos would help, "
+                        "whenever you feel up to it.")
+        if not text:
+            return []
+        sent["last"] = now.isoformat()
+        self.store.set_case(case["case_id"], reminders=json.dumps(sent))
+        return [Outbound(owner["dm_chat"], text)]
 
     def _digest(self, case: dict, chat_id: str, burst: dict, now: datetime) -> list[Outbound]:
         case_id = case["case_id"]
@@ -493,7 +519,30 @@ class Engine:
         if link_for and len(photos) > 1:
             out[0].text += f" Full list: {self.link(case, link_for)}"
         self._save(chat_id, context)
-        return out
+        # After a digest of several photos only: a single annotated photo is left to stand on its own.
+        ask = self._directed_ask(case_id, chat_id, sender, now) if len(out) == 1 and len(photos) > 1 else None
+        return out + ([ask] if ask else [])
+
+    def _directed_ask(self, case_id: str, chat_id: str, member: dict | None, now: datetime) -> Outbound | None:
+        """One specific request to the person who just sent photos. At most once a day per person."""
+        if not member or (member.get("last_ask") or "")[:10] == now.isoformat()[:10]:
+            return None
+        counts: dict[str, int] = {}
+        for item in self.store.get_items(case_id, canonical_only=True):
+            if item["status"] != "rejected" and item.get("room_label"):
+                counts[item["room_label"].lower()] = counts.get(item["room_label"].lower(), 0) + 1
+        thin = [(counts.get((r.get("name") or r["label"]).lower(), 0), r.get("name") or r["label"])
+                for r in self.store.get_rooms(case_id)
+                if not re.search(r"bath|hall|closet|other", (r.get("name") or r["label"]).lower())]
+        thin = [t for t in thin if t[0] < DIRECTED_ASK_BELOW]
+        if not thin or not counts:
+            return None
+        have, room = min(thin)
+        self.store.set_member(member["member_id"], last_ask=now.isoformat())
+        name = f"{member['name']}, " if member.get("name") else ""
+        lead = f"the {room.lower()} only has {have} item{'s' if have != 1 else ''} so far" if have else \
+            f"there's nothing from the {room.lower()} yet"
+        return Outbound(chat_id, f"{name}{lead}. Any birthday or holiday photos taken there?")
 
     @staticmethod
     def _counts_line(new: int, merged: int) -> str:
@@ -660,6 +709,28 @@ class Engine:
             self.store.log_event(case_id, "remove", {"item_id": item_id, "status": item["status"]}, member["member_id"])
             self.store.set_item_status(case_id, item_id, "rejected")
             return [Outbound(chat_id, f"Removed the {item['label']}. Say undo if that was a mistake.")]
+        match = (re.fullmatch(r"(?:price\s+)?#?(\d+)\s+(?:was|is|cost|costs|at|for)?\s*(\$\s*[\d][\d,.]*\s*k?|[\d][\d,.]*\s*(?:k|dollars))", low)
+                 or re.fullmatch(r"price\s+#?(\d+)\s+(\$?\s*[\d][\d,.]*\s*k?)", low))
+        if match:
+            item_id = self._context(chat_id).get("list", {}).get(match.group(1))
+            item, value = (self.store.get_item(case_id, item_id) if item_id else None), parse_money(match.group(2))
+            if item and value:
+                self.store.log_event(case_id, "item.price", {"item_id": item_id, "before": {k: item.get(k) for k in (
+                    "status", "label", "qty", "price_low", "price_mid", "price_high", "price_source")}}, member["member_id"])
+                self.store.update_item(case_id, item_id, price_low=value, price_mid=value, price_high=value,
+                                       price_source="set by family")
+                return [Outbound(chat_id, f"Set the {item['label']} to {money(value)}, marked as a price set by the family.")]
+        match = re.fullmatch(r"(?:split|separate)\s+#?(\d+)", low)
+        if match:
+            item_id = self._context(chat_id).get("list", {}).get(match.group(1))
+            others = [s for s in self.store.get_sightings(case_id, item_id) if s["item_id"] != item_id] if item_id else []
+            if not others:
+                return [Outbound(chat_id, f"Number {match.group(1)} is only one item, so there's nothing to split.")]
+            for sighting in others:
+                self.store.update_item(case_id, sighting["item_id"], cluster_id=sighting["item_id"])
+            self.store.log_event(case_id, "split", {"into": item_id, "moved": [s["item_id"] for s in others]},
+                                 member["member_id"])
+            return [Outbound(chat_id, f"Split into {len(others) + 1} separate items. Say undo if that was a mistake.")]
         match = re.fullmatch(r"#?(\d+)\s+(?:is|was)\s+(?:an?\s+|the\s+)?(.+)", text.strip(" ."), flags=re.I)
         if match:
             item_id = self._context(chat_id).get("list", {}).get(match.group(1))
@@ -717,6 +788,10 @@ class Engine:
         elif action == "add":
             self.store.set_item_status(case_id, payload["item_id"], "rejected")
             text = "Undone: I've taken that off the list."
+        elif action == "split":
+            for item_id in payload["moved"]:
+                self.store.update_item(case_id, item_id, cluster_id=payload["into"])
+            text = "Undone: those are one item again."
         elif action.startswith("item."):                  # a change made on the inventory page
             before = payload["before"]
             self.store.update_item(case_id, payload["item_id"], **{k: before[k] for k in (

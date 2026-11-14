@@ -22,7 +22,7 @@ CREATE TABLE IF NOT EXISTS cases (
   case_id TEXT PRIMARY KEY, address TEXT, loss_date TEXT, created_at TEXT);
 CREATE TABLE IF NOT EXISTS home (
   case_id TEXT PRIMARY KEY, sid TEXT, lat REAL, lon REAL, parcel_wkt TEXT, homes_listing_id TEXT,
-  scan_captured TEXT, capture_notes TEXT, aerial_collection TEXT, aerial_captured TEXT);
+  scan_captured TEXT, capture_notes TEXT, aerial_collection TEXT, aerial_captured TEXT, listing TEXT);
 CREATE TABLE IF NOT EXISTS rooms (
   case_id TEXT, room_id TEXT, label TEXT, name TEXT, area_m2 REAL, width REAL, depth REAL, height REAL,
   furnished INTEGER, source TEXT, PRIMARY KEY (case_id, room_id));
@@ -54,6 +54,14 @@ class Store:
         self.db = sqlite3.connect(path)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Add columns that databases created by an earlier version lack."""
+        columns = {row["name"] for row in self.db.execute("PRAGMA table_info(home)")}
+        if "listing" not in columns:
+            self.db.execute("ALTER TABLE home ADD COLUMN listing TEXT")
+            self.db.commit()
 
     @contextmanager
     def tx(self):
@@ -89,8 +97,10 @@ class Store:
     # ---------------------------------------------------------------- home
     def set_home(self, case_id: str, **fields) -> None:
         allowed = ("sid", "lat", "lon", "parcel_wkt", "homes_listing_id", "scan_captured",
-                   "capture_notes", "aerial_collection", "aerial_captured")
+                   "capture_notes", "aerial_collection", "aerial_captured", "listing")
         fields = {k: v for k, v in fields.items() if k in allowed and v is not None}
+        if isinstance(fields.get("listing"), dict):
+            fields["listing"] = json.dumps(fields["listing"])
         with self.tx() as db:
             db.execute("INSERT OR IGNORE INTO home (case_id) VALUES (?)", (case_id,))
             for key, value in fields.items():
@@ -98,7 +108,10 @@ class Store:
 
     def get_home(self, case_id: str) -> dict | None:
         rows = self._rows("SELECT * FROM home WHERE case_id = ?", case_id)
-        return rows[0] if rows else None
+        if not rows:
+            return None
+        rows[0]["listing"] = json.loads(rows[0]["listing"]) if rows[0].get("listing") else None
+        return rows[0]
 
     # --------------------------------------------------------------- rooms
     def set_rooms(self, case_id: str, rooms: list[dict], source: str = "scan") -> None:

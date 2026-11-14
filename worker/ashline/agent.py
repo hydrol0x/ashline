@@ -53,12 +53,19 @@ def home_lookup(address: str = "", lat: float | None = None, lon: float | None =
 
 def seed_inside(case_id: str, sid: str, captured: str = "") -> dict:
     """Load the scan's rooms and panorama photos into the case and run item detection. Items are stored as suggested."""
+    seed.listing(case_id, sid)              # the sale listing behind the scan, when the CoStar kit is set up
     return seed.inside(case_id, sid, captured or None)
 
 
 def seed_outside(case_id: str, lat: float, lon: float, loss_date: str = "") -> dict:
     """Load the parcel, buildings and yard findings from the aerial image taken before loss_date (YYYY-MM-DD)."""
     return seed.outside(case_id, lat, lon, loss_date or config.env("ASHLINE_LOSS_DATE"))
+
+
+def home_listing(case_id: str) -> dict:
+    """What the sale listing says about the home: beds, baths, size, year built, garage, appliances."""
+    home = Store().get_home(case_id) or {}
+    return home.get("listing") or {"found": False}
 
 
 def gap_questions(case_id: str, limit: int = 3) -> list[dict]:
@@ -93,7 +100,8 @@ def answer_finding(case_id: str, finding_id: int, theirs: bool) -> str:
     return f"finding {finding_id} {'confirmed' if theirs else 'rejected'}"
 
 
-ORCHESTRATOR_TOOLS = [home_lookup, gap_questions, list_suggestions, confirm_item, reject_item, answer_finding]
+ORCHESTRATOR_TOOLS = [home_lookup, home_listing, gap_questions, list_suggestions, confirm_item, reject_item,
+                      answer_finding]
 GATED_TOOLS = {"confirm_item": True, "reject_item": True, "answer_finding": True}
 
 SUBAGENTS = [

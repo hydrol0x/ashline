@@ -57,6 +57,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("listing_id", nargs="?", help="homes_listing_id from the scan index")
     p.add_argument("--sid", help="scan id")
     p.add_argument("--shape", action="store_true", help="print only field names and types, no values")
+    p.add_argument("--summary", action="store_true", help="print the short summary Ashline uses")
 
     p = sub.add_parser("delete", help="delete every stored row of a case")
     p.add_argument("--case", required=True)
@@ -99,6 +100,9 @@ def _run(args, parser) -> None:
         record = listing_record(args.listing_id, sid=args.sid)
         if args.shape and record.get("found"):
             print("\n".join(shape({"listing": record["listing"], "features": record["features"]})))
+        elif args.summary and record.get("found"):
+            from .costar.listing import summarize
+            print(json.dumps(summarize(record), indent=1))
         else:
             print(json.dumps(record, indent=1))
     elif args.cmd == "delete":

@@ -1,13 +1,16 @@
-"""The home twin seed: address -> scan + aerial -> first evidence batch of a case.
+"""The home twin seed: address -> scan + aerial + listing -> first evidence batch of a case.
 
-`inside` and `outside` are the two halves the agent runs as subagents. Both
+`inside` and `outside` are the two halves the agent runs as subagents; `listing`
+adds the CoStar record behind the address when the kit is configured. All of them
 only ever write suggestions: scan items are 'suggested', aerial hits are open
 findings that become questions. Nothing is confirmed without the family.
 """
 from __future__ import annotations
 
+import json
+
 from . import config, detect as detect_mod
-from .costar import matterport, vexcel
+from .costar import listing as listing_mod, matterport, vexcel
 from .costar.index import home_lookup
 from .dedupe import cluster_scan_items
 from .gaps import gap_questions
@@ -38,6 +41,54 @@ def merge_scan_items(case_id: str, items: list[dict], photos: dict, grouper=None
         return cluster_scan_items(items, photos, grouper), "claude"
     except Exception as exc:                # MergeError, or a missing SDK: never lose the seed over the merge
         return cluster_scan_items(items, photos), f"rules (Claude merge failed: {exc})"
+
+
+def listing_findings(summary: dict) -> list[dict]:
+    """What the listing mentions that is worth a question. Like aerial hits: questions, not items."""
+    date = summary.get("list_date")
+    has = summary.get("has") or {}
+    findings = []
+    if has.get("garage"):
+        findings.append({"kind": "listing", "label": "garage", "evidence_date": date,
+                         "detail": {"spaces": summary.get("garage_spaces")}})
+    for flag, label in (("basement", "basement"), ("storage", "storage"),
+                        ("washer_dryer", "washer and dryer"), ("spa", "spa")):
+        if has.get(flag):
+            findings.append({"kind": "listing", "label": label, "evidence_date": date, "detail": {}})
+    if summary.get("appliances"):
+        findings.append({"kind": "listing", "label": "appliances", "evidence_date": date,
+                         "detail": {"names": summary["appliances"]}})
+    return findings
+
+
+def listing(case_id: str, sid: str | None = None, homes_listing_id: str | None = None,
+            store: Store | None = None) -> dict:
+    """CoStar listing behind the scan -> home record and open findings. Returns a short summary.
+
+    Optional: without the kit configured it reports that and the seed carries on.
+    The summary is cached in cases/<case>/listing.json (git-ignored).
+    """
+    store = store or Store()
+    cache = config.case_dir(case_id) / "listing.json"
+    try:
+        if cache.exists():
+            summary = json.loads(cache.read_text())
+        else:
+            record = listing_mod.listing_record(homes_listing_id, sid=sid)
+            if not record.get("found"):
+                return {"found": False, "reason": record.get("reason")}
+            summary = listing_mod.summarize(record)
+            cache.write_text(json.dumps(summary, indent=1))
+    except Exception as exc:                # a missing or unreadable kit must not stop the seed
+        return {"found": False, "reason": f"Could not read the CoStar kit: {exc}"}
+    store.set_home(case_id, listing=summary)
+    store.set_findings(case_id, listing_findings(summary), source="listing")
+    return {
+        "found": True,
+        **{k: summary.get(k) for k in ("beds", "baths", "sqft", "year_built", "garage_spaces", "list_date")},
+        "mentions": sorted(k.replace("_", " and ") for k, v in (summary.get("has") or {}).items() if v),
+        "appliances": summary.get("appliances") or [],
+    }
 
 
 def inside(case_id: str, sid: str, captured: str | None = None, run_detection: bool = True,
@@ -77,7 +128,8 @@ def inside(case_id: str, sid: str, captured: str | None = None, run_detection: b
         "detections": suggested,
         "suggested_items": clusters,          # after merging repeats across panoramas
         "merged_by": merged_by,
-        "message": matterport.scan_confirmation_message(rooms["rooms"], captured, rooms["capture_notes"]),
+        "message": matterport.scan_confirmation_message(
+            rooms["rooms"], captured, rooms["capture_notes"], (store.get_home(case_id) or {}).get("listing")),
     }
 
 
@@ -143,6 +195,8 @@ def seed_home_twin(case_id: str, address: str | None = None, lat: float | None =
     if found["found"]:
         store.set_home(case_id, sid=found["sid"], lat=found["lat"], lon=found["lon"],
                        homes_listing_id=found["homes_listing_id"])
+        # The listing first: its summary goes into the message the inside step writes.
+        result["listing"] = listing(case_id, found["sid"], found["homes_listing_id"], store)
         result["inside"] = inside(case_id, found["sid"], found["original_created"], run_detection,
                                   max_faces, store)
         lat, lon = found["lat"], found["lon"]

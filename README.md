@@ -5,8 +5,12 @@ photos, Ashline circles and prices what it sees, calls to help recall what no ph
 builds the evidence-linked contents list an insurer asks for.
 
 This repo currently holds the **worker** side of the **home twin seed**: given the survivor's
-address, it pulls the Matterport 3D scan (inside) and the Vexcel aerial (outside) of that home and
-turns both into the first batch of evidence for the case.
+address, it pulls the Matterport 3D scan (inside), the Vexcel aerial (outside) and the CoStar sale
+listing (the record) of that home and turns them into the first batch of evidence for the case.
+
+The three sources are used together. For example: the listing says there is a 2-car garage, the
+aerial from before the fire shows a second building on the lot, and the scan never went inside it,
+so Ashline asks "What was kept there: tools, bikes, storage?"
 
 Everything the seed finds is a **suggestion**. A listing scan can show staging or a previous
 owner's furniture, so nothing becomes an inventory item until the family confirms it.
@@ -35,6 +39,11 @@ ashline export --case demo --include-suggested           # cases/demo/inventory.
 ashline kit-info                                         # what is inside the CoStar kit
 ashline listing --sid <scan id>                          # the CoStar listing behind a scan
 ```
+
+With the CoStar kit configured (`COSTAR_KIT_ZIP` or `COSTAR_KIT_URL`, plus `COSTAR_ZIP_PASSWORD`), the
+seed also reads the listing: beds, baths, size and year built go into the family message, and what
+the listing mentions but the scan does not show (a garage, a basement, a washer and dryer, named
+appliances) becomes questions. Without the kit that step is skipped.
 
 `seed` is safe to run again: scan photos, detections and aerial results are cached per case, and
 answers the family already gave are kept. Run it once before the demo to precompute the demo home.

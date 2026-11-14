@@ -179,3 +179,70 @@ def listing_record(homes_listing_id: str | None = None, sid: str | None = None) 
         "listing": {k: v for k, v in (listing or {}).items() if k not in BULKY} or None,
         "features": features,
     }
+
+
+# Appliances a listing names that are part of the house, not contents.
+BUILT_IN = {"dishwasher", "disposal", "garbage disposal", "range hood", "hood", "cooktop", "oven", "range",
+            "water heater", "furnace", "exhaust fan", "vent hood"}
+
+
+def _first(*values):
+    """First value that is set and not zero."""
+    for value in values:
+        if value not in (None, "", 0, 0.0):
+            return value
+    return None
+
+
+def summarize(record: dict) -> dict:
+    """The parts of a listing record that matter for a contents inventory.
+
+    Field names follow the real kit (checked with `ashline listing --shape`).
+    Every value may be missing; missing stays None rather than a guess.
+    """
+    listing = record.get("listing") or {}
+    features = record.get("features") or {}
+    derived = features.get("derivedValues") or {}
+    prop = listing.get("property") or {}
+    reso = listing.get("resoValues") or {}
+    structure = reso.get("structure") or {}
+    costar = listing.get("costarFeatureValues") or {}
+
+    baths = _first(derived.get("totalBathrooms"), prop.get("bathsMax"))
+    if baths is None and prop.get("bathsFull"):
+        baths = prop["bathsFull"] + 0.5 * (prop.get("bathsHalf") or 0)
+    garage_spaces = _first(derived.get("totalGarageSpaces"), derived.get("totalPrivateGarageSpaces"),
+                           structure.get("garageSpaces"))
+
+    appliances = []
+    for feature in features.get("features") or []:
+        where = " ".join(str(feature.get(k) or "") for k in ("category", "subcategory1", "subcategory2")).lower()
+        name = str(feature.get("name") or "").strip()
+        if "applianc" in where and name and name.lower() not in BUILT_IN and name not in appliances:
+            appliances.append(name)
+
+    return {
+        "beds": _first(derived.get("totalBedrooms"), prop.get("bedsMax")),
+        "baths": baths,
+        "sqft": _first(derived.get("homeSquareFeet"), prop.get("sqftMax")),
+        "year_built": _first(derived.get("yearBuilt"), prop.get("yearBuilt"), structure.get("yearBuilt")),
+        "stories": _first(derived.get("numberOfStories"), prop.get("stories"), structure.get("stories")),
+        "lot_acres": _first(derived.get("lotSizeInAcres"), prop.get("lotSizeAcresMax")),
+        "property_type": _first(derived.get("propertyType"), prop.get("mlsPropertyType")),
+        "garage_spaces": int(garage_spaces) if garage_spaces else None,
+        "list_date": (listing.get("listDate") or "")[:10] or None,
+        "close_date": (listing.get("closeDate") or "")[:10] or None,
+        "price": _first(listing.get("closePrice"), listing.get("currentPrice"), listing.get("originalPrice")),
+        "has": {                                   # True only when the listing says so
+            "garage": bool(garage_spaces or reso.get("hasGarage") or costar.get("hasGarage")),
+            "carport": bool(structure.get("hasCarport")),
+            "basement": bool(reso.get("hasBasement") or costar.get("hasBasement") or structure.get("hasBasement")),
+            "storage": bool(reso.get("hasStorage")),
+            "washer_dryer": bool(reso.get("hasWasherDryer")),
+            "spa": bool(reso.get("hasSpa")),
+            "fireplace": bool(reso.get("hasFireplace") or costar.get("hasFireplace") or structure.get("hasFireplace")),
+        },
+        "appliances": appliances[:12],
+        "highlights": [str(h.get("text")) for h in (features.get("highlights") or []) if h.get("text")][:10],
+        "remarks": (listing.get("remarks") or "").strip()[:800] or None,
+    }

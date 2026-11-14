@@ -343,8 +343,29 @@ def _month_year(date: str | None) -> str | None:
         return None
 
 
+def listing_sentence(listing: dict | None) -> str:
+    """'The sale listing describes a 3-bed, 2-bath home of 1,500 sq ft built in 1962.' or ''."""
+    if not listing:
+        return ""
+    def num(value):
+        return int(value) if float(value) == int(value) else value
+    parts = []
+    if listing.get("beds"):
+        parts.append(f"{num(listing['beds'])}-bed")
+    if listing.get("baths"):
+        parts.append(f"{num(listing['baths'])}-bath")
+    text = (", ".join(parts) + " home") if parts else "home"
+    if listing.get("sqft"):
+        text += f" of {int(listing['sqft']):,} sq ft"
+    if listing.get("year_built"):
+        text += f" built in {int(listing['year_built'])}"
+    if text == "home":
+        return ""
+    return f" The sale listing describes a {text}."
+
+
 def scan_confirmation_message(rooms: list[dict], captured: str | None,
-                              capture_notes: str | None = None) -> str:
+                              capture_notes: str | None = None, listing: dict | None = None) -> str:
     """One short message asking the family whether to start from the scan."""
     counts: dict[str, int] = {}
     for room in rooms:
@@ -360,7 +381,8 @@ def scan_confirmation_message(rooms: list[dict], captured: str | None,
         text += f" from {when}"
     if parts:
         text += " with " + (", ".join(parts[:-1]) + " and " + parts[-1] if len(parts) > 1 else parts[0])
-    text += ". Use it as a starting point?"
+    about_listing = listing_sentence(listing)
+    text += "." + about_listing + (" Use the scan as a starting point?" if about_listing else " Use it as a starting point?")
     if capture_notes:
         text += f' The photographer noted: "{capture_notes}".'
     text += " It may show staging or a previous owner's things, so nothing is added until you confirm it."

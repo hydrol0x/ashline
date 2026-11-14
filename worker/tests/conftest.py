@@ -52,6 +52,14 @@ def index(index_csv):
 
 @pytest.fixture(autouse=True)
 def _isolated_data_dir(tmp_path, monkeypatch):
+    # A developer's .env and shell hold real keys and the real CoStar kit. Tests must never read
+    # them: no paid API call, no real data. Tests that need a setting set it themselves.
+    from ashline import config
+    monkeypatch.setattr(config, "_dotenv_paths", lambda: [])
+    for name in ("MATTERPORT_API_KEY", "MATTERPORT_API_TOKEN", "VEXCEL_API_KEY", "COSTAR_KIT_URL",
+                 "COSTAR_KIT_ZIP", "COSTAR_ZIP_PASSWORD", "ANTHROPIC_API_KEY", "ASHLINE_VLM_API_KEY",
+                 "ASHLINE_DETECTOR", "ASHLINE_DEMO_SID", "ASHLINE_DEMO_ADDRESS", "ASHLINE_LOSS_DATE",
+                 "ASHLINE_INDEX_CSV", "ASHLINE_AGENT_MODEL"):
+        monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("ASHLINE_DATA_DIR", str(tmp_path / "cases"))
-    # A developer's .env may hold real keys: tests must never reach a paid API.
     monkeypatch.setenv("ASHLINE_MERGER", "rules")

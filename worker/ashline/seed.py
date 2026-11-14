@@ -42,7 +42,7 @@ def inside(case_id: str, sid: str, captured: str | None = None, run_detection: b
 
     return {
         "sid": sid,
-        "rooms": [{"label": r["label"], "area_m2": r["area_m2"], "furnished": r["furnished"]} for r in rooms["rooms"]],
+        "rooms": [{"label": r["name"], "area_m2": r["area_m2"], "furnished": r["furnished"]} for r in rooms["rooms"]],
         "capture_notes": rooms["capture_notes"],
         "captured": captured,
         "faces": len(shots["photos"]),

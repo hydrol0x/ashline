@@ -98,7 +98,11 @@ def test_gap_questions_cover_rooms_structures_and_yard(seeded):
     assert "patio furniture" in yard and "trampoline" in yard and "car" not in yard.replace("carport", "")
     rooms = [q for q in queue if q["kind"] == "room"]
     assert rooms[0]["ref"] == "living"          # biggest valuable room with nothing confirmed
-    assert "don't have anything from the living room / dining room yet" in rooms[0]["text"]
+    # Suggestions from the scan are waiting there, so it must not claim to have nothing.
+    assert "I've spotted 2 possible things in the living room / dining room for you to check" in rooms[0]["text"]
+    assert "nothing is confirmed there yet" in rooms[0]["text"]
+    garage = next(q for q in rooms if "garage" in q["text"])
+    assert "I don't have anything from the garage yet" in garage["text"]
     assert any("garage" in q["text"] for q in rooms)        # no panorama inside, so it must be asked
 
 
@@ -112,6 +116,8 @@ def test_confirming_shrinks_the_queue_and_fills_the_export(seeded, tmp_path):
     assert all(i["status"] == "confirmed" for i in store.get_items("fam1") if item_key(i["label"]) == "sofa")
     after = {q["ref"]: q["weight"] for q in gap_questions("fam1", store) if q["kind"] == "room"}
     assert after["living"] < before["living"]
+    living = next(q for q in gap_questions("fam1", store) if q["ref"] == "living")
+    assert living["text"].startswith("I only have 1 confirmed thing from the living room / dining room so far.")
 
     structure = next(f for f in store.get_findings("fam1") if f["kind"] == "structure")
     store.set_finding_status("fam1", structure["finding_id"], "confirmed")

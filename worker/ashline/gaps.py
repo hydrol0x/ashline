@@ -54,6 +54,10 @@ def room_questions(store: Store, case_id: str) -> list[dict]:
     for item in store.get_items(case_id, status="confirmed", canonical_only=True):
         if item["room_id"]:
             confirmed[item["room_id"]] = confirmed.get(item["room_id"], 0) + (item["qty"] or 1)
+    pending: dict[str, int] = {}
+    for item in store.get_items(case_id, status="suggested", canonical_only=True):
+        if item["room_id"]:
+            pending[item["room_id"]] = pending.get(item["room_id"], 0) + 1
     out = []
     for room in store.get_rooms(case_id):
         kind = _room_kind(room["label"])
@@ -68,8 +72,14 @@ def room_questions(store: Store, case_id: str) -> list[dict]:
             name = "one of the smaller rooms"                         # Matterport labels some rooms "Other"
         else:
             name = name if name[-1].isdigit() else f"the {name}"     # "bedroom 2", "the kitchen"
-        lead = (f"I only have {have} thing{'s' if have != 1 else ''} from {name} so far."
-                if have else f"I don't have anything from {name} yet.")
+        waiting = pending.get(room["room_id"], 0)
+        if have:
+            lead = f"I only have {have} confirmed thing{'s' if have != 1 else ''} from {name} so far."
+        elif waiting:           # suggestions exist but the family has not looked at them yet
+            lead = (f"I've spotted {waiting} possible thing{'s' if waiting != 1 else ''} in {name} "
+                    "for you to check, and nothing is confirmed there yet.")
+        else:
+            lead = f"I don't have anything from {name} yet."
         out.append({
             "kind": "room", "ref": room["room_id"], "weight": round(expected_new * value),
             "text": f"{lead} {PROMPTS.get(kind, 'What do you remember being in there?')}",

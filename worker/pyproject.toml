@@ -10,7 +10,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-agent = ["deepagents>=0.7", "langchain-openai>=0.3"]
+agent = ["deepagents>=0.7", "langchain-anthropic>=1.0", "langchain-openai>=0.3"]
+claude = ["anthropic>=1.0"]
 local-vision = ["torch>=2.2", "transformers>=5.0"]
 dev = ["pytest>=8"]
 

@@ -12,9 +12,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 
 from . import config
 from .costar.index import home_lookup
+from .detect import DetectionError
 from .export import export_csv
 from .gaps import gap_questions
 from .seed import seed_home_twin
@@ -41,6 +43,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--loss-date")
     p.add_argument("--max-faces", type=int, default=40)
     p.add_argument("--no-detect", action="store_true", help="download photos but skip item detection")
+    p.add_argument("--redetect", action="store_true", help="discard cached detections and run the detector again")
 
     p = sub.add_parser("questions", help="voice-call questions from gaps in the case")
     p.add_argument("--case", required=True)
@@ -61,6 +64,8 @@ def main(argv: list[str] | None = None) -> None:
         _run(args, parser)
     except config.MissingKey as exc:
         parser.exit(2, f"{exc}\nLooked for .env in: {', '.join(str(p) for p in config._dotenv_paths())}\n")
+    except DetectionError as exc:
+        parser.exit(1, f"Item detection stopped: {exc}\nPhotos already done are cached; run the command again to continue.\n")
 
 
 def _run(args, parser) -> None:
@@ -74,6 +79,8 @@ def _run(args, parser) -> None:
             parser.exit(2, "No home given. Pass --address, --sid or --lat/--lon, or set ASHLINE_DEMO_SID "
                            "or ASHLINE_DEMO_ADDRESS in .env.\n"
                            f"Looked for .env in: {', '.join(str(p) for p in config._dotenv_paths())}\n")
+        if args.redetect:
+            shutil.rmtree(config.case_dir(args.case) / "detections", ignore_errors=True)
         result = seed_home_twin(args.case, address, args.lat, args.lon, args.loss_date,
                                 run_detection=not args.no_detect, max_faces=args.max_faces, sid=sid)
         print(json.dumps(result, indent=1))

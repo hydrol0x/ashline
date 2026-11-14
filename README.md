@@ -16,7 +16,7 @@ owner's furniture, so nothing becomes an inventory item until the family confirm
 ```bash
 cd worker
 python -m venv .venv && source .venv/bin/activate
-pip install -e '.[agent,dev]'            # add ,local-vision to run item detection without an API key
+pip install -e '.[agent,claude,dev]'     # add ,local-vision to run item detection without an API key
 cp ../.env.example ../.env               # then fill in the keys
 pytest -q
 ```
@@ -64,10 +64,17 @@ Around them: `detect.py` (item detection, build spec 6.3), `dedupe.py` (scan pri
 
 ### Item detection
 
-`ASHLINE_DETECTOR=vlm` sends each photo to a vision model through any OpenAI-compatible endpoint
-(`ASHLINE_VLM_BASE_URL`, `ASHLINE_VLM_API_KEY`, `ASHLINE_VLM_MODEL`). `ASHLINE_DETECTOR=florence`
-runs Florence-2 locally: no key, about 15 seconds per photo on a laptop CPU, fewer small items
-found. With no setting, the vision model is used when a key is set and the local model otherwise.
+`ASHLINE_DETECTOR` picks how photos are read:
+
+| Value | Needs | Notes |
+| --- | --- | --- |
+| `claude` | `ANTHROPIC_API_KEY` | Claude through the Anthropic SDK, with the item list constrained to a JSON schema. Model from `ASHLINE_CLAUDE_MODEL` (default `claude-opus-5-5`). |
+| `vlm` | `ASHLINE_VLM_API_KEY` | Any OpenAI-compatible chat endpoint (`ASHLINE_VLM_BASE_URL`, `ASHLINE_VLM_MODEL`). |
+| `florence` | nothing | Florence-2 run locally: about 15 seconds per photo on a laptop CPU, fewer small items found. |
+
+Left unset, it uses `claude` when an Anthropic key is set, then `vlm`, then `florence`. Detections
+are cached per case; `ashline seed --case demo --redetect` throws the cache away and runs the
+current detector again.
 
 ## What the CoStar APIs actually do
 

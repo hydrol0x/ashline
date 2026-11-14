@@ -50,3 +50,36 @@ def test_missing_key_is_one_line_not_a_traceback(offline, capsys, monkeypatch, i
     with pytest.raises(SystemExit):
         cli.main(["seed", "--case", "demo", "--sid", "fakeA000001", "--no-detect"])
     assert "MATTERPORT_API_KEY is not set" in capsys.readouterr().err
+
+
+def test_redetect_discards_cached_detections(offline, capsys, monkeypatch):
+    from ashline.pipeline import detection_path
+
+    class Counting:
+        calls = 0
+
+        def detect(self, path, room_hint=None):
+            Counting.calls += 1
+            return []
+
+    monkeypatch.setattr(seed.detect_mod, "get_detector", Counting)
+    cli.main(["seed", "--case", "demo", "--sid", "fakeA000001", "--max-faces", "8"])
+    first = Counting.calls
+    assert first == 8 and len(list(detection_path("demo", "x").parent.glob("scan-*.json"))) == 8
+    cli.main(["seed", "--case", "demo", "--sid", "fakeA000001", "--max-faces", "8"])
+    assert Counting.calls == first                              # cached
+    cli.main(["seed", "--case", "demo", "--sid", "fakeA000001", "--max-faces", "8", "--redetect"])
+    assert Counting.calls == 2 * first
+
+
+def test_detector_failure_is_one_line(offline, capsys, monkeypatch):
+    from ashline.detect import DetectionError
+
+    class Failing:
+        def detect(self, path, room_hint=None):
+            raise DetectionError("Anthropic rejected the key. Check ANTHROPIC_API_KEY in .env.")
+
+    monkeypatch.setattr(seed.detect_mod, "get_detector", Failing)
+    with pytest.raises(SystemExit) as exit_info:
+        cli.main(["seed", "--case", "demo", "--sid", "fakeA000001"])
+    assert exit_info.value.code == 1 and "ANTHROPIC_API_KEY" in capsys.readouterr().err

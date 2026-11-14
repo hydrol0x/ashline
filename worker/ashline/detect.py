@@ -24,14 +24,16 @@ from . import config
 CATEGORIES = ["furniture", "electronics", "appliances", "kitchen", "decor", "lighting", "bedding",
               "clothing", "tools", "sports", "toys", "outdoor", "office", "other"]
 
-PROMPT = """You are building a home contents inventory for an insurance claim after a total loss.
+TASK = """You are building a home contents inventory for an insurance claim after a total loss.
 List the personal property visible in this photo{room}.
 
 Include: furniture, electronics, freestanding appliances, rugs, lamps, decor, bedding, kitchenware,
 toys, tools, sports gear, outdoor furniture and equipment.
 Skip: anything built into the house (cabinets, counters, sinks, range hoods, built-in ovens,
 doors, windows, ceiling lights, vents, flooring), people, pets, and things too small or blurry to name.
-Skip anything seen only through a doorway in another room.
+Skip anything seen only through a doorway in another room."""
+
+PROMPT = TASK + """
 
 Return ONLY a JSON array, between 0 and 30 objects, each:
 {{"label": "<specific noun phrase, e.g. blue velvet three-seat sofa>",
@@ -276,12 +278,21 @@ class FlorenceDetector:
         return clean_regions(out.get("labels") or [], out.get("bboxes") or [], *image.size)
 
 
+def default_detector_kind() -> str:
+    """claude when an Anthropic key is set, else vlm when a gateway key is set, else the local model."""
+    if config.env("ANTHROPIC_API_KEY"):
+        return "claude"
+    return "vlm" if config.env("ASHLINE_VLM_API_KEY") else "florence"
+
+
 def get_detector(kind: str | None = None):
-    """`ASHLINE_DETECTOR` = vlm | florence. Default: vlm when a key is set, else the local model."""
-    kind = (kind or config.env("ASHLINE_DETECTOR") or
-            ("vlm" if config.env("ASHLINE_VLM_API_KEY") else "florence")).lower()
+    """`ASHLINE_DETECTOR` = claude | vlm | florence. See default_detector_kind() for the default."""
+    kind = (kind or config.env("ASHLINE_DETECTOR") or default_detector_kind()).lower()
+    if kind == "claude":
+        from .detect_claude import ClaudeDetector
+        return ClaudeDetector()
     if kind == "vlm":
         return VLMDetector()
     if kind == "florence":
         return FlorenceDetector()
-    raise DetectionError(f"Unknown ASHLINE_DETECTOR {kind!r}: use vlm or florence.")
+    raise DetectionError(f"Unknown ASHLINE_DETECTOR {kind!r}: use claude, vlm or florence.")

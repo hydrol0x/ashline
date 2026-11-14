@@ -49,6 +49,13 @@ ITEMS_SCHEMA = {
     "additionalProperties": False,
 }
 
+ROOM_ITEMS_SCHEMA = {
+    "type": "object",
+    "properties": {"room": {"type": ["string", "null"]}, "items": ITEMS_SCHEMA["properties"]["items"]},
+    "required": ["room", "items"],
+    "additionalProperties": False,
+}
+
 INSTRUCTIONS = """
 
 List at most 30 items. Give each physical object its own entry (four bar stools = four entries).
@@ -65,7 +72,9 @@ class ClaudeDetector:
         self.max_side = max_side
         self.client = client or anthropic.Anthropic()
 
-    def detect(self, path: str | Path, room_hint: str | None = None) -> list[dict]:
+    def detect(self, path: str | Path, room_hint: str | None = None, rooms: list[str] | None = None) -> list[dict]:
+        """Items in one photo. For a family photo with no known room, pass the home's room names
+        in `rooms`: the model says which one the photo shows and each item carries it as "room"."""
         image = Image.open(path).convert("RGB")
         width, height = image.size
         small = image.copy()
@@ -74,14 +83,21 @@ class ClaudeDetector:
         small.save(buf, format="JPEG", quality=85)
 
         room = f" (taken in: {room_hint})" if room_hint else ""
+        schema, ask_room = ITEMS_SCHEMA, ""
+        if not room_hint and rooms is not None:
+            schema = ROOM_ITEMS_SCHEMA
+            known = f" The rooms of this home are: {', '.join(rooms)}." if rooms else ""
+            ask_room = (f"\n\nAlso give `room`: the room this photo shows.{known} Use one of those names when it "
+                        "fits, a plain name such as \"Garage\" when none does, or null when the photo is not "
+                        "inside or around a home.")
         request = dict(
             model=self.model,
             max_tokens=16000,
-            output_config={"effort": self.effort, "format": {"type": "json_schema", "schema": ITEMS_SCHEMA}},
+            output_config={"effort": self.effort, "format": {"type": "json_schema", "schema": schema}},
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
                                              "data": base64.standard_b64encode(buf.getvalue()).decode("utf-8")}},
-                {"type": "text", "text": TASK.format(room=room) + INSTRUCTIONS},
+                {"type": "text", "text": TASK.format(room=room) + INSTRUCTIONS + ask_room},
             ]}],
         )
         try:
@@ -110,7 +126,13 @@ class ClaudeDetector:
             raise DetectionError("The item list was cut off at max_tokens.")
         text = next((block.text for block in response.content if block.type == "text"), "")
         try:
-            items = json.loads(text).get("items", [])
+            reply = json.loads(text)
+            items = reply.get("items", [])
         except (json.JSONDecodeError, AttributeError) as exc:
             raise DetectionError(f"Unexpected reply from Claude: {text[:200]}") from exc
-        return parse_items(json.dumps(items), width, height)
+        parsed = parse_items(json.dumps(items), width, height)
+        guess = reply.get("room") if isinstance(reply.get("room"), str) else None
+        if guess and guess.strip():
+            for item in parsed:
+                item["room"] = guess.strip()
+        return parsed

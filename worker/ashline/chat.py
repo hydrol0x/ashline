@@ -1,0 +1,787 @@
+"""The conversation: what Ashline says, and when it stays quiet (UX doc sections 2 to 9).
+
+The engine is independent of the channel. A bridge (Photon, or the local simulator) hands it an
+`Inbound` message and sends whatever `Outbound` messages come back. `tick()` is called on a timer
+for the things that happen later: the digest after a burst of photos, the daily review, questions
+that expire.
+
+Principles the code follows:
+- Quiet by default. In a group chat Ashline answers photos, messages addressed to it, replies to
+  its own pending question and command words. Anything else gets silence.
+- Everything is a suggestion until the owner says OK.
+- It never quotes the family's conversation back; it only ever surfaces items.
+"""
+from __future__ import annotations
+
+import io
+import re
+import secrets
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+from PIL import Image, ImageOps
+
+from . import config, detect as detect_mod
+from .annotate import annotate, legend, side_by_side
+from .dedupe import item_key, merge_into_inventory
+from .gaps import gap_questions
+from .meter import meter, meter_line
+from .pipeline import detect_cached
+from .pricing import money, money_range, price_items
+from .store import Store
+
+BATCH_SECONDS = 60                      # wait this long after the last photo of a burst
+QUESTION_HOURS = 4                      # an unanswered "same item?" expires after this
+CODE = re.compile(r"\b(HOME-\d{4})\b", re.I)
+ADDRESSED = re.compile(r"^\s*@?ashline\b[,:]?\s*", re.I)
+MEMORY_QUESTIONS = 6                    # a text "call" asks at most this many questions
+
+INTRO = ("I'm Ashline. I help families rebuild the list of belongings insurance asks for after a fire. "
+         "It takes a few minutes at a time, and you can stop whenever. What should I call your home?")
+HELP = ("Send photos from inside the home, from any year, and I'll list what's in them. You can also say: "
+        "list, how much so far, show photo 3, call me, export, undo, pause.")
+# Household things worth noticing when the family mentions them to each other.
+HEARD_WORDS = ("piano", "guitar", "violin", "drum kit", "tv", "television", "sofa", "couch", "dining table", "table",
+               "desk", "bed", "dresser", "bike", "bicycle", "treadmill", "freezer", "washer", "dryer", "sewing machine",
+               "computer", "laptop", "camera", "jewelry", "watch", "china", "silverware", "quilt", "rug", "painting",
+               "record player", "records", "tools", "table saw", "lawn mower", "grill", "kayak", "surfboard", "skis",
+               "golf clubs", "wine", "books", "bookshelf", "armchair", "recliner", "crib", "stroller", "telescope")
+OWNERSHIP = re.compile(r"\b(remember|we had|had a|had an|there was|don't forget|what about|grandma's|grandpa's|"
+                       r"mom's|dad's|our|my|her|his)\b", re.I)
+
+
+@dataclass
+class Inbound:
+    chat_id: str
+    sender: str                                   # phone number
+    text: str = ""
+    attachments: list = field(default_factory=list)   # (filename, bytes) pairs
+    is_group: bool = False
+    sender_name: str | None = None
+    now: datetime | None = None
+
+
+@dataclass
+class Outbound:
+    chat_id: str
+    text: str
+    image: str | None = None                      # path of an image to attach
+    files: list = field(default_factory=list)     # paths of files to attach
+
+
+def _now(value: datetime | None = None) -> datetime:
+    return value or datetime.now(timezone.utc)
+
+
+def _join(parts: list[str]) -> str:
+    parts = [p for p in parts if p]
+    return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1] if parts else ""
+
+
+def parse_money(text: str) -> float | None:
+    """'$400,000', '400k', '1.2 million' -> dollars."""
+    match = re.search(r"\$?\s*([\d][\d,]*\.?\d*)\s*(k|thousand|m|million)?", text.lower())
+    if not match:
+        return None
+    try:
+        value = float(match.group(1).replace(",", ""))
+    except ValueError:
+        return None
+    return value * {"k": 1e3, "thousand": 1e3, "m": 1e6, "million": 1e6}.get(match.group(2) or "", 1)
+
+
+def split_rooms(text: str) -> list[str]:
+    """'living room, kitchen, 3 bedrooms and a garage' -> Living room, Kitchen, Bedroom, Bedroom 2, Bedroom 3, Garage."""
+    rooms = []
+    for part in re.split(r",|;|\band\b|\n", text.lower()):
+        part = re.sub(r"\b(a|an|the|one|plus)\b", " ", part).strip(" .")
+        if not part:
+            continue
+        match = re.match(r"(\d+|two|three|four|five|six)\s+(.+)", part)
+        count = 1
+        if match:
+            count = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6}.get(match.group(1)) or int(match.group(1))
+            part = match.group(2)
+        part = re.sub(r"s$", "", part.strip()) if count > 1 else part.strip()
+        name = part[:1].upper() + part[1:]
+        for n in range(1, min(count, 12) + 1):
+            rooms.append(name if n == 1 else f"{name} {n}")
+    return rooms[:30]
+
+
+class Engine:
+    def __init__(self, store: Store | None = None, detector=None, pricer=None, grouper=None,
+                 public_url: str | None = None, number: str | None = None, batch_seconds: int | None = None):
+        self.store = store or Store()
+        self.detector, self.pricer, self.grouper = detector, pricer, grouper
+        self.public_url = (public_url or config.env("ASHLINE_PUBLIC_URL") or "").rstrip("/")
+        self.number = number or config.env("ASHLINE_NUMBER") or "this number"
+        self.batch_seconds = batch_seconds if batch_seconds is not None else int(
+            config.env("ASHLINE_BATCH_SECONDS") or BATCH_SECONDS)
+
+    # ------------------------------------------------------------ helpers
+    def link(self, case: dict, member: dict) -> str:
+        token = case["owner_token"] if member["role"] == "owner" else case["member_token"]
+        return f"{self.public_url}/p/{token}" if self.public_url else f"/p/{token}"
+
+    def _context(self, chat_id: str) -> dict:
+        chat = self.store.get_chat(chat_id)
+        return dict(chat["context"]) if chat else {}
+
+    def _save(self, chat_id: str, context: dict) -> None:
+        self.store.set_chat_context(chat_id, context)
+
+    def _owner(self, case_id: str) -> dict | None:
+        return next((m for m in self.store.get_members(case_id) if m["role"] == "owner"), None)
+
+    def _room_names(self, case_id: str) -> list[str]:
+        return [r.get("name") or r["label"] for r in self.store.get_rooms(case_id)]
+
+    def _display(self, item: dict) -> str:
+        price = money_range(item.get("price_low"), item.get("price_high")) if item.get("price_mid") else ""
+        qty = f"{item['qty']} × " if (item.get("qty") or 1) > 1 else ""
+        return f"{qty}{item['label']}" + (f" ({price})" if price else "")
+
+    # ---------------------------------------------------------- entry point
+    def handle(self, inbound: Inbound) -> list[Outbound]:
+        now = _now(inbound.now)
+        text = (inbound.text or "").strip()
+        member = self.store.get_member(inbound.sender)
+
+        code = CODE.search(text)
+        if code:
+            return self._join_case(inbound, code.group(1).upper(), member)
+
+        if member is None:
+            chat = self.store.get_chat(inbound.chat_id)
+            if inbound.is_group and chat:                 # someone new in the family's inventory chat
+                member = self.store.add_member(chat["case_id"], inbound.sender, inbound.sender_name)
+            elif inbound.is_group:
+                return []                                 # a group Ashline was not introduced to: say nothing
+            else:
+                return self._start_onboarding(inbound)
+
+        case = self.store.get_case(member["case_id"])
+        if case is None:                                  # their case was deleted
+            self.store.set_member(member["member_id"], case_id="")
+            return self._start_onboarding(inbound) if not inbound.is_group else []
+        if not self.store.get_chat(inbound.chat_id):
+            self.store.set_chat(inbound.chat_id, case["case_id"], inbound.is_group)
+        self.store.set_member(member["member_id"], last_seen=now.isoformat(), paused=0)   # writing again ends a pause
+
+        step = member["state"].get("step")
+        if step in ("home_name", "rooms") and not inbound.is_group:
+            return self._continue_onboarding(inbound, member, case, text)
+
+        if inbound.attachments:
+            return self._intake(inbound, member, case, now)
+
+        if inbound.is_group:
+            addressed = bool(ADDRESSED.match(text))
+            text = ADDRESSED.sub("", text).strip()
+            reply = self._answer_pending(inbound, member, case, text) or self._command(inbound, member, case, text, now)
+            if reply is not None:
+                return reply
+            if addressed:
+                return [Outbound(inbound.chat_id, HELP)]
+            self._listen(inbound.chat_id, text)           # unsure = silent
+            return []
+
+        reply = (self._answer_pending(inbound, member, case, text)
+                 or self._command(inbound, member, case, text, now)
+                 or self._memory_answer(inbound, member, case, text))
+        if reply is not None:
+            return reply
+        return [Outbound(inbound.chat_id, "I'm not sure what you'd like me to do with that. " + HELP)]
+
+    # ----------------------------------------------------------- onboarding
+    def _start_onboarding(self, inbound: Inbound) -> list[Outbound]:
+        case_id = "case-" + secrets.token_hex(4)
+        while True:
+            code = f"HOME-{secrets.randbelow(9000) + 1000}"
+            if not self.store.find_case(invite_code=code):
+                break
+        self.store.set_case(case_id, invite_code=code, owner_token=secrets.token_urlsafe(24),
+                            member_token=secrets.token_urlsafe(24))
+        member = self.store.add_member(case_id, inbound.sender, inbound.sender_name, role="owner")
+        self.store.set_member(member["member_id"], state={"step": "home_name"})
+        self.store.set_chat(inbound.chat_id, case_id, False)
+        return [Outbound(inbound.chat_id, INTRO)]
+
+    def _continue_onboarding(self, inbound: Inbound, member: dict, case: dict, text: str) -> list[Outbound]:
+        if member["state"]["step"] == "home_name":
+            name = re.sub(r"^(call it|it's|its)\s+", "", text, flags=re.I).strip(" .\"'") or "Our home"
+            if not re.match(r"(the|our|my)\b", name, re.I):
+                name = f"The {name}"
+            self.store.set_case(case["case_id"], name=name[:60])
+            self.store.set_member(member["member_id"], state={"step": "rooms"})
+            return [Outbound(inbound.chat_id, "Which rooms did it have? A rough list is fine.")]
+
+        rooms = split_rooms(text)
+        if rooms and not self.store.get_rooms(case["case_id"]):
+            self.store.set_rooms(case["case_id"], [{"room_id": f"fam-{n}", "label": re.sub(r" \d+$", "", r), "name": r}
+                                                   for n, r in enumerate(rooms, 1)], source="family")
+        self.store.set_case(case["case_id"], rooms_note=text[:300])
+        self.store.set_member(member["member_id"], state={})
+        case = self.store.get_case(case["case_id"])
+        short = re.sub(r"^The ", "", case["name"])
+        forward = (f"We're using Ashline to rebuild the {short} inventory. Text {case['invite_code']} to "
+                   f"{self.number}, then send any photos from inside the house, from any year.")
+        return [
+            Outbound(inbound.chat_id,
+                     f"Thank you. Your code is {case['invite_code']}. Make a group chat called \"{short}\", add family "
+                     f"who have photos, and have each of them text {case['invite_code']} to this number once. "
+                     "Or forward them the next message. You can also send me photos yourself, any time."),
+            Outbound(inbound.chat_id, forward),
+        ]
+
+    def _join_case(self, inbound: Inbound, code: str, member: dict | None) -> list[Outbound]:
+        case = self.store.find_case(invite_code=code)
+        if not case:
+            return [] if inbound.is_group else [Outbound(
+                inbound.chat_id, "I don't recognise that code. Check it with the person who sent it to you.")]
+        existing = self.store.get_member(inbound.sender, case["case_id"])
+        if not existing:
+            self.store.add_member(case["case_id"], inbound.sender, inbound.sender_name)
+        elif member and member["case_id"] != case["case_id"]:
+            pass                                           # also in another case: the code switches them over below
+        self.store.set_chat(inbound.chat_id, case["case_id"], inbound.is_group)
+        name = case.get("name") or "the home"
+        name = name[:1].lower() + name[1:] if name.startswith("The ") else name
+        if existing:
+            return [Outbound(inbound.chat_id, f"You're already part of {name}. Send photos whenever you like.")]
+        return [Outbound(inbound.chat_id,
+                         f"You've joined {name}. Send any photos from inside the house: holidays, birthdays, "
+                         "video calls, real estate listings, anything.")]
+
+    # --------------------------------------------------------- photo intake
+    def _intake(self, inbound: Inbound, member: dict, case: dict, now: datetime) -> list[Outbound]:
+        case_id = case["case_id"]
+        context = self._context(inbound.chat_id)
+        burst = context.get("burst") or {"member_id": member["member_id"], "photos": [], "acked": False}
+        folder = config.case_dir(case_id) / "photos"
+        folder.mkdir(parents=True, exist_ok=True)
+        saved = 0
+        for name, data in inbound.attachments:
+            photo = normalize_photo(data)
+            if photo is None:
+                continue                                    # not an image we can read: ignored quietly
+            number = self.store.next_photo_number(case_id)
+            photo_id = f"fam-{number}"
+            path = folder / f"{photo_id}.jpg"
+            photo["image"].save(path, quality=92)
+            self.store.add_photos(case_id, [{
+                "photo_id": photo_id, "path": str(path), "source": "photo", "number": number,
+                "taken": photo["taken"], "captured": photo["taken"], "status": "queued", "chat_id": inbound.chat_id,
+                "added_by": member.get("name") or inbound.sender_name or "family"}])
+            burst["photos"].append(photo_id)
+            saved += 1
+        if not saved:
+            return []
+        burst["last_at"] = now.isoformat()
+        out = []
+        if not burst["acked"]:                              # once per burst
+            burst["acked"] = True
+            out.append(Outbound(inbound.chat_id, "Got it, looking through them." if len(burst["photos"]) > 1 or saved > 1
+                                else "Got it, looking at it."))
+            if len(burst["photos"]) >= 500:
+                out[-1].text = ("That's a lot, thank you. I'll work through them and send a summary in about "
+                                "20 minutes.")
+        context["burst"] = burst
+        self._save(inbound.chat_id, context)
+        return out
+
+    def tick(self, now: datetime | None = None) -> list[Outbound]:
+        """Things that happen later. Call every few seconds."""
+        now = _now(now)
+        out: list[Outbound] = []
+        for case in self.store.list_cases():
+            for chat in self.store.get_chats(case["case_id"]):
+                context = self._context(chat["chat_id"])
+                burst = context.get("burst")
+                if burst and now - datetime.fromisoformat(burst["last_at"]) >= timedelta(seconds=self.batch_seconds):
+                    context.pop("burst")
+                    self._save(chat["chat_id"], context)
+                    out += self._digest(case, chat["chat_id"], burst, now)
+            for question in self.store.get_questions(case["case_id"]):
+                if question.get("expires_at") and question["expires_at"] <= now.isoformat():
+                    self.store.close_question(question["question_id"], "expired")     # both stay as suggestions
+            out += self._daily_review(case, now)
+        return out
+
+    def _digest(self, case: dict, chat_id: str, burst: dict, now: datetime) -> list[Outbound]:
+        case_id = case["case_id"]
+        photos = [self.store.get_photo(case_id, pid) for pid in burst["photos"]]
+        photos = [p for p in photos if p]
+        rooms = self._room_names(case_id)
+        sender = next((m for m in self.store.get_members(case_id) if m["member_id"] == burst["member_id"]), None)
+        who = (sender or {}).get("name") or "you"
+        get_detector = (lambda: self.detector) if self.detector else detect_mod.get_detector
+
+        new_ids, found = [], 0
+        for photo in photos:
+            try:
+                items = detect_cached(case_id, photo, None, get_detector=lambda: _RoomAware(get_detector(), rooms))
+            except detect_mod.DetectionError as exc:
+                self.store.set_photo(case_id, photo["photo_id"], status="failed")
+                return [Outbound(chat_id, f"I couldn't look through those just now ({exc}). I've kept them and will "
+                                          "try again when you send the next one.")]
+            room = next((i.get("room") for i in items if i.get("room")), None)
+            self.store.set_photo(case_id, photo["photo_id"], status="done", room_label=room)
+            photo = {**photo, "room_label": room}
+            for item in items:
+                new_ids.append(self.store.add_item(case_id, {**item, "room_label": room}, source="photo", photo=photo,
+                                                   added_by=photo.get("added_by")))
+            found += len(items)
+
+        if not found:
+            return [Outbound(chat_id, "Couldn't make out items in this one, that's fine." if len(photos) == 1
+                             else "Couldn't make out items in those, that's fine.")]
+
+        merged = merge_into_inventory(self.store, case_id, new_ids, self.grouper)
+        price_items(case_id, self.store, self.pricer)
+        lines = [self.store.get_item(case_id, i) for i in merged["new_lines"]]
+        lines.sort(key=lambda i: -((i.get("price_mid") or 0) * (i.get("qty") or 1)))
+
+        out: list[Outbound] = []
+        context = self._context(chat_id)
+        if len(photos) == 1:                                # one photo on its own: the annotated version
+            out.append(self._annotated(case_id, chat_id, photos[0], context,
+                                       extra=self._counts_line(len(lines), merged["merged"])))
+        else:
+            years = sorted({p["taken"][:4] for p in photos if p.get("taken")})
+            span = f" ({years[0]}–{years[-1]})" if len(years) > 1 else f" ({years[0]})" if years else ""
+            text = f"Got {len(photos)} photos from {who}{span}. Found {found} items, {len(lines)} new to the list."
+            if merged["merged"]:
+                text += f" Merged {merged['merged']} I'd already seen."
+            top = [f"{i['label']} ({money_range(i['price_low'], i['price_high'])})" for i in lines[:3] if i.get("price_mid")]
+            if top:
+                text += " Biggest finds: " + ", ".join(top) + "."
+            out.append(Outbound(chat_id, text))
+
+        heard = context.pop("heard", [])
+        if heard:                                           # never a quote, only the item
+            thing = heard[0]
+            self.store.add_question(case_id, "add", {"label": thing}, chat_id,
+                                    (now + timedelta(hours=QUESTION_HOURS)).isoformat(), now.isoformat())
+            out.append(Outbound(chat_id, f"I heard a {thing} mentioned. Add it to the list? Reply yes or no."))
+        elif merged["maybe"]:
+            out += self._ask_same(case_id, chat_id, merged["maybe"], now)
+
+        owner = self._owner(case_id)
+        link_for = sender or owner
+        if link_for and len(photos) > 1:
+            out[0].text += f" Full list: {self.link(case, link_for)}"
+        self._save(chat_id, context)
+        return out
+
+    @staticmethod
+    def _counts_line(new: int, merged: int) -> str:
+        text = f"{new} new to the list" if new else "nothing new to the list"
+        return text + (f", {merged} already on it." if merged else ".")
+
+    def _annotated(self, case_id: str, chat_id: str, photo: dict, context: dict, extra: str = "") -> Outbound:
+        """The original photo with numbered boxes, and a legend in the text."""
+        shown, boxes, entries = {}, [], []
+        detections = [i for i in self.store.get_items(case_id) if i["photo_id"] == photo["photo_id"]
+                      and i["status"] != "rejected" and i.get("bbox")]
+        new_canon = {i["item_id"] for i in detections if i["cluster_id"] in (None, i["item_id"])}
+        open_maybe = {q["payload"].get("b") for q in self.store.get_questions(case_id) if q["kind"] == "same"}
+        for n, item in enumerate(detections, 1):
+            canonical = item["cluster_id"] or item["item_id"]
+            status = "maybe" if canonical in open_maybe else "new" if item["item_id"] in new_canon else "listed"
+            boxes.append({"n": n, "bbox": item["bbox"], "status": status})
+            line = self.store.get_item(case_id, canonical) or item
+            entries.append({"n": n, "label": self._display(line) if status != "listed" else f"{line['label']} (already listed)"})
+            shown[str(n)] = canonical
+        out_path = config.case_dir(case_id) / "annotated" / f"{photo['photo_id']}.jpg"
+        annotate(photo["path"], boxes, out_path)
+        context["list"] = shown
+        text = legend(entries) if entries else "I couldn't make out items in this one."
+        if extra and entries:
+            text = f"Found {len(entries)} items, {extra} {text}"
+        return Outbound(chat_id, text, image=str(out_path))
+
+    def _ask_same(self, case_id: str, chat_id: str, pairs: list, now: datetime) -> list[Outbound]:
+        a, b = (self.store.get_item(case_id, i) for i in pairs[0])
+        photo_a, photo_b = (self.store.get_photo(case_id, i["photo_id"]) for i in (a, b))
+        if not (photo_a and photo_b):
+            return []
+        qid = self.store.add_question(case_id, "same", {"a": a["item_id"], "b": b["item_id"]}, chat_id,
+                                      (now + timedelta(hours=QUESTION_HOURS)).isoformat(), now.isoformat())
+        image = side_by_side(photo_a["path"], a["bbox"], photo_b["path"], b["bbox"],
+                             config.case_dir(case_id) / "questions" / f"same-{qid}.jpg")
+        noun = item_key(b["label"]) or "item"
+        more = f" ({len(pairs) - 1} more might be duplicates too.)" if len(pairs) > 1 else ""
+        return [Outbound(chat_id, f"Same {noun}? 1 = same, 2 = different.{more}", image=str(image))]
+
+    # ------------------------------------------------------- pending answers
+    def _answer_pending(self, inbound: Inbound, member: dict, case: dict, text: str):
+        case_id, low = case["case_id"], text.lower().strip(" .!")
+        state = member["state"]
+        if state.get("step") == "coverage" and member["role"] == "owner" and not inbound.is_group:
+            self.store.set_member(member["member_id"], state={k: v for k, v in state.items() if k != "step"})
+            if low in ("skip", "no", "not now", "later"):
+                self.store.set_case(case_id, coverage_skipped=1)
+                return [Outbound(inbound.chat_id, "That's fine. " + meter_line(meter(case_id, self.store)))]
+            limit = parse_money(text)
+            if limit and limit >= 1000:
+                self.store.set_case(case_id, coverage_limit=limit, coverage_skipped=0)
+                return [Outbound(inbound.chat_id, meter_line(meter(case_id, self.store)))]
+            return None
+        if state.get("step") == "delete" and not inbound.is_group:
+            self.store.set_member(member["member_id"], state={})
+            if low in ("yes", "delete", "yes delete", "yes, delete"):
+                self._delete(case_id)
+                return [Outbound(inbound.chat_id, "Everything for this case has been deleted: photos, items and messages.")]
+            return [Outbound(inbound.chat_id, "Okay, nothing was deleted.")]
+
+        questions = [q for q in self.store.get_questions(case_id, chat_id=inbound.chat_id)]
+        if not questions:
+            return None
+        yes = low in ("1", "same", "yes", "y", "yep", "yeah", "ok", "okay", "add it", "yes please")
+        no = low in ("2", "different", "no", "n", "nope", "not the same")
+        if not (yes or no):
+            return None
+        kinds = {q["kind"] for q in questions}
+        if len(questions) > 1 and low in ("yes", "no", "y", "n", "ok", "okay") and len(kinds) > 1:
+            names = [("the " + (item_key((self.store.get_item(case_id, q["payload"]["b"]) or {}).get("label", "")) or "item"))
+                     if q["kind"] == "same" else f"the {q['payload'].get('label', 'item')}" for q in questions[:2]]
+            return [Outbound(inbound.chat_id, f"{'Yes' if yes else 'No'} to {names[0]} or {names[1]}?")]
+        question = questions[0]
+        self.store.close_question(question["question_id"], "answered", "yes" if yes else "no")
+        if question["kind"] == "same":
+            a, b = question["payload"]["a"], question["payload"]["b"]
+            if yes:
+                moved = [s["item_id"] for s in self.store.get_sightings(case_id, b)]
+                for item_id in moved:
+                    self.store.update_item(case_id, item_id, cluster_id=a)
+                self.store.log_event(case_id, "merge", {"into": a, "from": b, "moved": moved}, member["member_id"])
+                return [Outbound(inbound.chat_id, "Thanks, counted once.")]
+            return [Outbound(inbound.chat_id, "Thanks, kept as two.")]
+        if question["kind"] == "add":
+            if yes:
+                item_id = self.store.add_item(case_id, {"label": question["payload"]["label"], "category": "other"},
+                                              source="voice", added_by=member.get("name"))
+                self.store.set_cluster(case_id, item_id, [item_id], 1)
+                price_items(case_id, self.store, self.pricer)
+                self.store.log_event(case_id, "add", {"item_id": item_id}, member["member_id"])
+                return [Outbound(inbound.chat_id, f"Added the {question['payload']['label']}, marked \"from memory\". "
+                                                  "A photo of it would make it stronger.")]
+            return [Outbound(inbound.chat_id, "Okay, left it off.")]
+        return None
+
+    # -------------------------------------------------------------- commands
+    def _command(self, inbound: Inbound, member: dict, case: dict, text: str, now: datetime):
+        case_id, low = case["case_id"], text.lower().strip(" .!?")
+        chat_id, owner = inbound.chat_id, member["role"] == "owner"
+
+        if low in ("help", "?", "what can you do"):
+            return [Outbound(chat_id, HELP)]
+        if low in ("pause", "not today", "stop", "not now") and not member["state"].get("memory"):
+            self.store.set_member(member["member_id"], paused=1)
+            return [Outbound(chat_id, "Okay. I'll stay quiet until you write again.")]
+        if low in ("list", "show me everything", "show everything", "the list", "link"):
+            return [Outbound(chat_id, f"Here is everything so far: {self.link(case, member)}")]
+        if re.fullmatch(r"(how much( so far)?|total|progress|how are we doing|where are we)", low):
+            m = meter(case_id, self.store)
+            out = [Outbound(chat_id, meter_line(m))]
+            if owner and not inbound.is_group and not m["limit"] and not case.get("coverage_skipped"):
+                self.store.set_member(member["member_id"], state={**member["state"], "step": "coverage"})
+                out.append(Outbound(chat_id, "If you tell me the contents coverage limit on the policy, I can show how "
+                                             "much is left to document. Or say skip."))
+            return out
+        match = re.fullmatch(r"show (?:me )?(?:photo|picture|pic)?\s*#?(\d+)", low)
+        if match:
+            photo = self.store.get_photo(case_id, number=int(match.group(1)))
+            if not photo:
+                return [Outbound(chat_id, f"I don't have a photo {match.group(1)}.")]
+            context = self._context(chat_id)
+            reply = self._annotated(case_id, chat_id, photo, context)
+            self._save(chat_id, context)
+            return [reply]
+        match = re.fullmatch(r"show (?:me )?(?:the )?(.+?)(?: ones| photos| pictures)?", low)
+        if match and match.group(1) not in ("everything", "me everything"):
+            wanted = match.group(1)
+            photos = [p for p in self.store.get_photos(case_id, source="photo")
+                      if wanted in (p.get("room_label") or "").lower()][:3]
+            if not photos:
+                return [Outbound(chat_id, f"I don't have photos of the {wanted} yet.")]
+            context, out = self._context(chat_id), []
+            for photo in photos:
+                out.append(self._annotated(case_id, chat_id, photo, context))
+            self._save(chat_id, context)
+            return out
+        if low in ("review", "what's new", "whats new"):
+            return self._review(case, chat_id, member, now) or [Outbound(chat_id, "Nothing new is waiting for your OK.")]
+        if low in ("ok", "okay", "ok add all", "add all", "looks good", "yes") and owner:
+            ids = [i for i in self._context(chat_id).get("review", [])]
+            if not ids:
+                return None
+            changed = [i for i in ids if (self.store.get_item(case_id, i) or {}).get("status") == "suggested"]
+            for item_id in changed:
+                self.store.set_item_status(case_id, item_id, "confirmed")
+            self.store.log_event(case_id, "confirm", {"items": changed}, member["member_id"])
+            context = self._context(chat_id)
+            context.pop("review", None)
+            self._save(chat_id, context)
+            return [Outbound(chat_id, f"Added {len(changed)} item{'s' if len(changed) != 1 else ''}. "
+                             + meter_line(meter(case_id, self.store)))]
+        match = (re.fullmatch(r"(?:remove|delete|drop)\s+#?(\d+)", low)
+                 or re.fullmatch(r"#?(\d+)\s+(?:isn't|isnt|is not|wasn't|wasnt|was not)\s+(?:ours|mine|hers|his)", low))
+        if match:
+            item_id = self._context(chat_id).get("list", {}).get(match.group(1))
+            item = self.store.get_item(case_id, item_id) if item_id else None
+            if not item:
+                return [Outbound(chat_id, f"I don't have a number {match.group(1)} in the last list I sent.")]
+            if not owner and item["status"] == "confirmed":
+                boss = (self._owner(case_id) or {}).get("name") or "the owner"
+                return [Outbound(chat_id, f"That one is already confirmed, so I'll leave it for {boss} to decide.")]
+            self.store.log_event(case_id, "remove", {"item_id": item_id, "status": item["status"]}, member["member_id"])
+            self.store.set_item_status(case_id, item_id, "rejected")
+            return [Outbound(chat_id, f"Removed the {item['label']}. Say undo if that was a mistake.")]
+        match = re.fullmatch(r"#?(\d+)\s+(?:is|was)\s+(?:an?\s+|the\s+)?(.+)", text.strip(" ."), flags=re.I)
+        if match:
+            item_id = self._context(chat_id).get("list", {}).get(match.group(1))
+            item = self.store.get_item(case_id, item_id) if item_id else None
+            if item:
+                self.store.log_event(case_id, "rename", {"item_id": item_id, "label": item["label"]}, member["member_id"])
+                self.store.update_item(case_id, item_id, label=match.group(2).strip()[:120], price_mid=None,
+                                       price_low=None, price_high=None, price_source=None)
+                price_items(case_id, self.store, self.pricer)
+                fresh = self.store.get_item(case_id, item_id)
+                return [Outbound(chat_id, f"Updated: {self._display(fresh)}.")]
+        if low == "undo":
+            done = self._undo(case_id)
+            return [Outbound(chat_id, done or "There's nothing to undo.")]
+        if low in ("export", "send the list", "send me the list", "download"):
+            if not owner:
+                boss = (self._owner(case_id) or {}).get("name") or "the owner"
+                return [Outbound(chat_id, f"Only {boss} can export. Here is the list: {self.link(case, member)}")]
+            from . import export as exporter
+            m = meter(case_id, self.store)
+            if not m["items"]:
+                return [Outbound(chat_id, "Nothing is confirmed yet, so there's nothing to export. Say review to see "
+                                          "what's waiting for your OK.")]
+            files = [str(exporter.export_pdf(case_id, self.store)), str(exporter.export_xlsx(case_id, self.store))]
+            return [Outbound(chat_id, f"Here are the PDF for the insurer and the spreadsheet: {m['items']} items, about "
+                                      f"{money(m['documented'])}. Estimates for planning, not legal or insurance "
+                                      "advice; confirm values with your adjuster.", files=files)]
+        if low in ("call me", "call", "let's talk", "lets talk"):
+            return self._memory_start(inbound, member, case)
+        if low in ("delete my case", "delete everything", "delete all") and owner and not inbound.is_group:
+            self.store.set_member(member["member_id"], state={"step": "delete"})
+            return [Outbound(chat_id, "This removes every photo, item and message for this case, for everyone. "
+                                      "Reply yes to delete, or anything else to keep it.")]
+        return None
+
+    def _undo(self, case_id: str) -> str | None:
+        event = self.store.last_event(case_id)
+        if not event:
+            return None
+        payload, action = event["payload"], event["action"]
+        if action == "confirm":
+            for item_id in payload["items"]:
+                self.store.set_item_status(case_id, item_id, "suggested")
+            text = f"Undone: those {len(payload['items'])} items are back to waiting for an OK."
+        elif action == "remove":
+            self.store.set_item_status(case_id, payload["item_id"], payload["status"])
+            text = "Undone: it's back on the list."
+        elif action == "rename":
+            self.store.update_item(case_id, payload["item_id"], label=payload["label"])
+            text = "Undone: the name is back to what it was."
+        elif action == "merge":
+            for item_id in payload["moved"]:
+                self.store.update_item(case_id, item_id, cluster_id=payload["from"])
+            text = "Undone: those are two separate items again."
+        elif action == "add":
+            self.store.set_item_status(case_id, payload["item_id"], "rejected")
+            text = "Undone: I've taken that off the list."
+        elif action.startswith("item."):                  # a change made on the inventory page
+            before = payload["before"]
+            self.store.update_item(case_id, payload["item_id"], **{k: before[k] for k in (
+                "label", "qty", "price_low", "price_mid", "price_high", "price_source")})
+            self.store.set_item_status(case_id, payload["item_id"], before["status"])
+            text = "Undone: that item is back to how it was."
+        else:
+            return None
+        self.store.mark_undone(event["event_id"])
+        return text
+
+    def _delete(self, case_id: str) -> None:
+        import shutil
+        shutil.rmtree(config.case_dir(case_id), ignore_errors=True)
+        self.store.delete_case(case_id)
+
+    # ---------------------------------------------------------------- review
+    def _review(self, case: dict, chat_id: str, member: dict, now: datetime) -> list[Outbound] | None:
+        """The owner's short review of what is waiting: 'Reply OK to add all, or tell me what's wrong.'"""
+        case_id = case["case_id"]
+        waiting = [i for i in self.store.get_items(case_id, status="suggested", canonical_only=True)]
+        fresh = [i for i in waiting if not i.get("reviewed")] or waiting
+        if not fresh:
+            return None
+        fresh.sort(key=lambda i: -((i.get("price_mid") or 0) * (i.get("qty") or 1)))
+        people = sorted({("the 3D scan" if i["added_by"] == "scan" else i["added_by"]) for i in fresh if i.get("added_by")})
+        total = sum((i.get("price_mid") or 0) * (i.get("qty") or 1) for i in fresh)
+        context = self._context(chat_id)
+        context["review"] = [i["item_id"] for i in fresh]
+        context["list"] = {str(n): i["item_id"] for n, i in enumerate(fresh, 1)}
+        self._save(chat_id, context)
+        for item in fresh:
+            self.store.update_item(case_id, item["item_id"], reviewed=1)
+        self.store.set_case(case_id, last_review_at=now.isoformat())
+        top = " · ".join(f"{n} {i['label']}" for n, i in enumerate(fresh[:5], 1))
+        more = f" · and {len(fresh) - 5} more" if len(fresh) > 5 else ""
+        text = (f"{len(fresh)} new item{'s' if len(fresh) != 1 else ''}"
+                + (f" from {_join(people)}" if people else "") + (f", about {money(total)}" if total else "")
+                + f". Reply OK to add all, or tell me what's wrong (\"remove 4\"). {top}{more}. "
+                + f"See them: {self.link(case, member)}")
+        return [Outbound(chat_id, text)]
+
+    def _daily_review(self, case: dict, now: datetime) -> list[Outbound]:
+        owner = self._owner(case["case_id"])
+        if not owner or owner.get("paused") or now.hour != int(case.get("review_hour") or 18):
+            return []
+        if (case.get("last_review_at") or "")[:10] == now.isoformat()[:10]:
+            return []                                       # once a day; an unanswered one rolls into tomorrow's
+        chat = next((c for c in self.store.get_chats(case["case_id"]) if not c["is_group"]
+                     and c["chat_id"] == owner["phone"]), None)
+        chat_id = chat["chat_id"] if chat else owner["phone"]
+        if not self.store.get_chat(chat_id):
+            self.store.set_chat(chat_id, case["case_id"], False)
+        return self._review(case, chat_id, owner, now) or []
+
+    # ------------------------------------------------- memory "call" by text
+    def _memory_start(self, inbound: Inbound, member: dict, case: dict) -> list[Outbound]:
+        queue = [q for q in gap_questions(case["case_id"], self.store) if q["kind"] != "yard"][:MEMORY_QUESTIONS]
+        intro = "I can't call from this number yet, so let's do it here, one question at a time. Say stop whenever."
+        if not queue:
+            return [Outbound(inbound.chat_id, intro + " What's one thing you remember that no photo would show?")] \
+                if self._begin_memory(member, [{"text": "", "kind": "open"}]) else []
+        self._begin_memory(member, queue)
+        return [Outbound(inbound.chat_id, intro), Outbound(inbound.chat_id, queue[0]["text"])]
+
+    def _begin_memory(self, member: dict, queue: list[dict]) -> bool:
+        self.store.set_member(member["member_id"], state={"memory": {
+            "queue": [q["text"] for q in queue], "at": 0, "added": []}})
+        return True
+
+    def _memory_answer(self, inbound: Inbound, member: dict, case: dict, text: str):
+        memory = member["state"].get("memory")
+        if not memory or inbound.is_group:
+            return None
+        case_id, low = case["case_id"], text.lower().strip(" .!")
+        ended = low in ("stop", "that's enough", "thats enough", "enough", "done", "i don't want to talk about that",
+                        "not today", "no more")
+        if not ended and low not in ("skip", "nothing", "no", "i don't remember", "not sure"):
+            for label, qty in extract_things(text):
+                item_id = self.store.add_item(case_id, {"label": label, "category": "other", "qty": qty,
+                                                        "detail": "From memory"}, source="voice",
+                                              added_by=member.get("name"))
+                self.store.set_cluster(case_id, item_id, [item_id], qty)
+                memory["added"].append(item_id)
+        memory["at"] += 1
+        if ended or memory["at"] >= len(memory["queue"]):
+            self.store.set_member(member["member_id"], state={})
+            if not memory["added"]:
+                return [Outbound(inbound.chat_id, "That's fine. Thank you for trying. We can pick it up another day.")]
+            price_items(case_id, self.store, self.pricer)
+            items = [self.store.get_item(case_id, i) for i in memory["added"]]
+            total = sum((i.get("price_mid") or 0) * (i.get("qty") or 1) for i in items)
+            context = self._context(inbound.chat_id)
+            context["review"] = [i["item_id"] for i in items]
+            context["list"] = {str(n): i["item_id"] for n, i in enumerate(items, 1)}
+            self._save(inbound.chat_id, context)
+            names = " · ".join(f"{n} {i['label']}" for n, i in enumerate(items[:6], 1))
+            return [Outbound(inbound.chat_id,
+                             f"That was really helpful. From our chat: {len(items)} item{'s' if len(items) != 1 else ''}, "
+                             f"about {money(total)}. They're marked \"from memory\". If anyone has photos of them, "
+                             f"they'd make these stronger. {names}. Reply OK to add them, or tell me what's wrong.")]
+        self.store.set_member(member["member_id"], state={"memory": memory})
+        return [Outbound(inbound.chat_id, memory["queue"][memory["at"]])]
+
+    # ------------------------------------------------------------ listening
+    def _listen(self, chat_id: str, text: str) -> None:
+        """Family talking to each other. Note a belonging if one is clearly mentioned; say nothing."""
+        low = text.lower()
+        if not OWNERSHIP.search(low):
+            return
+        thing = next((w for w in sorted(HEARD_WORDS, key=len, reverse=True) if re.search(rf"\b{re.escape(w)}\b", low)), None)
+        if not thing:
+            return
+        context = self._context(chat_id)
+        heard = context.get("heard", [])
+        if thing not in heard:
+            context["heard"] = heard + [thing]              # the item only, never the sentence
+            self._save(chat_id, context)
+
+
+class _RoomAware:
+    """Passes the home's room names to detectors that can use them."""
+
+    def __init__(self, detector, rooms: list[str]):
+        self.detector, self.rooms = detector, rooms
+
+    def detect(self, path, room_hint=None):
+        try:
+            return self.detector.detect(path, room_hint, rooms=self.rooms)
+        except TypeError:                                   # a detector without room support
+            return self.detector.detect(path, room_hint)
+
+
+def normalize_photo(data: bytes) -> dict | None:
+    """Bytes as received -> upright RGB image and the date it was taken (build spec 6.2)."""
+    try:
+        try:
+            import pillow_heif                              # iPhone photos arrive as HEIC
+            pillow_heif.register_heif_opener()
+        except ImportError:
+            pass
+        image = Image.open(io.BytesIO(data))
+        taken = None
+        try:
+            exif = image.getexif()
+            raw = exif.get_ifd(0x8769).get(0x9003) or exif.get(0x0132)       # DateTimeOriginal, DateTime
+            if raw:
+                taken = str(raw)[:10].replace(":", "-")
+        except Exception:
+            taken = None
+        image = ImageOps.exif_transpose(image).convert("RGB")
+        image.thumbnail((4096, 4096))
+        return {"image": image, "taken": taken}
+    except Exception:
+        return None
+
+
+QUANTITY = {"a": 1, "an": 1, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "couple": 2,
+            "a couple of": 2, "pair of": 2, "few": 3, "a few": 3}
+
+
+def extract_things(text: str) -> list[tuple[str, int]]:
+    """'a table saw, two bikes and a bunch of tools' -> [('table saw', 1), ('bikes', 2), ('tools, assorted', 1)].
+
+    A plain splitter: good enough for a text conversation, and it never invents an item. Vague
+    answers become one group item rather than many lines.
+    """
+    text = re.sub(r"^(yes|yeah|yep|oh|um|well|there was|there were|we had|i had|i think|also|and)\b[,\s]*", "",
+                  text.strip(), flags=re.I)
+    things = []
+    for part in re.split(r",|;|\band\b|\bplus\b|\n", text):
+        part = part.strip(" .!").lower()
+        part = re.sub(r"^(there was|there were|we had|i had|also|maybe|probably|i think)\s+", "", part)
+        if not part or len(part) > 80 or part in ("yes", "no", "that's it", "thats it"):
+            continue
+        qty = 1
+        match = re.match(r"(\d+|a couple of|a few|pair of|couple|few|two|three|four|five|six|one|an|a)\s+(.+)", part)
+        if match:
+            qty = QUANTITY.get(match.group(1)) or int(match.group(1))
+            part = match.group(2)
+        group = re.match(r"(?:a\s+)?(?:bunch|lot|lots|pile|box|boxes|set|collection|some|all kinds)\s+of\s+(.+)", part) \
+            or re.match(r"(?:some|assorted|various|all the|all our|my|our)\s+(.+)", part)
+        if group:
+            things.append((f"{group.group(1).strip()}, assorted", 1))
+        elif part:
+            things.append((part, min(qty, 50)))
+    return things[:12]

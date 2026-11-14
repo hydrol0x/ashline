@@ -313,3 +313,62 @@ def _complete(groups, count: int) -> list[tuple[list[int], int | None]]:
             out.append((clean, best))
     out.extend(([i], None) for i in range(count) if i not in seen)      # anything left out stays its own line
     return out
+
+
+def merge_into_inventory(store, case_id: str, new_ids: list[int], grouper=None) -> dict:
+    """Fold a batch of new photo detections into the case's existing inventory lines.
+
+    Works room by room. Each existing line counts as one object from its own
+    viewpoint, each new detection as an object seen from its photo. A new
+    detection that matches an existing line becomes another sighting of it; the
+    rest form new lines. Returns {new_lines, merged, maybe}: `maybe` are pairs
+    (existing line, new line) about the same kind of thing that were not merged,
+    for a "same item?" question to the family.
+    """
+    new_ids = set(new_ids)
+    everything = [i for i in store.get_items(case_id) if i["status"] != "rejected"]
+    new = [i for i in everything if i["item_id"] in new_ids]
+    existing = [i for i in everything if i["item_id"] not in new_ids
+                and (i["cluster_id"] in (None, i["item_id"]))]
+
+    def bucket(item: dict) -> str:
+        return (item.get("room_label") or "").strip().lower()
+
+    result = {"new_lines": [], "merged": 0, "maybe": []}
+    for room in sorted({bucket(i) for i in new}):
+        lines = [i for i in existing if bucket(i) == room]
+        fresh = [i for i in new if bucket(i) == room]
+        objects = [{"members": [i], "best": i, "label": i["label"], "category": i.get("category"),
+                    "room_id": room, "room_label": i.get("room_label"), "pano": f"line-{i['item_id']}", "line": True}
+                   for i in lines]
+        objects += [{"members": [i], "best": i, "label": i["label"], "category": i.get("category"),
+                     "room_id": room, "room_label": i.get("room_label"), "pano": i["photo_id"], "line": False}
+                    for i in fresh]
+        groups = grouper(fresh[0].get("room_label"), objects) if grouper else group_by_rules(objects)
+        for indices, _best_index in _complete(groups, len(objects)):
+            old = [objects[i]["best"] for i in indices if objects[i]["line"]]
+            added = [objects[i]["best"] for i in indices if not objects[i]["line"]]
+            if not added:
+                continue
+            per_photo: dict = {}
+            for item in added:
+                per_photo[item["photo_id"]] = per_photo.get(item["photo_id"], 0) + 1
+            seen_at_once = max(per_photo.values())
+            if old:
+                target = max(old, key=lambda i: (i["status"] == "confirmed", i.get("price_mid") or 0))
+                for item in added:
+                    store.update_item(case_id, item["item_id"], cluster_id=target["item_id"])
+                if seen_at_once > (target.get("qty") or 1):
+                    store.update_item(case_id, target["item_id"], qty=seen_at_once)
+                result["merged"] += len(added)
+            else:
+                canonical = _best(added)
+                store.set_cluster(case_id, canonical["item_id"], [i["item_id"] for i in added], seen_at_once)
+                result["new_lines"].append(canonical["item_id"])
+                # Same kind of thing already listed in this room, but not confidently the same object.
+                key = item_key(canonical["label"])
+                twin = next((i for i in lines if key and item_key(i["label"]) == key
+                             and i.get("photo_id") and canonical.get("photo_id")), None)
+                if twin and len(result["maybe"]) < 3:
+                    result["maybe"].append((twin["item_id"], canonical["item_id"]))
+    return result

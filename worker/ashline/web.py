@@ -1,0 +1,268 @@
+"""The inventory page and the worker's HTTP endpoints (UX doc section 8, build spec 6.1).
+
+    uvicorn ashline.web:app --port 8000
+
+- `GET /p/<token>`: the family's private page. The link is long and unguessable; there is no
+  login. The owner's link shows export and remove; a member's link does not.
+- The page is rendered from the case store on every request, so it is always live.
+"""
+from __future__ import annotations
+
+import hashlib
+import io
+from datetime import datetime, timezone
+from pathlib import Path
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import HTMLResponse, JSONResponse, Response
+from jinja2 import Environment, FileSystemLoader, select_autoescape
+
+from . import config
+from .annotate import annotate, crop_item
+from .meter import DISCLAIMER, meter
+from .pricing import load_calibration, money, money_range
+from .store import Store
+
+TEMPLATES = Environment(loader=FileSystemLoader(Path(__file__).parent / "templates"),
+                        autoescape=select_autoescape(["html"]))
+MEMORY_SOURCES = ("voice",)
+SOURCE_NAMES = {"photo": "family photo", "scan": "3D scan", "aerial": "aerial image", "voice": "from memory",
+                "receipt": "receipt"}
+
+
+def _ago(stamp: str | None, now: datetime | None = None) -> str:
+    if not stamp:
+        return "just now"
+    try:
+        then = datetime.fromisoformat(stamp)
+    except ValueError:
+        return "recently"
+    seconds = ((now or datetime.now(timezone.utc)) - then).total_seconds()
+    if seconds < 90:
+        return "just now"
+    if seconds < 3600:
+        return f"{int(seconds // 60)} min ago"
+    if seconds < 86400:
+        hours = int(seconds // 3600)
+        return f"{hours} hour{'s' if hours != 1 else ''} ago"
+    days = int(seconds // 86400)
+    return f"{days} day{'s' if days != 1 else ''} ago"
+
+
+def _title(label: str) -> str:
+    return label[:1].upper() + label[1:] if label else ""
+
+
+def item_view(item: dict, sightings: list[dict]) -> dict:
+    """What a card shows for one inventory line."""
+    sources = [s["source"] for s in sightings]
+    photo_like = sum(1 for s in sources if s in ("photo", "scan", "aerial"))
+    qty = int(item.get("qty") or 1)
+    low, high, mid = item.get("price_low"), item.get("price_high"), item.get("price_mid")
+    price = money_range(low, high) if mid else ""
+    contributors = sorted({("3D scan" if s["added_by"] == "scan" else s["added_by"])
+                           for s in sightings if s.get("added_by")})
+    return {
+        "id": item["item_id"],
+        "title": _title(item["label"]),
+        "room": item.get("room_label") or "Unsorted",
+        "category": item.get("category") or "other",
+        "detail": item.get("detail") or "",
+        "brand": item.get("brand_guess") or "",
+        "qty": qty,
+        "price": (f"{qty} × {price}" if qty > 1 and price else price),
+        "value": float(mid or 0) * qty,
+        "status": item["status"],
+        "memory_only": bool(sources) and all(s in MEMORY_SOURCES for s in sources),
+        "has_photo": any(s.get("photo_id") and s.get("bbox") for s in sightings),
+        "badges": {"photo": photo_like, "memory": sources.count("voice"), "receipt": sources.count("receipt")},
+        "contributors": contributors,
+        "created": item.get("created_at") or "",
+        "needs_proof": photo_like == 0 and sources.count("receipt") == 0,
+    }
+
+
+def page_data(case_id: str, store: Store, role: str) -> dict:
+    case = store.get_case(case_id) or {}
+    everything = store.get_items(case_id)
+    by_canonical: dict[int, list[dict]] = {}
+    for row in everything:
+        by_canonical.setdefault(row["cluster_id"] or row["item_id"], []).append(row)
+    items = []
+    for row in everything:
+        if (row["cluster_id"] or row["item_id"]) != row["item_id"] or row["status"] == "rejected":
+            continue
+        items.append(item_view(row, by_canonical[row["item_id"]]))
+    items.sort(key=lambda i: -i["value"])
+
+    rooms: dict[str, int] = {}
+    for item in items:
+        rooms[item["room"]] = rooms.get(item["room"], 0) + 1
+    m = meter(case_id, store)
+    scale = max(m["target"] or 0, m["documented"] + m["pending"], 1)
+    members = store.get_members(case_id)
+    latest = max([i["created"] for i in items] + [case.get("created_at") or ""], default="")
+    return {
+        "case": case,
+        "name": case.get("name") or "Your home",
+        "role": role,
+        "items": items,
+        "confirmed": sum(1 for i in items if i["status"] == "confirmed"),
+        "rooms": sorted(rooms.items(), key=lambda kv: -kv[1]),
+        "meter": m,
+        "money": money,
+        "bar": {"backed": 100 * m["backed"] / scale, "memory": 100 * m["memory"] / scale,
+                "pending": 100 * m["pending"] / scale},
+        "updated": _ago(latest),
+        "members": len(members),
+        "calibrated": load_calibration()["calibrated"],
+        "disclaimer": DISCLAIMER,
+    }
+
+
+def create_app(store_factory=Store) -> FastAPI:
+    app = FastAPI(title="Ashline", docs_url=None, redoc_url=None)
+
+    def resolve(token: str) -> tuple[Store, dict, str]:
+        """The case a page link belongs to, and whether it is the owner's link."""
+        store = store_factory()
+        for key, role in (("owner_token", "owner"), ("member_token", "member")):
+            case = store.find_case(**{key: token})
+            if case:
+                return store, case, role
+        raise HTTPException(status_code=404, detail="This link is not valid.")
+
+    def owned_item(store: Store, case: dict, item_id: int) -> dict:
+        item = store.get_item(case["case_id"], item_id)
+        if not item:
+            raise HTTPException(status_code=404)
+        return item
+
+    @app.get("/healthz")
+    def healthz():
+        return {"ok": True}
+
+    @app.get("/p/{token}", response_class=HTMLResponse)
+    def page(token: str):
+        store, case, role = resolve(token)
+        data = page_data(case["case_id"], store, role)
+        return TEMPLATES.get_template("inventory.html").render(token=token, **data)
+
+    @app.get("/p/{token}/crop/{item_id}.jpg")
+    def crop(token: str, item_id: int):
+        store, case, _ = resolve(token)
+        item = owned_item(store, case, item_id)
+        photo = store.get_photo(case["case_id"], item["photo_id"]) if item.get("photo_id") else None
+        if not photo:
+            raise HTTPException(status_code=404)
+        key = hashlib.sha1(f"{photo['path']}|{item['bbox']}".encode()).hexdigest()[:12]
+        cached = config.case_dir(case["case_id"]) / "crops" / f"{key}.jpg"
+        if not cached.exists():
+            cached.parent.mkdir(parents=True, exist_ok=True)
+            crop_item(photo["path"], item["bbox"]).save(cached, quality=85)
+        return Response(cached.read_bytes(), media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
+
+    @app.get("/p/{token}/sighting/{item_id}.jpg")
+    def sighting(token: str, item_id: int):
+        """The full original photo with this one item's box drawn on it."""
+        store, case, _ = resolve(token)
+        item = owned_item(store, case, item_id)
+        photo = store.get_photo(case["case_id"], item["photo_id"]) if item.get("photo_id") else None
+        if not photo:
+            raise HTTPException(status_code=404)
+        buf = io.BytesIO()
+        annotate(photo["path"], [{"n": 1, "bbox": item["bbox"], "status": "new"}], max_side=1400).save(
+            buf, format="JPEG", quality=85)
+        return Response(buf.getvalue(), media_type="image/jpeg", headers={"Cache-Control": "private, max-age=600"})
+
+    @app.get("/p/{token}/item/{item_id}.json")
+    def item_detail(token: str, item_id: int):
+        store, case, role = resolve(token)
+        item = owned_item(store, case, item_id)
+        sightings = store.get_sightings(case["case_id"], item_id)
+        view = item_view(item, sightings)
+        calibrated = load_calibration()["calibrated"]
+        basis = {"set by family": "Price set by the family.",
+                 "category default": "A rough figure for this kind of item. Set the price if you know it."}.get(
+            item.get("price_source") or "", "Estimate of buying it new today, at a typical mid-range price.")
+        if item.get("price_mid") and item.get("price_source") != "set by family":
+            basis += (" The range covers 90% of similar items in our test set." if calibrated
+                      else " The range is a rough allowance for uncertainty.")
+        return JSONResponse({
+            **view, "label": item["label"], "price_basis": basis,
+            "price_mid": item.get("price_mid"), "editable": role == "owner",
+            "sightings": [{
+                "id": s["item_id"], "source": SOURCE_NAMES.get(s["source"], s["source"]),
+                "by": "3D scan" if s.get("added_by") == "scan" else s.get("added_by"),
+                "date": s.get("evidence_date"), "label": s["label"],
+                "image": f"/p/{token}/sighting/{s['item_id']}.jpg" if s.get("photo_id") and s.get("bbox") else None,
+            } for s in sightings],
+        })
+
+    @app.post("/p/{token}/item/{item_id}")
+    async def item_action(token: str, item_id: int, request: Request):
+        store, case, role = resolve(token)
+        if role != "owner":
+            raise HTTPException(status_code=403, detail="Only the case owner can change items.")
+        item = owned_item(store, case, item_id)
+        body = await request.json()
+        action, case_id = body.get("action"), case["case_id"]
+        before = {k: item.get(k) for k in ("status", "label", "qty", "price_low", "price_mid", "price_high", "price_source")}
+        if action in ("confirm", "remove", "restore"):
+            status = {"confirm": "confirmed", "remove": "rejected", "restore": "suggested"}[action]
+            store.set_item_status(case_id, item_id, status)
+        elif action == "rename" and str(body.get("value") or "").strip():
+            store.update_item(case_id, item_id, label=str(body["value"]).strip()[:120])
+        elif action == "qty":
+            store.update_item(case_id, item_id, qty=max(1, min(999, int(body.get("value") or 1))))
+        elif action == "price":
+            value = float(body.get("value") or 0)
+            if value <= 0:
+                raise HTTPException(status_code=400, detail="Give a price above zero.")
+            store.update_item(case_id, item_id, price_low=value, price_mid=value, price_high=value,
+                              price_source="set by family")
+        else:
+            raise HTTPException(status_code=400, detail="Unknown action.")
+        store.log_event(case_id, f"item.{action}", {"item_id": item_id, "before": before})
+        return {"ok": True}
+
+    @app.post("/p/{token}/coverage")
+    async def coverage(token: str, request: Request):
+        store, case, role = resolve(token)
+        if role != "owner":
+            raise HTTPException(status_code=403, detail="Only the case owner can set this.")
+        body = await request.json()
+        if body.get("skip"):
+            store.set_case(case["case_id"], coverage_skipped=1)
+        else:
+            limit = float(str(body.get("limit") or "0").replace(",", "").replace("$", "") or 0)
+            if limit <= 0:
+                raise HTTPException(status_code=400, detail="Give the contents coverage limit in dollars.")
+            store.set_case(case["case_id"], coverage_limit=limit, coverage_skipped=0)
+            if body.get("loss_date"):
+                store.set_case(case["case_id"], loss_date=str(body["loss_date"])[:10])
+        return {"ok": True}
+
+    @app.get("/p/{token}/export.{kind}")
+    def export(token: str, kind: str):
+        store, case, role = resolve(token)
+        if role != "owner":
+            raise HTTPException(status_code=403, detail="Only the case owner can export.")
+        from . import export as exporter
+        name = (case.get("name") or "inventory").replace(" ", "-").lower()
+        if kind == "csv":
+            return Response(exporter.export_csv(case["case_id"], store).read_bytes(), media_type="text/csv",
+                            headers={"Content-Disposition": f'attachment; filename="{name}.csv"'})
+        if kind == "xlsx":
+            return Response(exporter.export_xlsx(case["case_id"], store).read_bytes(),
+                            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'})
+        if kind == "pdf":
+            return Response(exporter.export_pdf(case["case_id"], store).read_bytes(), media_type="application/pdf",
+                            headers={"Content-Disposition": f'attachment; filename="{name}.pdf"'})
+        raise HTTPException(status_code=404)
+
+    return app
+
+
+app = create_app()

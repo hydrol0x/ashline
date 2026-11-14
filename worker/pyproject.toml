@@ -7,13 +7,18 @@ dependencies = [
     "requests>=2.31",
     "pillow>=10",
     "shapely>=2.0",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "jinja2>=3.1",
+    "reportlab>=4.0",
+    "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]
 agent = ["deepagents>=0.7", "langchain-anthropic>=1.0", "langchain-openai>=0.3"]
 claude = ["anthropic>=1.0"]
 local-vision = ["torch>=2.2", "transformers>=5.0"]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "httpx>=0.27"]
 
 [project.scripts]
 ashline = "ashline.cli:main"
@@ -24,6 +29,9 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["ashline*"]
+
+[tool.setuptools.package-data]
+ashline = ["templates/*.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

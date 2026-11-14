@@ -48,6 +48,23 @@ appliances) becomes questions. Without the kit that step is skipped.
 `seed` is safe to run again: scan photos, detections and aerial results are cached per case, and
 answers the family already gave are kept. Run it once before the demo to precompute the demo home.
 
+## Inventory page
+
+```bash
+cd worker && uvicorn ashline.web:app --port 8000
+```
+
+Each case has two long, unguessable links and no login: `/p/<owner_token>` for the survivor (confirm,
+fix, remove, export) and `/p/<member_token>` for relatives (view only). The page is rendered from the
+case store on every request, so it is always current. It shows the meter (how much of what SB 495
+still requires is documented, split into evidence-backed, from memory and waiting for an OK), room
+filters, an item grid with the crop from the original photo, and a detail sheet with every sighting
+of the item. The owner can download the spreadsheet (XLSX or CSV) and the PDF for the insurer.
+
+Prices are replacement-cost estimates with a range (`pricing.py`). The range comes from
+`eval/calibration.json` once that has been measured; until then it is labelled a rough allowance
+and no coverage is claimed.
+
 ## Tools
 
 | Tool | Module | What it does |

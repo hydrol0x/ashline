@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{{ name }} · Ashline</title>
+<style>
+  :root {
+    --bg: #FAF7F2; --card: #FFFFFF; --ink: #2A2826; --muted: #7C766D; --line: #E8E1D6;
+    --accent: #1F6F6B; --accent-soft: #9CC5C0; --pending: #DCD5C9;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; }
+  main { max-width: 1120px; margin: 0 auto; padding: 20px 16px 120px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 4px 0 2px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 18px; }
+  button, input, select { font: inherit; color: inherit; }
+
+  .meter { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 18px 16px; margin-bottom: 18px; }
+  .meter .figure { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
+  .meter .figure small { font-size: 15px; font-weight: 400; color: var(--muted); letter-spacing: 0; }
+  .bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: #F0EBE2; margin: 12px 0 10px; }
+  .bar span { display: block; height: 100%; }
+  .bar .backed { background: var(--accent); }
+  .bar .memory { background: var(--accent-soft); }
+  .bar .pending { background: repeating-linear-gradient(135deg, var(--pending) 0 5px, #EEE8DE 5px 10px); }
+  .key { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--muted); }
+  .key i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: baseline; }
+  .key b { color: var(--ink); font-weight: 600; }
+  .due { margin-top: 10px; font-size: 13px; color: var(--muted); }
+  .ask { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 13.5px; }
+  .ask form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
+  .ask input[type=text] { flex: 1 1 150px; min-width: 0; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+  .btn { padding: 9px 14px; border-radius: 10px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+  .btn.quiet { background: transparent; color: var(--muted); border-color: var(--line); }
+
+  .chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 10px; margin: 0 -16px; padding-left: 16px; padding-right: 16px; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip { flex: none; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--card);
+          font-size: 13px; cursor: pointer; white-space: nowrap; }
+  .chip span { color: var(--muted); margin-left: 4px; }
+  .chip[aria-pressed=true] { background: var(--ink); border-color: var(--ink); color: #fff; }
+  .chip[aria-pressed=true] span { color: #D8D2C8; }
+  .tools { display: flex; justify-content: space-between; align-items: center; margin: 2px 0 12px; font-size: 13px; color: var(--muted); }
+  .tools select { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 5px 8px; }
+
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  @media (min-width: 640px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; } }
+  @media (min-width: 920px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } main { padding-top: 32px; } h1 { font-size: 26px; } }
+  .item { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; cursor: pointer;
+          display: flex; flex-direction: column; text-align: left; padding: 0; width: 100%; }
+  .item[hidden] { display: none; }
+  .item.suggested { border: 1.5px dashed #CDC4B5; }
+  .item .shot { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: #F1ECE3; display: flex; align-items: center; justify-content: center; flex: none; }
+  .item .shot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+  .item .shot .mem { font-size: 12px; color: var(--muted); border: 1px solid var(--line); background: var(--card); padding: 5px 10px; border-radius: 999px; }
+  .item .body { padding: 10px 11px 11px; }
+  .item .name { font-size: 13.5px; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .item .line { font-size: 12px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .price { font-size: 13px; margin-top: 6px; }
+  .item .foot { font-size: 11.5px; color: var(--muted); margin-top: 5px; display: flex; justify-content: space-between; gap: 8px; }
+  .item .foot span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .empty { color: var(--muted); text-align: center; padding: 48px 12px; }
+
+  .footer { position: fixed; left: 0; right: 0; bottom: 0; background: rgba(250, 247, 242, 0.96); backdrop-filter: blur(6px);
+            border-top: 1px solid var(--line); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); }
+  .footer div { max-width: 1120px; margin: 0 auto; display: flex; gap: 10px; }
+  .footer a { flex: 1; text-align: center; text-decoration: none; padding: 11px 10px; border-radius: 12px; font-size: 14px; white-space: nowrap; }
+  .footer .wide { display: none; }
+  @media (min-width: 520px) { .footer .wide { display: inline; } .footer .narrow { display: none; } }
+  .footer a.sheet { border: 1px solid var(--line); color: var(--ink); background: var(--card); }
+  .footer a.pdf { background: var(--accent); color: #fff; border: 1px solid var(--accent); }
+  .note { color: var(--muted); font-size: 11.5px; margin: 28px 0 0; text-align: center; }
+
+  dialog { border: 0; padding: 0; width: min(560px, 100vw); max-width: 100vw; max-height: 92vh; border-radius: 18px 18px 0 0;
+           margin: auto auto 0; background: var(--card); color: var(--ink); }
+  @media (min-width: 640px) { dialog { border-radius: 18px; margin: auto; } }
+  dialog::backdrop { background: rgba(42, 40, 38, 0.45); }
+  .sightings { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; background: #1E1D1B; }
+  .sightings figure { flex: 0 0 100%; margin: 0; scroll-snap-align: center; position: relative; }
+  .sightings img { width: 100%; max-height: 46vh; object-fit: contain; display: block; }
+  .sightings figcaption { position: absolute; left: 10px; bottom: 8px; font-size: 11.5px; color: #fff; background: rgba(0,0,0,.5); padding: 3px 8px; border-radius: 999px; }
+  .sightings .quote { color: #EDE7DD; padding: 26px 20px; font-size: 14px; }
+  .sheet { padding: 16px 18px 18px; }
+  .sheet h2 { font-size: 18px; margin: 0 0 2px; }
+  .sheet p { margin: 6px 0; font-size: 13.5px; }
+  .sheet .muted { color: var(--muted); }
+  .sheet .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+  .sheet .row .btn { flex: 1 1 auto; }
+  .close { position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border-radius: 16px; border: 0; background: rgba(0,0,0,.45); color: #fff; font-size: 16px; cursor: pointer; z-index: 2; }
+</style>
+</head>
+<body>
+<main>
+  <h1>{{ name }} · {{ items|length }} item{{ '' if items|length == 1 else 's' }}</h1>
+  <p class="sub">Updated {{ updated }}{% if members %} · {{ members }} family member{{ '' if members == 1 else 's' }} contributing{% endif %}</p>
+
+  <section class="meter" aria-label="Progress">
+    {% if meter.target %}
+      <div class="figure">{{ money(meter.documented) }} <small>of {{ money(meter.target) }} documented</small></div>
+    {% else %}
+      <div class="figure">{{ money(meter.documented) }} <small>documented · {{ confirmed }} item{{ '' if confirmed == 1 else 's' }}</small></div>
+    {% endif %}
+    <div class="bar" role="img" aria-label="{{ money(meter.backed) }} backed by photos or receipts, {{ money(meter.memory) }} from memory, {{ money(meter.pending) }} waiting for an OK">
+      <span class="backed" style="width: {{ '%.2f'|format(bar.backed) }}%"></span>
+      <span class="memory" style="width: {{ '%.2f'|format(bar.memory) }}%"></span>
+      <span class="pending" style="width: {{ '%.2f'|format(bar.pending) }}%"></span>
+    </div>
+    <div class="key">
+      <span><i style="background: var(--accent)"></i><b>{{ money(meter.backed) }}</b> with a photo or receipt</span>
+      {% if meter.memory %}<span><i style="background: var(--accent-soft)"></i><b>{{ money(meter.memory) }}</b> from memory</span>{% endif %}
+      {% if meter.pending %}<span><i style="background: var(--pending)"></i><b>{{ money(meter.pending) }}</b> waiting for an OK ({{ meter.pending_items }})</span>{% endif %}
+    </div>
+    {% if meter.days_left is not none %}<div class="due">Proof of loss due in {{ meter.days_left }} day{{ '' if meter.days_left == 1 else 's' }}</div>{% endif %}
+    {% if not meter.limit and not case.coverage_skipped and role == 'owner' %}
+      <div class="ask">
+        What is the contents coverage limit on the policy? It shows how much there is left to document. You can skip this.
+        <form id="coverage">
+          <input type="text" name="limit" inputmode="numeric" placeholder="e.g. 400,000" aria-label="Contents coverage limit in dollars">
+          <button class="btn" type="submit">Save</button>
+          <button class="btn quiet" type="button" id="skip">Skip</button>
+        </form>
+      </div>
+    {% endif %}
+  </section>
+
+  <nav class="chips" aria-label="Rooms">
+    <button class="chip" aria-pressed="true" data-room="">All<span>{{ items|length }}</span></button>
+    {% for room, count in rooms %}<button class="chip" aria-pressed="false" data-room="{{ room }}">{{ room }}<span>{{ count }}</span></button>{% endfor %}
+  </nav>
+  <div class="tools">
+    <span id="shown">{{ items|length }} shown</span>
+    <label>Sort <select id="sort" aria-label="Sort items">
+      <option value="value">Highest value</option><option value="proof">Needs proof</option><option value="new">Newest</option>
+    </select></label>
+  </div>
+
+  {% if items %}
+  <div class="grid" id="grid">
+    {% for i in items %}
+    <button class="item {{ i.status }}" data-id="{{ i.id }}" data-room="{{ i.room }}" data-value="{{ i.value }}"
+            data-proof="{{ 1 if i.needs_proof else 0 }}" data-new="{{ i.created }}">
+      <div class="shot">
+        {% if i.has_photo %}<img loading="lazy" src="/p/{{ token }}/crop/{{ i.id }}.jpg" alt="">
+        {% else %}<span class="mem">from memory</span>{% endif %}
+      </div>
+      <div class="body">
+        <div class="name">{{ i.title }}</div>
+        <div class="line">{{ i.room }} · {{ i.category }}{% if i.brand %} · {{ i.brand }}{% endif %}</div>
+        {% if i.price %}<div class="price">{{ i.price }}</div>{% endif %}
+        <div class="foot">
+          <span>{% if i.badges.photo %}📷 {{ i.badges.photo }}{% endif %}{% if i.badges.memory %} 🎙 {{ i.badges.memory }}{% endif %}{% if i.badges.receipt %} 🧾 {{ i.badges.receipt }}{% endif %}{% if i.status == 'suggested' %} · to check{% endif %}</span>
+          <span>{{ i.contributors|join(', ') }}</span>
+        </div>
+      </div>
+    </button>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty">Nothing here yet. Photos sent to Ashline show up on this page within a minute or two.</p>
+  {% endif %}
+
+  <p class="note">{{ disclaimer }}{% if not calibrated %} Price ranges are a rough allowance, not a measured one.{% endif %}</p>
+</main>
+
+{% if role == 'owner' %}
+<div class="footer"><div>
+  <a class="sheet" href="/p/{{ token }}/export.xlsx"><span class="narrow">Spreadsheet</span><span class="wide">Download spreadsheet</span></a>
+  <a class="pdf" href="/p/{{ token }}/export.pdf"><span class="narrow">PDF for insurer</span><span class="wide">Download PDF for insurer</span></a>
+</div></div>
+{% endif %}
+
+<dialog id="detail" aria-label="Item detail">
+  <button class="close" id="close" aria-label="Close">✕</button>
+  <div class="sightings" id="sightings"></div>
+  <div class="sheet" id="sheet"></div>
+</dialog>
+
+<script>
+(function () {
+  var token = {{ token|tojson }}, grid = document.getElementById('grid');
+  var chips = [].slice.call(document.querySelectorAll('.chip')), room = '';
+  function apply() {
+    if (!grid) return;
+    var cards = [].slice.call(grid.children), mode = document.getElementById('sort').value, shown = 0;
+    cards.sort(function (a, b) {
+      if (mode === 'proof') return (b.dataset.proof - a.dataset.proof) || (b.dataset.value - a.dataset.value);
+      if (mode === 'new') return b.dataset.new < a.dataset.new ? -1 : b.dataset.new > a.dataset.new ? 1 : 0;
+      return b.dataset.value - a.dataset.value;
+    });
+    cards.forEach(function (c) {
+      var ok = !room || c.dataset.room === room;
+      c.hidden = !ok; if (ok) shown++; grid.appendChild(c);
+    });
+    document.getElementById('shown').textContent = shown + ' shown';
+  }
+  chips.forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      room = chip.dataset.room;
+      chips.forEach(function (c) { c.setAttribute('aria-pressed', c === chip ? 'true' : 'false'); });
+      apply();
+    });
+  });
+  document.getElementById('sort').addEventListener('change', apply);
+
+  function post(path, body) {
+    return fetch('/p/' + token + path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body) }).then(function (r) { if (!r.ok) throw new Error('failed'); return r.json(); });
+  }
+  function el(tag, text, cls) { var e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; }
+
+  var dialog = document.getElementById('detail');
+  function open(id) {
+    fetch('/p/' + token + '/item/' + id + '.json').then(function (r) { return r.json(); }).then(function (d) {
+      var strip = document.getElementById('sightings'), sheet = document.getElementById('sheet');
+      strip.innerHTML = ''; sheet.innerHTML = '';
+      d.sightings.forEach(function (s) {
+        var fig = el('figure');
+        if (s.image) { var img = el('img'); img.src = s.image; img.alt = s.label; fig.appendChild(img); }
+        else { fig.appendChild(el('div', '“' + s.label + '”', 'quote')); }
+        fig.appendChild(el('figcaption', [s.source, s.by !== s.source ? s.by : null, s.date].filter(Boolean).join(' · ')));
+        strip.appendChild(fig);
+      });
+      sheet.appendChild(el('h2', d.title));
+      sheet.appendChild(el('p', [d.room, d.category, d.brand].filter(Boolean).join(' · '), 'muted'));
+      if (d.price) sheet.appendChild(el('p', d.price));
+      sheet.appendChild(el('p', d.price_basis, 'muted'));
+      if (d.sightings.length > 1) sheet.appendChild(el('p', 'Seen ' + d.sightings.length + ' times. Swipe the photo to see each one.', 'muted'));
+      if (d.editable) {
+        var row = el('div', null, 'row');
+        function act(label, body, quiet) {
+          var b = el('button', label, 'btn' + (quiet ? ' quiet' : ''));
+          b.addEventListener('click', function () { post('/item/' + id, body()).then(function () { location.reload(); }); });
+          row.appendChild(b);
+        }
+        if (d.status === 'suggested') act('Yes, this was ours', function () { return { action: 'confirm' }; });
+        act('Fix name', function () { return { action: 'rename', value: prompt('What is it?', d.label) || d.label }; }, true);
+        act('Quantity', function () { return { action: 'qty', value: prompt('How many?', d.qty) || d.qty }; }, true);
+        act('Set price', function () { return { action: 'price', value: prompt('What does one cost to buy new, in dollars?', d.price_mid || '') }; }, true);
+        act('Remove', function () { return { action: 'remove' }; }, true);
+        sheet.appendChild(row);
+      }
+      dialog.showModal();
+    });
+  }
+  if (grid) grid.addEventListener('click', function (e) { var card = e.target.closest('.item'); if (card) open(card.dataset.id); });
+  document.getElementById('close').addEventListener('click', function () { dialog.close(); });
+  dialog.addEventListener('click', function (e) { if (e.target === dialog) dialog.close(); });
+
+  var form = document.getElementById('coverage');
+  if (form) {
+    form.addEventListener('submit', function (e) { e.preventDefault(); post('/coverage', { limit: form.limit.value }).then(function () { location.reload(); }); });
+    document.getElementById('skip').addEventListener('click', function () { post('/coverage', { skip: true }).then(function () { location.reload(); }); });
+  }
+})();
+</script>
+</body>
+</html>

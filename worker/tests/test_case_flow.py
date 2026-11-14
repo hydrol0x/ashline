@@ -129,7 +129,7 @@ def test_confirming_shrinks_the_queue_and_fills_the_export(seeded, tmp_path):
     assert len(export_rows("fam1", store, include_suggested=True)) > 1
     path = export_csv("fam1", store)
     lines = path.read_text().splitlines()
-    assert lines[0].split(",")[9:11] == ["source", "evidence"] and "not legal advice" in lines[-1]
+    assert lines[0].split(",")[9:11] == ["source", "evidence"] and "not legal or insurance advice" in lines[-1]
     assert next(csv.DictReader(lines))["room"] == "Living Room / Dining Room"
 
 

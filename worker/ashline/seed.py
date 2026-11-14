@@ -15,8 +15,33 @@ from .pipeline import detect_cached
 from .store import Store
 
 
+def merger_kind() -> str:
+    """`ASHLINE_MERGER` = claude | rules. Default: claude when an Anthropic key is set."""
+    kind = (config.env("ASHLINE_MERGER") or ("claude" if config.env("ANTHROPIC_API_KEY") else "rules")).lower()
+    if kind not in ("claude", "rules"):
+        raise ValueError(f"Unknown ASHLINE_MERGER {kind!r}: use claude or rules.")
+    return kind
+
+
+def merge_scan_items(case_id: str, items: list[dict], photos: dict, grouper=None) -> tuple[list[dict], str]:
+    """Cluster scan detections into inventory lines. Returns (clusters, how they were merged).
+
+    If the Claude merge fails, the word-matching rules are used so the seed
+    still completes, and the reason is reported.
+    """
+    if grouper is None and merger_kind() == "claude":
+        from .merge_claude import ClaudeGrouper
+        grouper = ClaudeGrouper(case_id)
+    if grouper is None:
+        return cluster_scan_items(items, photos), "rules"
+    try:
+        return cluster_scan_items(items, photos, grouper), "claude"
+    except Exception as exc:                # MergeError, or a missing SDK: never lose the seed over the merge
+        return cluster_scan_items(items, photos), f"rules (Claude merge failed: {exc})"
+
+
 def inside(case_id: str, sid: str, captured: str | None = None, run_detection: bool = True,
-           max_faces: int = 40, store: Store | None = None, detector=None, client=None) -> dict:
+           max_faces: int = 40, store: Store | None = None, detector=None, client=None, grouper=None) -> dict:
     """Scan rooms and photos -> rooms table, photos, suggested items. Returns a short summary."""
     store = store or Store()
     rooms = matterport.scan_rooms(sid, client)
@@ -27,6 +52,7 @@ def inside(case_id: str, sid: str, captured: str | None = None, run_detection: b
     store.add_photos(case_id, shots["photos"], added_by="scan")
 
     suggested = clusters = 0
+    merged_by = None
     if run_detection and shots["photos"]:
         store.clear_items(case_id, "scan")
         for photo in shots["photos"]:
@@ -35,7 +61,8 @@ def inside(case_id: str, sid: str, captured: str | None = None, run_detection: b
                 store.add_item(case_id, item, source="scan", photo=photo, added_by="scan")
         items = [i for i in store.get_items(case_id, status="suggested") if i["source"] == "scan"]
         by_id = {p["photo_id"]: p for p in shots["photos"]}
-        for cluster in cluster_scan_items(items, by_id):
+        clusters_found, merged_by = merge_scan_items(case_id, items, by_id, grouper)
+        for cluster in clusters_found:
             store.set_cluster(case_id, cluster["canonical_id"], cluster["member_ids"], cluster["qty"])
         suggested = len(items)
         clusters = len(store.get_items(case_id, status="suggested", canonical_only=True))
@@ -49,6 +76,7 @@ def inside(case_id: str, sid: str, captured: str | None = None, run_detection: b
         "panos_used": shots["panos_used"], "panos_total": shots["panos_total"],
         "detections": suggested,
         "suggested_items": clusters,          # after merging repeats across panoramas
+        "merged_by": merged_by,
         "message": matterport.scan_confirmation_message(rooms["rooms"], captured, rooms["capture_notes"]),
     }
 

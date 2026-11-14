@@ -53,3 +53,5 @@ def index(index_csv):
 @pytest.fixture(autouse=True)
 def _isolated_data_dir(tmp_path, monkeypatch):
     monkeypatch.setenv("ASHLINE_DATA_DIR", str(tmp_path / "cases"))
+    # A developer's .env may hold real keys: tests must never reach a paid API.
+    monkeypatch.setenv("ASHLINE_MERGER", "rules")

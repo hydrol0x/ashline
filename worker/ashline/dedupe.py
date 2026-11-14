@@ -235,39 +235,81 @@ def seam_objects(items: list[dict], photos: dict[str, dict]) -> list[list[dict]]
     return [[by_id[i] for i in group] for group in groups.groups()]
 
 
-def cluster_scan_items(items: list[dict], photos: dict[str, dict]) -> list[dict]:
-    """Group scan detections into inventory lines: [{canonical_id, member_ids, qty, key, room_id}].
-
-    `items` need item_id, photo_id, label, category, confidence, room_id, bbox.
-    `photos` maps photo_id to its record (pano_id, face, path).
-    """
-    objects = []                                         # one per physical object seen from one panorama
+def scan_objects(items: list[dict], photos: dict[str, dict]) -> list[dict]:
+    """One entry per physical object seen from one panorama (seam-cut detections joined)."""
+    objects = []
     for members in seam_objects(items, photos):
         best = _best(members)
         photo = photos.get(best["photo_id"]) or {}
-        objects.append({"members": members, "label": best["label"], "room_id": best.get("room_id"),
-                        "pano": photo.get("pano_id") or best["photo_id"]})
+        objects.append({"members": members, "best": best, "label": best["label"],
+                        "category": best.get("category"), "room_id": best.get("room_id"),
+                        "room_label": best.get("room_label") or photo.get("room_label"),
+                        "pano": photo.get("pano_id") or best["photo_id"], "face": photo.get("face")})
+    return objects
 
+
+def group_by_rules(objects: list[dict]) -> list[list[int]]:
+    """Link objects of one room seen from different panoramas when their labels match."""
     links = _Groups(range(len(objects)))
     for i, a in enumerate(objects):
         for j in range(i + 1, len(objects)):
             b = objects[j]
-            # Two objects in one panorama are two objects; rooms never share one.
-            if a["room_id"] == b["room_id"] and a["pano"] != b["pano"] and same_thing(a["label"], b["label"]):
+            # Two objects in one panorama are two objects.
+            if a["pano"] != b["pano"] and same_thing(a["label"], b["label"]):
                 links.join(i, j)
+    return links.groups()
+
+
+def cluster_scan_items(items: list[dict], photos: dict[str, dict], grouper=None) -> list[dict]:
+    """Group scan detections into inventory lines: [{canonical_id, member_ids, qty, key, room_id}].
+
+    `items` need item_id, photo_id, label, category, confidence, room_id, bbox.
+    `photos` maps photo_id to its record (pano_id, face, path).
+    `grouper(room_label, objects)` returns groups of indices into `objects` (all
+    from one room), optionally as (indices, index_of_best). Default: the rules.
+
+    Whatever the grouper says, the quantity of a line is the largest number of
+    its objects seen from one panorama. A grouper can merge lines but can
+    never raise a count above what one viewpoint actually showed.
+    """
+    objects = scan_objects(items, photos)
+    by_room: dict = {}
+    for index, obj in enumerate(objects):
+        by_room.setdefault(obj["room_id"], []).append(index)
 
     clusters = []
-    for group in links.groups():
-        per_pano: dict = {}
-        for index in group:
-            per_pano[objects[index]["pano"]] = per_pano.get(objects[index]["pano"], 0) + 1
-        members = [m for index in group for m in objects[index]["members"]]
-        canonical = _best(members)
-        clusters.append({
-            "canonical_id": canonical["item_id"],
-            "member_ids": [m["item_id"] for m in members],
-            "qty": max(per_pano.values()),
-            "key": item_key(canonical["label"]),
-            "room_id": canonical.get("room_id"),
-        })
+    for room_id, indices in by_room.items():
+        room = [objects[i] for i in indices]
+        groups = grouper(room[0]["room_label"], room) if grouper else group_by_rules(room)
+        for group in _complete(groups, len(room)):
+            local, best_local = group
+            per_pano: dict = {}
+            for i in local:
+                per_pano[room[i]["pano"]] = per_pano.get(room[i]["pano"], 0) + 1
+            members = [m for i in local for m in room[i]["members"]]
+            canonical = room[best_local]["best"] if best_local in local else _best(members)
+            clusters.append({
+                "canonical_id": canonical["item_id"],
+                "member_ids": [m["item_id"] for m in members],
+                "qty": max(per_pano.values()),
+                "key": item_key(canonical["label"]),
+                "room_id": room_id,
+            })
     return clusters
+
+
+def _complete(groups, count: int) -> list[tuple[list[int], int | None]]:
+    """Make a grouping safe to use: every object exactly once, unknown indices dropped."""
+    seen: set = set()
+    out = []
+    for group in groups or []:
+        indices, best = group if isinstance(group, tuple) else (group, None)
+        clean = []
+        for i in indices:
+            if isinstance(i, int) and 0 <= i < count and i not in seen:
+                seen.add(i)
+                clean.append(i)
+        if clean:
+            out.append((clean, best))
+    out.extend(([i], None) for i in range(count) if i not in seen)      # anything left out stays its own line
+    return out

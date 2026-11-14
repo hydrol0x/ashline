@@ -99,29 +99,53 @@ def _scanned(store: Store, case_id: str, word: str) -> bool:
     return any(word in (room["label"] or "").lower() for room in store.get_rooms(case_id))
 
 
+def _and(parts: list[str]) -> str:
+    return parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + " and " + parts[-1]
+
+
 def structure_questions(store: Store, case_id: str) -> list[dict]:
-    """One question per outbuilding on the aerial. Where the listing mentions a garage, the first
-    one puts all three sources together: listing, aerial and what the scan did not cover."""
-    out = []
+    """Questions about the other buildings on the lot.
+
+    Where the sale listing names what they are (a garage, a guest house), one
+    question puts the three sources together: what the listing mentions, what
+    the aerial shows, and what the scan did not go inside. It does not guess
+    which building is which. Otherwise there is one question per building.
+    """
     findings = store.get_findings(case_id)
     structures = [f for f in findings if f["kind"] == "structure" and f["status"] == "open"]
-    garage = next((f for f in findings if f["kind"] == "listing" and f["label"] == "garage"), None)
+    if not structures:
+        return []
+    when = _month_year(structures[0]["evidence_date"])
+    seen = f"the aerial photo{' from ' + when if when else ''} shows"
+    listed = {f["label"]: f for f in findings if f["kind"] == "listing" and f["label"] in ("garage", "guest house")}
+
+    if listed:
+        mentions = (["a detached guest house"] if "guest house" in listed else []) \
+            + ([_garage_phrase(listed["garage"])] if "garage" in listed else [])
+        sizes = [f"{f['detail']['footprint_sqft']:,}" for f in structures if f["detail"].get("footprint_sqft")]
+        size_text = f" (about {_and(sizes)} sq ft)" if len(sizes) == len(structures) else ""
+        count = len(structures)
+        buildings = ("a second building" if count == 1 else
+                     f"{ {2: 'two', 3: 'three', 4: 'four'}.get(count, count) } more buildings")
+        text = f"The listing mentions {_and(mentions)}, and {seen} {buildings} on the lot{size_text}."
+        if "garage" in listed and not _scanned(store, case_id, "garage"):
+            text += " The 3D scan doesn't go inside a garage."
+        if count == 1 and len(mentions) == 1:
+            text += (" What was kept there: tools, bikes, storage?" if "garage" in listed
+                     else " Was that the guest house? What was in it?")
+        else:
+            text += " Which building was which, and what was in each?"
+        return [{"kind": "structure", "ref": [f["finding_id"] for f in structures],
+                 "weight": STRUCTURE_ITEMS * STRUCTURE_VALUE * count, "text": text}]
+
+    out = []
     for n, f in enumerate(structures, 1):
-        when = _month_year(f["evidence_date"])
         size = f["detail"].get("footprint_sqft")
         size_text = f" (about {size:,} sq ft)" if size else ""
-        if n == 1 and garage:
-            text = (f"The listing mentions {_garage_phrase(garage)}, and the aerial photo"
-                    f"{' from ' + when if when else ''} shows a second building on the lot{size_text}.")
-            if not _scanned(store, case_id, "garage"):
-                text += " The 3D scan doesn't show inside it."
-            text += " What was kept there: tools, bikes, storage?"
-        else:
-            which = "a second building" if n == 1 else "another building"
-            text = (f"The aerial photo{' from ' + when if when else ''} shows {which} on the lot{size_text}. "
-                    "Was that a garage or a workshop? What was in it?")
-        out.append({"kind": "structure", "ref": f["finding_id"],
-                    "weight": STRUCTURE_ITEMS * STRUCTURE_VALUE, "text": text})
+        which = "a second building" if n == 1 else "another building"
+        out.append({"kind": "structure", "ref": f["finding_id"], "weight": STRUCTURE_ITEMS * STRUCTURE_VALUE,
+                    "text": f"{seen[0].upper() + seen[1:]} {which} on the lot{size_text}. "
+                            "Was that a garage or a workshop? What was in it?"})
     return out
 
 
@@ -139,12 +163,17 @@ def listing_questions(store: Store, case_id: str) -> list[dict]:
         return bool(words) and any(words <= w for w in item_words)
 
     out = []
-    if "garage" in listing and not any(f["kind"] == "structure" for f in findings) \
-            and not _scanned(store, case_id, "garage"):
+    # With buildings on the aerial, the garage and guest house are asked about there, once.
+    on_aerial = any(f["kind"] == "structure" for f in findings)
+    if "garage" in listing and not on_aerial and not _scanned(store, case_id, "garage"):
         f = listing["garage"]
         out.append({"kind": "listing", "ref": f["finding_id"], "weight": STRUCTURE_ITEMS * STRUCTURE_VALUE,
                     "text": f"The listing mentions {_garage_phrase(f)}, but the 3D scan doesn't show inside it. "
                             "What was kept there: tools, bikes, storage?"})
+    if "guest house" in listing and not on_aerial:
+        out.append({"kind": "listing", "ref": listing["guest house"]["finding_id"],
+                    "weight": STRUCTURE_ITEMS * STRUCTURE_VALUE,
+                    "text": "The listing mentions a detached guest house. Was it furnished, and what was in it?"})
     if "basement" in listing and not _scanned(store, case_id, "basement"):
         out.append({"kind": "listing", "ref": listing["basement"]["finding_id"], "weight": 2400,
                     "text": "The listing mentions a basement that the 3D scan doesn't show. What was stored down there?"})

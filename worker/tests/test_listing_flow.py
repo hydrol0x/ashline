@@ -38,8 +38,10 @@ def test_summarize_picks_the_useful_fields():
     s = summarize({"listing": LISTING, "features": FEATURES})
     assert (s["beds"], s["baths"], s["sqft"], s["year_built"], s["garage_spaces"]) == (3, 2, 1500, 1962, 2)
     assert s["list_date"] == "2026-02-10" and s["price"] == 750000.0 and s["property_type"] == "Single Family"
-    assert s["has"] == {"garage": True, "carport": False, "basement": False, "storage": False,
-                        "washer_dryer": True, "spa": False, "fireplace": True}
+    assert s["has"] == {"garage": True, "guest_house": False, "carport": False, "basement": False,
+                        "storage": False, "washer_dryer": True, "spa": False, "fireplace": True}
+    assert s["features"] == {"Interior / Appliances": ["Refrigerator", "Wine Cooler", "Dishwasher"],
+                             "Exterior / Parking": ["Detached Garage"]}
     assert s["appliances"] == ["Refrigerator", "Wine Cooler"]            # the dishwasher is part of the house
     assert s["highlights"] == ["Detached two-car garage"] and s["remarks"].startswith("Bright home")
 
@@ -53,8 +55,9 @@ def test_summarize_survives_missing_parts():
 
 
 def test_listing_sentence():
+    # Size is left out on purpose: it can describe only the main house of a multi-unit lot.
     assert listing_sentence({"beds": 3, "baths": 2.5, "sqft": 1480, "year_built": 1960}) == \
-        " The sale listing describes a 3-bed, 2.5-bath home of 1,480 sq ft built in 1960."
+        " The sale listing describes a 3-bed, 2.5-bath home built in 1960."
     assert listing_sentence({"beds": 3}) == " The sale listing describes a 3-bed home."
     assert listing_sentence({}) == "" and listing_sentence(None) == ""
     text = scan_confirmation_message([], "2026-03-04", None, {"beds": 3, "baths": 2})
@@ -102,7 +105,7 @@ def test_seed_uses_all_three_layers(kit, offline):
                                  "mentions": ["fireplace", "garage", "washer and dryer"],
                                  "appliances": ["Refrigerator", "Wine Cooler"]}
     assert store.get_home("fam1")["listing"]["sqft"] == 1500
-    assert "The sale listing describes a 3-bed, 2-bath home of 1,500 sq ft built in 1962." in result["inside"]["message"]
+    assert "The sale listing describes a 3-bed, 2-bath home built in 1962." in result["inside"]["message"]
 
     questions = {q["kind"]: q for q in reversed(gap_questions("fam1", store))}
     # Listing + aerial + what the scan did not cover, in one question. (The fake scan has a room
@@ -160,3 +163,55 @@ def test_database_from_an_earlier_version_gains_the_listing_column(tmp_path):
     assert store.get_home("old")["sid"] == "fakeA000001" and store.get_home("old")["listing"] is None
     store.set_home("old", listing={"beds": 3})
     assert Store(str(path)).get_home("old")["listing"] == {"beds": 3}
+
+
+def test_appliances_are_found_by_name_whatever_the_category_is_called():
+    features = dict(FEATURES, features=[
+        {"category": "Kitchen", "subcategory1": "Equipment", "name": "Wine Refrigerator"},
+        {"category": "Laundry", "name": "Dryer"}, {"category": "Laundry", "name": "Washer"},
+        {"category": "Kitchen", "name": "Range Hood"}, {"category": "Kitchen", "name": "Quartz Countertops"}])
+    assert summarize({"listing": LISTING, "features": features})["appliances"] == ["Wine Refrigerator", "Dryer", "Washer"]
+
+
+def test_guest_house_and_garage_with_two_buildings_on_the_aerial(kit, offline, monkeypatch, tmp_path):
+    """The listing names a guest house and a garage; the aerial shows two more buildings. One
+    question lays that out without guessing which building is which."""
+    import zipfile as z
+    from fakes import FEATURES as PARCEL, HOUSE, SHED, parcel_feature, structure
+    features = dict(FEATURES, highlights=[{"kind": "feature", "text": "Detached Guest House"}])
+    with z.ZipFile(kit, "w") as zf:
+        zf.writestr("residential-listings.csv",
+                    "Address,City,ListingId,MatterportModelId,ResidentialListingId,State\n"
+                    "12 Example Ave,Los Angeles,501,fakeA000001,9001,CA\n")
+        zf.writestr("data/residential-listings.jsonl", json.dumps(LISTING))
+        zf.writestr("data/residential-listing-features.jsonl", json.dumps(features))
+    other = SHED.replace("34.05012", "34.05020").replace("34.05018", "34.05026")
+    parcel = [parcel_feature("fake-city-2024", "urban", "2024-08-06",
+                             [structure(True, 1500, HOUSE), structure(False, 721, SHED), structure(False, 278, other)])]
+    no_garage = dict(FakeMatterport().model)
+    no_garage["rooms"] = [r for r in no_garage["rooms"] if r["id"] != "garage"]
+    monkeypatch.setattr(seed.matterport, "MatterportClient", lambda: FakeMatterport(no_garage))
+    monkeypatch.setattr(seed.vexcel, "VexcelClient", lambda: FakeVexcel(features=parcel))
+    store = Store()
+    seed.seed_home_twin("fam1", sid="fakeA000001", loss_date="2025-01-07", max_faces=16, store=store)
+    structure_qs = [q for q in gap_questions("fam1", store) if q["kind"] == "structure"]
+    assert len(structure_qs) == 1 and len(structure_qs[0]["ref"]) == 2
+    assert structure_qs[0]["text"] == (
+        "The listing mentions a detached guest house and a 2-car garage, and the aerial photo from August 2024 "
+        "shows two more buildings on the lot (about 721 and 278 sq ft). The 3D scan doesn't go inside a garage. "
+        "Which building was which, and what was in each?")
+    assert not [q for q in gap_questions("fam1", store) if q["kind"] == "listing" and "guest" in q["text"]]
+
+
+def test_guest_house_wording_and_stale_cache(kit, offline):
+    from ashline import config
+    from ashline.costar.listing import SUMMARY_VERSION
+    for text, expected in [("Detached Guest House", True), ("Permitted ADU", True), ("Maid or Guest Quarters", True),
+                           ("Graduated Driveway", False), ("Recreation Room", False)]:
+        features = dict(FEATURES, highlights=[{"kind": "feature", "text": text}])
+        assert summarize({"listing": LISTING, "features": features})["has"]["guest_house"] is expected, text
+    # A summary cached by an earlier version is rebuilt, not reused.
+    cache = config.case_dir("fam1") / "listing.json"
+    cache.write_text(json.dumps({"beds": 99, "has": {}}))
+    result = seed.listing("fam1", "fakeA000001", store=Store())
+    assert result["beds"] == 3 and json.loads(cache.read_text())["version"] == SUMMARY_VERSION

@@ -51,6 +51,8 @@ def listing_findings(summary: dict) -> list[dict]:
     if has.get("garage"):
         findings.append({"kind": "listing", "label": "garage", "evidence_date": date,
                          "detail": {"spaces": summary.get("garage_spaces")}})
+    if has.get("guest_house"):
+        findings.append({"kind": "listing", "label": "guest house", "evidence_date": date, "detail": {}})
     for flag, label in (("basement", "basement"), ("storage", "storage"),
                         ("washer_dryer", "washer and dryer"), ("spa", "spa")):
         if has.get(flag):
@@ -71,9 +73,8 @@ def listing(case_id: str, sid: str | None = None, homes_listing_id: str | None =
     store = store or Store()
     cache = config.case_dir(case_id) / "listing.json"
     try:
-        if cache.exists():
-            summary = json.loads(cache.read_text())
-        else:
+        summary = json.loads(cache.read_text()) if cache.exists() else None
+        if not summary or summary.get("version") != listing_mod.SUMMARY_VERSION:      # none, or an older format
             record = listing_mod.listing_record(homes_listing_id, sid=sid)
             if not record.get("found"):
                 return {"found": False, "reason": record.get("reason")}

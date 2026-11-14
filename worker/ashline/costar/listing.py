@@ -15,6 +15,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import re
 import zipfile
 
 import requests
@@ -186,6 +187,14 @@ BUILT_IN = {"dishwasher", "disposal", "garbage disposal", "range hood", "hood", 
             "water heater", "furnace", "exhaust fan", "vent hood"}
 
 
+APPLIANCE_WORDS = ("refrigerator", "fridge", "freezer", "washer", "dryer", "microwave", "wine cooler",
+                   "wine refrigerator", "ice maker")
+# A second dwelling on the lot: its contents belong in the inventory too.
+GUEST_HOUSE = re.compile(r"\b(guest ?house|guest quarters|adu|accessory dwelling|in-law|casita|back house|"
+                         r"second unit|granny flat)\b")
+SUMMARY_VERSION = 2            # bump when summarize() changes, so cached summaries are rebuilt
+
+
 def _first(*values):
     """First value that is set and not zero."""
     for value in values:
@@ -214,14 +223,23 @@ def summarize(record: dict) -> dict:
     garage_spaces = _first(derived.get("totalGarageSpaces"), derived.get("totalPrivateGarageSpaces"),
                            structure.get("garageSpaces"))
 
-    appliances = []
+    appliances, grouped = [], {}
     for feature in features.get("features") or []:
-        where = " ".join(str(feature.get(k) or "") for k in ("category", "subcategory1", "subcategory2")).lower()
         name = str(feature.get("name") or "").strip()
-        if "applianc" in where and name and name.lower() not in BUILT_IN and name not in appliances:
+        if not name:
+            continue
+        where = " / ".join(str(feature[k]) for k in ("category", "subcategory1", "subcategory2") if feature.get(k))
+        grouped.setdefault(where or "Other", []).append(name)
+        # An appliance by its category, or by its name whatever the kit calls the category.
+        is_appliance = "applianc" in where.lower() or any(word in name.lower() for word in APPLIANCE_WORDS)
+        if is_appliance and name.lower() not in BUILT_IN and name not in appliances:
             appliances.append(name)
+    highlights = [str(h.get("text")) for h in (features.get("highlights") or []) if h.get("text")]
+    named = " | ".join(highlights + [n for names in grouped.values() for n in names]).lower()
+    guest_house = bool(GUEST_HOUSE.search(named) or reso.get("hasInLawSuite") or costar.get("hasInLawSuite"))
 
     return {
+        "version": SUMMARY_VERSION,
         "beds": _first(derived.get("totalBedrooms"), prop.get("bedsMax")),
         "baths": baths,
         "sqft": _first(derived.get("homeSquareFeet"), prop.get("sqftMax")),
@@ -235,6 +253,7 @@ def summarize(record: dict) -> dict:
         "price": _first(listing.get("closePrice"), listing.get("currentPrice"), listing.get("originalPrice")),
         "has": {                                   # True only when the listing says so
             "garage": bool(garage_spaces or reso.get("hasGarage") or costar.get("hasGarage")),
+            "guest_house": guest_house,
             "carport": bool(structure.get("hasCarport")),
             "basement": bool(reso.get("hasBasement") or costar.get("hasBasement") or structure.get("hasBasement")),
             "storage": bool(reso.get("hasStorage")),
@@ -243,6 +262,7 @@ def summarize(record: dict) -> dict:
             "fireplace": bool(reso.get("hasFireplace") or costar.get("hasFireplace") or structure.get("hasFireplace")),
         },
         "appliances": appliances[:12],
-        "highlights": [str(h.get("text")) for h in (features.get("highlights") or []) if h.get("text")][:10],
+        "highlights": highlights[:20],
+        "features": {where: names[:15] for where, names in list(grouped.items())[:30]},
         "remarks": (listing.get("remarks") or "").strip()[:800] or None,
     }

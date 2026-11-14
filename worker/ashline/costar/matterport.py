@@ -344,7 +344,7 @@ def _month_year(date: str | None) -> str | None:
 
 
 def listing_sentence(listing: dict | None) -> str:
-    """'The sale listing describes a 3-bed, 2-bath home of 1,500 sq ft built in 1962.' or ''."""
+    """'The sale listing describes a 3-bed, 2-bath home built in 1962.' or ''."""
     if not listing:
         return ""
     def num(value):
@@ -355,8 +355,7 @@ def listing_sentence(listing: dict | None) -> str:
     if listing.get("baths"):
         parts.append(f"{num(listing['baths'])}-bath")
     text = (", ".join(parts) + " home") if parts else "home"
-    if listing.get("sqft"):
-        text += f" of {int(listing['sqft']):,} sq ft"
+    # Size is left out: a listing's figure can cover only the main house of a lot with several units.
     if listing.get("year_built"):
         text += f" built in {int(listing['year_built'])}"
     if text == "home":

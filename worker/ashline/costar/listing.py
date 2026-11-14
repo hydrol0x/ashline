@@ -192,7 +192,9 @@ APPLIANCE_WORDS = ("refrigerator", "fridge", "freezer", "washer", "dryer", "micr
 # A second dwelling on the lot: its contents belong in the inventory too.
 GUEST_HOUSE = re.compile(r"\b(guest ?house|guest quarters|adu|accessory dwelling|in-law|casita|back house|"
                          r"second unit|granny flat)\b")
-SUMMARY_VERSION = 2            # bump when summarize() changes, so cached summaries are rebuilt
+OUTBUILDING = re.compile(r"\b(outdoor storage|storage building|shed|workshop|barn|outbuilding)\b")
+PATIO = re.compile(r"\b(patio|deck|porch|pergola|gazebo)\b")
+SUMMARY_VERSION = 3            # bump when summarize() changes, so cached summaries are rebuilt
 
 
 def _first(*values):
@@ -238,6 +240,17 @@ def summarize(record: dict) -> dict:
     named = " | ".join(highlights + [n for names in grouped.values() for n in names]).lower()
     guest_house = bool(GUEST_HOUSE.search(named) or reso.get("hasInLawSuite") or costar.get("hasInLawSuite"))
 
+    def names_under(*words) -> list[str]:
+        """Feature names of this home (not the community) whose category mentions one of `words`."""
+        return [n for where, names in grouped.items() if not where.lower().startswith("community")
+                and any(w in where.lower() for w in words) for n in names]
+
+    all_names = [n.lower() for names in grouped.values() for n in names]
+    other_structures = [n for n in names_under("other structures") if OUTBUILDING.search(n.lower())] \
+        or [n for n in sum(grouped.values(), []) if OUTBUILDING.search(n.lower())]
+    laundry = names_under("laundry")
+    patio = [n for n in names_under("patio", "outdoor features", "deck") if PATIO.search(n.lower())]
+
     return {
         "version": SUMMARY_VERSION,
         "beds": _first(derived.get("totalBedrooms"), prop.get("bedsMax")),
@@ -256,7 +269,11 @@ def summarize(record: dict) -> dict:
             "guest_house": guest_house,
             "carport": bool(structure.get("hasCarport")),
             "basement": bool(reso.get("hasBasement") or costar.get("hasBasement") or structure.get("hasBasement")),
-            "storage": bool(reso.get("hasStorage")),
+            "storage": bool(reso.get("hasStorage") or "storage" in all_names),
+            "outdoor_storage": bool(other_structures),
+            "laundry": bool(laundry),
+            "laundry_outside": any("outside" in n.lower() for n in laundry),
+            "patio": bool(patio),
             "washer_dryer": bool(reso.get("hasWasherDryer")),
             "spa": bool(reso.get("hasSpa")),
             "fireplace": bool(reso.get("hasFireplace") or costar.get("hasFireplace") or structure.get("hasFireplace")),

@@ -43,6 +43,10 @@ def merge_scan_items(case_id: str, items: list[dict], photos: dict, grouper=None
         return cluster_scan_items(items, photos), f"rules (Claude merge failed: {exc})"
 
 
+MENTION_NAMES = {"washer_dryer": "washer and dryer", "guest_house": "guest house",
+                 "outdoor_storage": "outdoor storage"}
+
+
 def listing_findings(summary: dict) -> list[dict]:
     """What the listing mentions that is worth a question. Like aerial hits: questions, not items."""
     date = summary.get("list_date")
@@ -53,10 +57,13 @@ def listing_findings(summary: dict) -> list[dict]:
                          "detail": {"spaces": summary.get("garage_spaces")}})
     if has.get("guest_house"):
         findings.append({"kind": "listing", "label": "guest house", "evidence_date": date, "detail": {}})
-    for flag, label in (("basement", "basement"), ("storage", "storage"),
-                        ("washer_dryer", "washer and dryer"), ("spa", "spa")):
+    for flag, label in (("outdoor_storage", "outdoor storage"), ("basement", "basement"), ("storage", "storage"),
+                        ("washer_dryer", "washer and dryer"), ("spa", "spa"), ("patio", "patio")):
         if has.get(flag):
             findings.append({"kind": "listing", "label": label, "evidence_date": date, "detail": {}})
+    if has.get("laundry") and not has.get("washer_dryer"):
+        findings.append({"kind": "listing", "label": "laundry", "evidence_date": date,
+                         "detail": {"outside": bool(has.get("laundry_outside"))}})
     if summary.get("appliances"):
         findings.append({"kind": "listing", "label": "appliances", "evidence_date": date,
                          "detail": {"names": summary["appliances"]}})
@@ -87,7 +94,8 @@ def listing(case_id: str, sid: str | None = None, homes_listing_id: str | None =
     return {
         "found": True,
         **{k: summary.get(k) for k in ("beds", "baths", "sqft", "year_built", "garage_spaces", "list_date")},
-        "mentions": sorted(k.replace("_", " and ") for k, v in (summary.get("has") or {}).items() if v),
+        "mentions": sorted(MENTION_NAMES.get(k, k.replace("_", " ")) for k, v in (summary.get("has") or {}).items()
+                           if v and k != "laundry_outside"),
         "appliances": summary.get("appliances") or [],
     }
 
@@ -121,7 +129,8 @@ def inside(case_id: str, sid: str, captured: str | None = None, run_detection: b
 
     return {
         "sid": sid,
-        "rooms": [{"label": r["name"], "area_m2": r["area_m2"], "furnished": r["furnished"]} for r in rooms["rooms"]],
+        "rooms": [{"label": r["name"], "area_m2": r["area_m2"], "furnished": r["furnished"]} for r in rooms["rooms"]
+                  if r["area_m2"] is None or r["area_m2"] >= matterport.MIN_ROOM_M2],      # slivers left out
         "capture_notes": rooms["capture_notes"],
         "captured": captured,
         "faces": len(shots["photos"]),

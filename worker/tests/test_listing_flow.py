@@ -38,8 +38,7 @@ def test_summarize_picks_the_useful_fields():
     s = summarize({"listing": LISTING, "features": FEATURES})
     assert (s["beds"], s["baths"], s["sqft"], s["year_built"], s["garage_spaces"]) == (3, 2, 1500, 1962, 2)
     assert s["list_date"] == "2026-02-10" and s["price"] == 750000.0 and s["property_type"] == "Single Family"
-    assert s["has"] == {"garage": True, "guest_house": False, "carport": False, "basement": False,
-                        "storage": False, "washer_dryer": True, "spa": False, "fireplace": True}
+    assert {k for k, v in s["has"].items() if v} == {"garage", "washer_dryer", "fireplace"}
     assert s["features"] == {"Interior / Appliances": ["Refrigerator", "Wine Cooler", "Dishwasher"],
                              "Exterior / Parking": ["Detached Garage"]}
     assert s["appliances"] == ["Refrigerator", "Wine Cooler"]            # the dishwasher is part of the house
@@ -215,3 +214,57 @@ def test_guest_house_wording_and_stale_cache(kit, offline):
     cache.write_text(json.dumps({"beds": 99, "has": {}}))
     result = seed.listing("fam1", "fakeA000001", store=Store())
     assert result["beds"] == 3 and json.loads(cache.read_text())["version"] == SUMMARY_VERSION
+
+
+# Feature categories and names as the real kit writes them (a listing's feature vocabulary, not a home's data).
+REAL_STYLE = [
+    {"category": "Inside This Home", "subcategory1": "Additional Homes", "subcategory2": "ADU Guest House", "name": "Detached Guest House"},
+    {"category": "Inside This Home", "subcategory1": "Interior Spaces", "subcategory2": "Spaces - Utility", "name": "Storage"},
+    {"category": "Inside This Home", "subcategory1": "Outdoor Features", "subcategory2": "Other Structures", "name": "Outdoor Storage"},
+    {"category": "Inside This Home", "subcategory1": "Outdoor Features", "subcategory2": "Patio", "name": "Concrete Porch or Patio"},
+    {"category": "Inside This Home", "subcategory1": "Laundry", "subcategory2": "Laundry Location", "name": "Laundry Located Outside"},
+    {"category": "Community Details", "subcategory1": "Amenities", "subcategory2": "Laundry", "name": "Laundry Facilities"},
+    {"category": "Inside This Home", "subcategory1": "Kitchen", "subcategory2": "Appliances - Dishwasher", "name": "Dishwasher"},
+    {"category": "Inside This Home", "subcategory1": "Parking", "subcategory2": "Doors", "name": "Two Garage Doors"},
+]
+
+
+def test_real_style_features():
+    listing = dict(LISTING, resoValues={"hasGarage": True, "structure": {"garageSpaces": 2.0}})
+    s = summarize({"listing": listing, "features": dict(FEATURES, features=REAL_STYLE, highlights=[])})
+    assert {k for k, v in s["has"].items() if v} == {"garage", "guest_house", "storage", "outdoor_storage",
+                                                     "laundry", "laundry_outside", "patio", "fireplace"}
+    assert s["appliances"] == []                       # only a dishwasher is named, and that is part of the house
+    assert s["features"]["Inside This Home / Outdoor Features / Other Structures"] == ["Outdoor Storage"]
+    community_only = [f for f in REAL_STYLE if f["category"] == "Community Details"]
+    assert not summarize({"listing": {}, "features": {"features": community_only}})["has"]["laundry"]
+    labels = [f["label"] for f in seed.listing_findings(s)]
+    assert labels == ["garage", "guest house", "outdoor storage", "storage", "patio", "laundry"]
+
+
+def test_real_style_questions(kit, offline, monkeypatch):
+    import zipfile as z
+    listing = dict(LISTING, resoValues={"hasGarage": True, "structure": {"garageSpaces": 2.0}})
+    with z.ZipFile(kit, "w") as zf:
+        zf.writestr("residential-listings.csv",
+                    "Address,City,ListingId,MatterportModelId,ResidentialListingId,State\n"
+                    "12 Example Ave,Los Angeles,501,fakeA000001,9001,CA\n")
+        zf.writestr("data/residential-listings.jsonl", json.dumps(listing))
+        zf.writestr("data/residential-listing-features.jsonl",
+                    json.dumps(dict(FEATURES, features=REAL_STYLE, highlights=[])))
+    store = Store()
+    result = seed.seed_home_twin("fam1", sid="fakeA000001", loss_date="2025-01-07", max_faces=16, store=store)
+    assert result["listing"]["mentions"] == ["fireplace", "garage", "guest house", "laundry", "outdoor storage",
+                                             "patio", "storage"]
+    queue = gap_questions("fam1", store)
+    buildings = next(q["text"] for q in queue if q["kind"] == "structure")
+    assert buildings.startswith("The listing mentions a detached guest house, a 2-car garage and outdoor storage, "
+                                "and the aerial photo from August 2024 shows a second building on the lot")
+    assert buildings.endswith("Which building was which, and what was in each?")
+    texts = [q["text"] for q in queue if q["kind"] == "listing"]
+    assert ("The listing mentions laundry outside the house, which the 3D scan doesn't show. "
+            "Was there a washer and dryer, and were they yours?") in texts
+    assert "The listing mentions storage space. Was anything kept there that we haven't covered?" in texts
+    # The aerial already raised patio furniture as a yard finding, so the patio is not asked about twice.
+    assert not any("patio" in t for t in texts)
+    assert not any("outdoor storage" in t or "guest house" in t for t in texts)      # in the buildings question

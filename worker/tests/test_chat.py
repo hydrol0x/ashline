@@ -838,3 +838,39 @@ def test_an_address_with_a_scan_offers_it_without_repeating_setup(fam):
     maya = fam.say(MAYA, "1 Elm St, Austin, TX")                                     # only the owner can set it
     assert not any(o.text.startswith("Saved the address") for o in maya)
     assert fam.store.get_case(fam.case_id)["address"].startswith("632 N Detroit")
+
+
+@pytest.mark.parametrize("reply,used", [("yes! use it as a starting point'", True), ("yes, use it as a starting point", True),
+                                        ("sure", True), ("no thanks", False), ("skip", False)])
+def test_scan_offer_understands_natural_answers(fam, reply, used):
+    fam.engine.lookup = lambda address: {"found": True, "sid": "abc", "room_count": 9, "original_created": "2026-10-01"}
+    fam.say(MOM, "632 N Detroit St, Los Angeles, CA 90036")
+    out = fam.say(MOM, reply)
+    assert out[0].text.startswith("When did it happen?") == used
+
+
+def test_unclear_scan_answer_is_asked_again_and_use_the_scan_works_later(fam):
+    fam.engine.lookup = lambda address: {"found": True, "sid": "abc", "room_count": 9, "original_created": "2026-10-01"}
+    fam.say(MOM, "632 N Detroit St, Los Angeles, CA 90036")
+    assert "Yes or no is fine" in fam.say(MOM, "hmm what does that mean")[0].text
+    fam.say(MOM, "no")
+    assert fam.say(MOM, "actually, use the scan")[0].text.startswith("When did it happen?")
+
+
+def test_scan_and_date_answers_work_in_the_family_group(fam):
+    fam.engine.lookup = lambda address: {"found": True, "sid": "abc", "room_count": 9, "original_created": "2026-10-01"}
+    group = "group-rivera"
+    fam.say(MOM, fam.code, chat=group, name="Mom")                           # the group is linked to the home
+    assert "I found a 3D scan" in fam.say(MOM, "632 N Detroit St, Los Angeles, CA 90036", chat=group)[0].text
+    assert fam.say(MOM, "yes! use it as a starting point", chat=group)[0].text.startswith("When did it happen?")
+    out = fam.say(MOM, "july 2025", chat=group)
+    assert out[0].text.startswith("Thank you. I'll go through the scan now")
+    assert fam.store.get_case(fam.case_id)["loss_date"] == "2025-07-01"
+
+
+@pytest.mark.parametrize("text,when", [("it happened in July 2025", "2025-07-01"), ("the fire was in january 2025", "2025-01-01"),
+                                       ("date of loss: 7/2025", "2025-07-01"), ("date July 2025", "2025-07-01")])
+def test_the_date_can_be_given_any_time(fam, text, when):
+    out = fam.say(MOM, text)
+    assert out[0].text.startswith("Saved: it happened in") or "insurance" in out[0].text   # or it answered "what happened?"
+    assert fam.store.get_case(fam.case_id)["loss_date"] == when

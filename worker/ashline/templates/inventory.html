@@ -234,6 +234,22 @@
   .sightings figure { flex: 0 0 100%; margin: 0; scroll-snap-align: center; position: relative; }
   .sightings img { width: 100%; max-height: 46vh; object-fit: contain; display: block; }
   .dock .sightings img { max-height: 300px; }
+  .sightings img { cursor: zoom-in; }
+  dialog.lightbox { position: fixed; inset: 0; width: 100vw; height: 100vh; max-width: none; max-height: none; margin: 0; padding: 0; border: 0;
+                    border-radius: 0; background: #0E0D0C; overflow: hidden; touch-action: none; }
+  dialog.lightbox::backdrop { background: #0E0D0C; }
+  .lb-stage { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  .lb-stage img { max-width: 100%; max-height: 100%; object-fit: contain; transform-origin: 0 0; user-select: none; -webkit-user-select: none;
+                  cursor: zoom-in; will-change: transform; }
+  .lightbox.zoomed .lb-stage img { cursor: grab; }
+  .lb-btn { position: absolute; border: 0; background: rgba(255,255,255,.92); color: #171615; width: 42px; height: 42px; font-size: 20px; cursor: pointer; border-radius: 999px; }
+  .lb-close { top: max(12px, env(safe-area-inset-top)); right: 12px; }
+  .lb-prev, .lb-next { top: 50%; transform: translateY(-50%); font-size: 28px; line-height: 1; }
+  .lb-prev { left: 12px; } .lb-next { right: 12px; }
+  .lb-btn[hidden] { display: none; }
+  .lb-bar { position: absolute; left: 0; right: 0; bottom: 0; display: flex; justify-content: space-between; padding: 10px 16px max(12px, env(safe-area-inset-bottom));
+            color: #EDE9E3; font-size: 13px; background: linear-gradient(transparent, rgba(0,0,0,.55)); pointer-events: none; }
+  .lightbox.zoomed .lb-hint { visibility: hidden; }
   .sightings figcaption { position: absolute; left: 10px; bottom: 10px; font-size: 12px; font-weight: 600; color: var(--ink); background: rgba(255, 255, 255, .94); padding: 3px 10px; border-radius: 999px; }
   .sightings .quote { color: #F1EEE9; padding: 30px 22px; font: 700 italic 18px/1.4 var(--serif); }
   .sheet { padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }
@@ -487,6 +503,13 @@
   </section>
 
   <aside class="dock" aria-label="Open item">
+    <dialog class="lightbox" id="lightbox" aria-label="Photo, zoomable">
+      <div class="lb-stage" id="lb-stage"><img id="lb-img" alt="" draggable="false"></div>
+      <button class="lb-btn lb-close" id="lb-close" type="button" aria-label="Close photo">✕</button>
+      <button class="lb-btn lb-prev" id="lb-prev" type="button" aria-label="Previous photo">‹</button>
+      <button class="lb-btn lb-next" id="lb-next" type="button" aria-label="Next photo">›</button>
+      <div class="lb-bar"><span id="lb-count"></span><span class="lb-hint">Tap to zoom · drag to move</span></div>
+    </dialog>
     <dialog id="detail" aria-label="Item detail">
       <button class="close" id="close" aria-label="Close">✕</button>
       <div class="sightings" id="sightings"></div>
@@ -817,7 +840,10 @@
     readyAt = Date.now() + 350;            // ignore a second tap that was meant for the previous item
     d.sightings.forEach(function (s, n) {
       var fig = el('figure');
-      if (s.image) { var img = el('img'); img.src = s.image; img.alt = s.label; fig.appendChild(img); }
+      if (s.image) {
+        var img = el('img'); img.src = s.image; img.alt = s.label; fig.appendChild(img);
+        img.addEventListener('click', function () { lightbox(d.sightings.filter(function (x) { return x.image; }), s); });
+      }
       else { fig.appendChild(el('div', '“' + s.label + '”', 'quote')); }
       fig.appendChild(el('figcaption', [d.sightings.length > 1 ? (n + 1) + ' of ' + d.sightings.length : null, s.source, s.by !== s.source ? s.by : null, s.date].filter(Boolean).join(' · ')));
       strip.appendChild(fig);
@@ -1018,6 +1044,75 @@
     prefetch(id);
   }
 
+  // ---- full-screen photo with zoom: tap to zoom in at that point (tap again to zoom out), drag to move,
+  // pinch on phones, scroll wheel on a laptop, swipe or arrows between an item's photos, Esc or ✕ to close.
+  var lb = document.getElementById('lightbox'), lbImg = document.getElementById('lb-img'), lbStage = document.getElementById('lb-stage');
+  var lbList = [], lbAt = 0, z = { s: 1, x: 0, y: 0 }, pts = {}, gesture = null;
+  function lbApply() { lbImg.style.transform = 'translate(' + z.x + 'px,' + z.y + 'px) scale(' + z.s + ')'; lb.classList.toggle('zoomed', z.s > 1.01); }
+  function lbReset() { z = { s: 1, x: 0, y: 0 }; lbApply(); }
+  function lbClamp() {                                       // keep the photo covering the screen while zoomed
+    var w = lbImg.offsetWidth * z.s, h = lbImg.offsetHeight * z.s, vw = lb.clientWidth, vh = lb.clientHeight;
+    var bx = lbImg.offsetLeft, by = lbImg.offsetTop;
+    z.x = w <= vw ? (vw - w) / 2 - bx : Math.min(-bx, Math.max(vw - w - bx, z.x));
+    z.y = h <= vh ? (vh - h) / 2 - by : Math.min(-by, Math.max(vh - h - by, z.y));
+  }
+  function lbZoomAt(cx, cy, scale) {
+    scale = Math.max(1, Math.min(5, scale));
+    if (scale <= 1.01) { lbReset(); return; }
+    var bx = lbImg.offsetLeft, by = lbImg.offsetTop;
+    var ix = (cx - bx - z.x) / z.s, iy = (cy - by - z.y) / z.s;            // the photo point under the finger
+    z.s = scale; z.x = cx - bx - ix * scale; z.y = cy - by - iy * scale;
+    lbClamp(); lbApply();
+  }
+  function lbShow(n) {
+    lbAt = (n + lbList.length) % lbList.length; lbReset();
+    var s = lbList[lbAt]; lbImg.src = s.image + (s.image.indexOf('?') < 0 ? '?full=1' : '&full=1'); lbImg.alt = s.label || '';
+    document.getElementById('lb-count').textContent = lbList.length > 1 ? (lbAt + 1) + ' of ' + lbList.length : (s.source || '');
+    document.getElementById('lb-prev').hidden = document.getElementById('lb-next').hidden = lbList.length < 2;
+  }
+  function lightbox(list, start) { if (!list.length) return; lbList = list; lbShow(Math.max(0, list.indexOf(start))); if (!lb.open) lb.showModal(); }
+  function lbClose() { if (lb.open) lb.close(); }
+  lb.addEventListener('close', function () { lbImg.removeAttribute('src'); lbReset(); });
+  document.getElementById('lb-close').addEventListener('click', lbClose);
+  document.getElementById('lb-prev').addEventListener('click', function () { lbShow(lbAt - 1); });
+  document.getElementById('lb-next').addEventListener('click', function () { lbShow(lbAt + 1); });
+  lbStage.addEventListener('wheel', function (e) { e.preventDefault(); lbZoomAt(e.clientX, e.clientY, z.s * (e.deltaY < 0 ? 1.15 : 1 / 1.15)); }, { passive: false });
+  lbStage.addEventListener('pointerdown', function (e) {
+    lbStage.setPointerCapture(e.pointerId); pts[e.pointerId] = { x: e.clientX, y: e.clientY };
+    var ids = Object.keys(pts);
+    gesture = ids.length === 2
+      ? { kind: 'pinch', d: Math.hypot(pts[ids[0]].x - pts[ids[1]].x, pts[ids[0]].y - pts[ids[1]].y) || 1, s: z.s }
+      : { kind: 'drag', sx: e.clientX, sy: e.clientY, x: z.x, y: z.y, moved: false };
+  });
+  lbStage.addEventListener('pointermove', function (e) {
+    if (!pts[e.pointerId] || !gesture) return;
+    pts[e.pointerId] = { x: e.clientX, y: e.clientY };
+    var ids = Object.keys(pts);
+    if (gesture.kind === 'pinch' && ids.length === 2) {
+      var a = pts[ids[0]], b = pts[ids[1]];
+      lbZoomAt((a.x + b.x) / 2, (a.y + b.y) / 2, gesture.s * Math.hypot(a.x - b.x, a.y - b.y) / gesture.d);
+    } else if (gesture.kind === 'drag') {
+      var dx = e.clientX - gesture.sx, dy = e.clientY - gesture.sy;
+      if (Math.abs(dx) + Math.abs(dy) > 6) gesture.moved = true;
+      if (z.s > 1.01) { z.x = gesture.x + dx; z.y = gesture.y + dy; lbClamp(); lbApply(); }
+    }
+  });
+  function lbUp(e) {
+    if (!pts[e.pointerId]) return;
+    delete pts[e.pointerId];
+    if (!gesture) return;
+    var left = Object.keys(pts);
+    if (gesture.kind === 'drag' && !left.length) {
+      var dx = e.clientX - gesture.sx;
+      if (!gesture.moved) lbZoomAt(e.clientX, e.clientY, z.s > 1.01 ? 1 : 2.5);            // a tap
+      else if (z.s <= 1.01 && Math.abs(dx) > 60 && lbList.length > 1) lbShow(lbAt + (dx < 0 ? 1 : -1));   // a swipe
+    }
+    if (!left.length) gesture = null;
+    else if (gesture.kind === 'pinch') gesture = { kind: 'drag', sx: pts[left[0]].x, sy: pts[left[0]].y, x: z.x, y: z.y, moved: true };
+  }
+  lbStage.addEventListener('pointerup', lbUp);
+  lbStage.addEventListener('pointercancel', lbUp);
+
   if (grid) grid.addEventListener('click', function (e) { var c = e.target.closest('.item'); if (c) { trail = []; open(c.dataset.id); } });
   var start = document.getElementById('review-start');
   if (start) start.addEventListener('click', function () { var first = toCheck()[0]; trail = []; if (first) open(first.dataset.id); });
@@ -1027,6 +1122,7 @@
     if (keys && keys.editor && !keys.editor.hidden) { e.preventDefault(); keys.editor.closeEditor(); }
   });
   dialog.addEventListener('close', function () {
+    lbClose();
     if (moving) return;
     current = null; keys = null; markOpen(null);
     function finish() {
@@ -1049,6 +1145,11 @@
   });
   dialog.addEventListener('click', function (e) { if (e.target === dialog && dialog.matches(':modal')) dialog.close(); });
   document.addEventListener('keydown', function (e) {   // laptop shortcuts: Y / N, arrows
+    if (lb.open) {                                       // the photo is open: arrows move between photos
+      if (e.key === 'ArrowRight') { e.preventDefault(); lbShow(lbAt + 1); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); lbShow(lbAt - 1); }
+      return;                                            // Esc closes it through the dialog itself
+    }
     if (!dialog.open || e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.target.closest && e.target.closest('.sort')) return;
     if (e.key === 'Escape' && !dialog.matches(':modal')) {   // the docked item has no Esc of its own

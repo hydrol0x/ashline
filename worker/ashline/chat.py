@@ -41,6 +41,9 @@ CODE = re.compile(r"\b(HOME-\d{4})\b", re.I)
 NEW_ITEMS = (r"(?:(?:no,?\s*)?(?:they|these|those|it|this|that)(?:'re| are| were| was|'s| is)?\s+)?(?:new|"
              r"not (?:previously |already )?(?:added|listed|on (?:the|my) list)|(?:were|was)n't (?:previously |already )?(?:added|listed)|"
              r"not the same(?: (?:ones?|things?|items?))?|different(?: (?:ones?|things?|items?))?)")
+LOSS_DATE = re.compile(r"(?:it happened|it was|this was|that was|the (?:fire|flood|storm|hurricane|disaster) (?:was|happened)|"
+                       r"(?:the )?date of (?:the )?loss(?: is| was|:)?|loss date(?: is| was|:)?|date(?: is| was|:)?)\s+(?:in |on |back in )?"
+                       r"(?P<when>.*\b20\d\d\b.*)")
 ADDRESS_CMD = re.compile(r"(?:(?:the |our |my )?(?:home |house |street )?address(?: is|:)?|we lived at|it was at|it's at)\s+(?P<addr>\d.+)", re.I)
 ADDRESS = re.compile(r"\d{1,6}\s+(?:[NSEW]\.?\s+)?[\w .'-]{2,40}\s(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|way|"
                      r"ct|court|pl|place|ter|terrace|pkwy|parkway|hwy|highway|cir|circle|trl|trail)\b\.?(?:[ ,].*)?", re.I)
@@ -134,8 +137,11 @@ def parse_date(text: str) -> str | None:
         year, month, day = (int(g) for g in match.groups())
     else:
         match = re.search(r"\b(\d{1,2})/(\d{1,2})/(20\d\d)\b", low)
+        short = re.search(r"\b(\d{1,2})/(20\d\d)\b", low)
         if match:
             month, day, year = (int(g) for g in match.groups())
+        elif short:
+            month, year, day = int(short.group(1)), int(short.group(2)), 1
         else:
             month = next((n for n, name in enumerate(MONTHS, 1) if re.search(rf"\b{name[:3]}[a-z]*\b", low)), None)
             year = re.search(r"\b(20\d\d)\b", low)
@@ -269,7 +275,8 @@ class Engine:
             self.store.set_member(member["member_id"], dm_chat=inbound.chat_id)          # where to reach them 1:1
 
         step = member["state"].get("step")
-        if step in ("home_name", "address", "use_scan", "loss_date", "rooms") and not inbound.is_group:
+        asked_here = member["state"].get("later") and step in ("use_scan", "loss_date")   # asked after setup, maybe in a group
+        if step in ("home_name", "address", "use_scan", "loss_date", "rooms") and (not inbound.is_group or asked_here):
             return self._continue_onboarding(inbound, member, case, text)
         if step in ("disaster", "flooded", "insured") and not inbound.is_group and not (inbound.attachments or inbound.missing):
             answered = self._answer_setup(inbound, member, case, text)
@@ -444,7 +451,10 @@ class Engine:
         if member["state"]["step"] == "use_scan":
             scan = member["state"].get("scan") or {}
             later = member["state"].get("later")
-            if text.lower().strip(" .!") in ("yes", "y", "ok", "okay", "sure", "yes please", "use it"):
+            answer = scan_answer(text)
+            if answer is None:                              # not clearly yes or no: ask again, don't guess
+                return [Outbound(inbound.chat_id, "Should I use the scan as a starting point? Yes or no is fine.")]
+            if answer:
                 # The aerial photo has to be from before the fire, so this one date is asked now.
                 self.store.set_member(member["member_id"], state={"step": "loss_date", "scan": scan, "later": later})
                 return [Outbound(inbound.chat_id, "When did it happen? A month and year is enough. It lets me use an "
@@ -500,6 +510,8 @@ class Engine:
             if not kind:
                 return None
             self.store.set_case(case["case_id"], disaster=kind)
+            if parse_date(text):                            # "a fire, in January 2025": keep the date too
+                self.store.set_case(case["case_id"], loss_date=parse_date(text))
             if kind == disaster.STORM:
                 self.store.set_member(member["member_id"], state={"step": "flooded"})
                 return [Outbound(chat_id, "I'm sorry. After a hurricane or storm there are usually two claims: flood "
@@ -545,8 +557,11 @@ class Engine:
         except Exception:                                   # the scan index is a bonus: never fail on it
             found = {"found": False}
         if found.get("found"):
-            self.store.set_member(member["member_id"], state={"step": "use_scan", "later": True, "scan": {
-                k: found.get(k) for k in ("sid", "lat", "lon", "homes_listing_id", "original_created")}})
+            scan = {k: found.get(k) for k in ("sid", "lat", "lon", "homes_listing_id", "original_created")}
+            self.store.set_member(member["member_id"], state={"step": "use_scan", "later": True, "scan": scan})
+            context = self._context(chat_id)
+            context["offered_scan"] = scan                  # "use the scan" still works after a no
+            self._save(chat_id, context)
             when = _month_year(found.get("original_created"))
             size = f" with {found['room_count']} rooms" if found.get("room_count") else ""
             return [Outbound(chat_id, f"Saved the address. I found a 3D scan of it{' from ' + when if when else ''}{size}. "
@@ -1384,6 +1399,20 @@ class Engine:
         cause = self._set_cause(case, chat_id, text)
         if cause is not None:
             return cause
+        offered = self._context(chat_id).get("offered_scan")
+        if offered and owner and re.search(r"\b(use (it|the scan|that scan|the 3d scan)|starting point|start from the scan)\b", low) \
+                and not re.search(r"\b(don'?t|do not|no)\b", low):
+            self.store.set_member(member["member_id"], state={"step": "loss_date", "scan": offered, "later": True})
+            return [Outbound(chat_id, "When did it happen? A month and year is enough. It lets me use an aerial photo "
+                                      "of the home from before it. You can say skip.")]
+        loss = LOSS_DATE.fullmatch(low)
+        if loss and owner and parse_date(loss.group("when")):
+            when = parse_date(loss.group("when"))
+            self.store.set_case(case_id, loss_date=when)
+            pretty = datetime.fromisoformat(when).strftime("%B %Y" if when.endswith("-01") else "%B %-d, %Y")
+            return [Outbound(chat_id, f"Saved: it happened in {pretty}." + (
+                f" The proof of loss is due in {meter(case_id, self.store)['days_left']} days."
+                if meter(case_id, self.store)["days_left"] is not None else ""))]
         said = ADDRESS_CMD.fullmatch(text.strip())
         address = said.group("addr") if said else (text.strip() if ADDRESS.fullmatch(text.strip()) else None)
         if address and owner:
@@ -1811,6 +1840,17 @@ def _one_edit(word: str, target: str) -> bool:
                                   and word[diff[0]] == target[diff[1]] and word[diff[1]] == target[diff[0]])
     short, long_ = sorted((word, target), key=len)
     return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
+
+
+def scan_answer(text: str) -> bool | None:
+    """Yes / no to 'use the scan as a starting point?', in the family's own words. None when unclear."""
+    low = text.lower().strip()
+    if re.search(r"\b(no|nope|nah|skip|don'?t|do not|not now|later|leave it)\b", low):
+        return False
+    if re.match(r"(yes|yeah|yep|yup|sure|ok|okay|y|please|go ahead|do it|sounds good|absolutely|of course)\b", low) \
+            or re.search(r"\b(use it|use the scan|starting point|start from it)\b", low):
+        return True
+    return None
 
 
 def yes_or_no(low: str) -> tuple[bool, bool]:

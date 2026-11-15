@@ -46,6 +46,8 @@ def test_photos_are_not_mistaken_for_video():
     assert not video.is_video("IMG_1.jpg", jpeg.getvalue())
     assert not video.is_video("IMG_2.heic", b"\x00\x00\x00\x18ftypheic\x00\x00\x00\x00")       # same container as mp4
     assert not video.is_video("IMG_3.webp", b"RIFF\x00\x00\x00\x00WEBPVP8 ")
+    assert not video.is_video("memo.m4a", b"\x00\x00\x00\x18ftypM4A \x00\x00\x00\x00")    # a voice memo
+    assert video.is_video("att_8f3a2c", b"\x00\x00\x00\x18ftypisom\x00\x00\x00\x00")       # no extension: by content
     assert video.is_video("clip.mp4", b"\x00\x00\x00\x18ftypisom\x00\x00\x00\x00")
     assert video.is_video("clip.mov", b"\x00\x00\x00\x14ftypqt  \x00\x00\x00\x00")
     assert video.is_video("clip.webm", b"\x1a\x45\xdf\xa3" + b"\x00" * 12)
@@ -66,6 +68,26 @@ def test_one_still_per_view_in_order_without_blank_walls(tmp_path):
 def test_frame_limit(tmp_path):
     clip = make_clip(tmp_path, [scene(n) for n in range(10)], seconds_each=1)
     assert len(video.extract_frames(clip, tmp_path / "frames", max_frames=4)) == 4
+
+
+@needs_ffmpeg
+def test_a_long_walk_through_gets_more_stills(tmp_path):
+    clip = make_clip(tmp_path, [scene(n) for n in range(60)], seconds_each=2)          # two minutes, 60 views
+    frames = video.extract_frames(clip, tmp_path / "frames", max_frames=5)
+    assert len(frames) == 10                                                          # 5 a minute
+    clip = make_clip(tmp_path, [scene(n) for n in range(100)], seconds_each=6, name="long.mp4")   # ten minutes
+    assert len(video.extract_frames(clip, tmp_path / "more", max_frames=14)) == video.MAX_FRAMES_LONG
+
+
+@needs_ffmpeg
+def test_a_phone_video_stored_sideways_comes_out_upright(tmp_path):
+    flat = make_clip(tmp_path, [scene(1), scene(2)], seconds_each=1, name="flat.mp4")       # 320x240 frames
+    turned = tmp_path / "turned.mov"
+    done = subprocess.run(["ffmpeg", "-v", "error", "-y", "-display_rotation:v:0", "90", "-i", str(flat),
+                           "-c", "copy", str(turned)], capture_output=True, text=True)
+    assert done.returncode == 0, done.stderr
+    frames = video.extract_frames(turned, tmp_path / "frames")
+    assert frames and all(Image.open(f["path"]).size == (240, 320) for f in frames)
 
 
 @needs_ffmpeg
@@ -106,6 +128,26 @@ def test_a_video_in_the_chat_goes_through_the_photo_pipeline(tmp_path):
     lines = [i for i in items if i["cluster_id"] in (None, i["item_id"])]
     assert sorted(i["label"] for i in lines) == ["blue velvet sofa", "brass floor lamp"]
     assert "sofa" in " ".join(texts(digest)).lower()              # one sofa seen three times, not three sofas
+
+
+@needs_ffmpeg
+def test_two_videos_at_once_and_a_repeat(tmp_path):
+    f = Family().setup()
+    f.engine.detector = SceneDetector()
+    one = make_clip(tmp_path, [scene(1), scene(2)], seconds_each=2, name="one.mp4")
+    two = make_clip(tmp_path, [scene(3), scene(4), scene(5)], seconds_each=2, name="two.mp4")
+    out = f.say(MOM, photos=[("att_1", one.read_bytes()), ("att_2", two.read_bytes())])     # names as the bridge gives them
+    assert texts(out) == ["Got the video, looking through it."]
+    photos = sorted(f.store.get_photos(f.case_id, source="photo"), key=lambda p: p["number"])
+    assert [p["batch_id"] for p in photos] == ["clip-1"] * 2 + ["clip-3"] * 3                # one clip id per video
+    f.wait()
+    assert texts(f.say(MOM, photos=[("att_3", one.read_bytes())])) == [
+        "I already have that video, so nothing new was added."]
+
+
+def test_a_voice_memo_is_neither_a_video_nor_a_broken_photo():
+    f = Family().setup()
+    assert f.say(MOM, photos=[("memo", b"\x00\x00\x00\x18ftypM4A \x00\x00\x00\x00" + b"sound" * 40)]) == []
 
 
 @needs_ffmpeg

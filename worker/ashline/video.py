@@ -18,7 +18,8 @@ from PIL import Image, ImageChops, ImageFilter, ImageStat
 
 VIDEO_SUFFIXES = (".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv", ".3gp")
 SAMPLE_FPS = 2                  # candidate frames per second of video
-MAX_FRAMES = 14                 # stills kept from one clip
+MAX_FRAMES = 14                 # stills kept from a clip of up to a minute; longer clips get as many per minute
+MAX_FRAMES_LONG = 40            # and never more than this, however long the walk-through
 MIN_DIFFERENCE = 9.0            # mean grey-level change needed to count as a new view (0-255)
 EMPTY_FRACTION = 0.35           # a frame with under this share of the clip's typical detail shows nothing
 
@@ -27,14 +28,16 @@ class VideoError(RuntimeError):
     pass
 
 
-IMAGE_BRANDS = (b"heic", b"heix", b"hevc", b"mif1", b"msf1", b"avif", b"avis")   # HEIC/AVIF photos share the mp4 container
+# Other things that live in the mp4 container: HEIC/AVIF photos, and audio (a voice memo).
+IMAGE_BRANDS = (b"heic", b"heix", b"hevc", b"mif1", b"msf1", b"avif", b"avis")
+NOT_VIDEO_BRANDS = IMAGE_BRANDS + (b"M4A ", b"M4B ", b"M4P ")
 
 
 def is_video(name: str, data: bytes) -> bool:
-    """By its first bytes, falling back to the file name. A HEIC photo or a WebP image is not a video."""
+    """By its first bytes, falling back to the file name. A HEIC photo, a WebP image or a voice memo is not a video."""
     head = data[:16]
     if head[4:8] == b"ftyp":
-        return head[8:12] not in IMAGE_BRANDS
+        return head[8:12] not in NOT_VIDEO_BRANDS
     if head[:4] == b"RIFF":
         return head[8:12] == b"AVI "
     if head[:4] == b"\x1a\x45\xdf\xa3":
@@ -88,6 +91,9 @@ def extract_frames(video: str | Path, out_dir: str | Path, max_frames: int = MAX
         typical = sorted(f["sharp"] for f in scored)[len(scored) // 2]
         detailed = [f for f in scored if f["sharp"] >= EMPTY_FRACTION * typical]
         scored = detailed if len(detailed) >= 3 else scored
+        minutes = len(candidates) / sample_fps / 60
+        if minutes > 1:                                     # a long walk-through covers more of the home
+            max_frames = min(max(MAX_FRAMES_LONG, max_frames), round(max_frames * minutes))
         spans = min(max_frames, len(scored))
         kept: list[dict] = []
         for k in range(spans):

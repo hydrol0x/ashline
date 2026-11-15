@@ -485,6 +485,8 @@ class Engine:
                 return [Outbound(inbound.chat_id, video_note)]
             if unreadable:
                 return [note]
+            if repeats and clips:
+                return [Outbound(inbound.chat_id, "I already have that video, so nothing new was added.")]
             if repeats:
                 which = ", ".join(f"photo {n}" for n in sorted(set(repeats)) if n)
                 return [Outbound(inbound.chat_id, f"I already have that one ({which}), so nothing new was added."
@@ -589,8 +591,10 @@ class Engine:
                 note = f"I couldn't open the video. {exc}" if "ffmpeg" in str(exc) else \
                     "I couldn't open the video. Could you send it again, or send a few photos instead?"
                 continue
-            clip = f"clip-{self.store.next_photo_number(case_id)}"       # unique: numbers only go up
+            # Unique per video: photo numbers only go up, and the count covers several videos in one message.
+            clip = f"clip-{self.store.next_photo_number(case_id) + len(clips)}"
             for frame_name, frame in frames:
+                frame_name = f"{clip}-{frame_name}"         # two videos may carry the same file name
                 clips[frame_name] = clip
                 out.append((frame_name, frame))
         return out, clips, note
@@ -1271,8 +1275,9 @@ def yes_or_no(low: str) -> tuple[bool, bool]:
 def looks_like_image(data: bytes) -> bool:
     """JPEG, PNG, GIF, WebP or HEIC by its first bytes."""
     head = data[:16] if data else b""
+    from .video import IMAGE_BRANDS
     return (head.startswith((b"\xff\xd8", b"\x89PNG", b"GIF8")) or head[8:12] == b"WEBP"
-            or head[4:8] == b"ftyp")
+            or (head[4:8] == b"ftyp" and head[8:12] in IMAGE_BRANDS))      # HEIC, not a video or a voice memo
 
 
 def photo_fingerprint(image) -> int:

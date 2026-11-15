@@ -120,8 +120,8 @@ def test_one_photo_comes_back_annotated(fam):
     out = fam.wait(45)
     assert len(out) == 1 and out[0].chat_id == MAYA
     assert out[0].image.endswith("annotated/fam-1.jpg") and Image.open(out[0].image).size == (640, 480)
-    assert out[0].text == ("Found 3 items, 3 new to the list. 1 blue velvet sofa ($290–$700) · "
-                           "2 brass floor lamp ($50–$130) · 3 oak coffee table ($290–$700)")
+    assert out[0].text == ("Found 3 items · 3 new\n\n1. Blue velvet sofa · $290–$700\n"
+                           "2. Brass floor lamp · $50–$130\n3. Oak coffee table · $290–$700")
     items = fam.store.get_items(fam.case_id)
     assert all(i["status"] == "suggested" and i["source"] == "photo" and i["added_by"] == "Maya" for i in items)
     assert {i["room_label"] for i in items} == {"Living room"}
@@ -149,10 +149,10 @@ def test_a_burst_gets_one_ack_and_one_digest(fam):
     assert texts(first) == ["Got it, looking through them."]
     assert fam.say(MAYA, "", [photo(672)]) == []                  # same burst: no second ack
     out = fam.wait()
-    assert out[0].text.startswith("Got 3 photos from Maya. Found 3 items, 2 new to the list. Merged 1 I'd already seen. "
-                                  "Biggest finds: ")
-    assert "red stand mixer ($30–$70)" in out[0].text and out[0].text.endswith(
-        "Full list: https://ashline.example/p/" + fam.store.get_case(fam.case_id)["member_token"])
+    assert out[0].text.startswith("Got 3 photos from Maya.\n3 items found · 2 new · 1 already listed\n\n"
+                                  "Biggest finds:\n")
+    assert "• Red stand mixer · $30–$70" in out[0].text and out[0].text.endswith(
+        "\n\nFull list: https://ashline.example/p/" + fam.store.get_case(fam.case_id)["member_token"])
     sofa = next(i for i in fam.store.get_items(fam.case_id, canonical_only=True) if "sofa" in i["label"])
     assert len(fam.store.get_sightings(fam.case_id, sofa["item_id"])) == 2          # the same sofa, seen twice
     assert fam.detector.calls == 4
@@ -200,7 +200,7 @@ def test_group_chat_is_quiet_by_default(fam):
     assert fam.say(MAYA, "Remember Grandma's piano?", chat=GROUP) == []              # heard, not answered
     assert fam.say(MAYA, "ok", chat=GROUP) == []                                     # no pending question: silence
     assert texts(fam.say(DAD, "how much so far", chat=GROUP)) == ["0 items documented so far, about $0."]
-    assert "Send photos from inside the home" in fam.say(DAD, "Ashline, what are you", chat=GROUP)[0].text
+    assert "Send me photos from inside the home" in fam.say(DAD, "Ashline, what are you", chat=GROUP)[0].text
     assert fam.say("+15558888", "hello", chat="some-other-group") == []              # not Ashline's group
 
     fam.say(MAYA, "", [photo(640), photo(656)], chat=GROUP)
@@ -222,14 +222,14 @@ def test_commands(fam):
     assert texts(fam.say(MOM, "show me everything")) == [f"Here is everything so far: https://ashline.example/p/{case['owner_token']}"]
 
     out = fam.say(MOM, "how much so far")
-    assert out[0].text == "0 items documented so far, about $0. 3 more items ($980) are waiting for an OK."
+    assert out[0].text == "0 items documented so far, about $0.\n3 more items ($980) are waiting for an OK."
     assert "contents coverage limit" in out[1].text and "skip" in out[1].text
     assert texts(fam.say(MOM, "$400k")) == [
-        "You're at $0 of $160k documented. 3 more items ($980) are waiting for an OK."]
+        "You're at $0 of $160k documented.\n3 more items ($980) are waiting for an OK."]
     assert len(fam.say(MAYA, "how much so far")) == 1                                # relatives are not asked
 
     shown = fam.say(MAYA, "show photo 1")
-    assert shown[0].image.endswith("fam-1.jpg") and shown[0].text.startswith("1 blue velvet sofa")
+    assert shown[0].image.endswith("fam-1.jpg") and shown[0].text.startswith("1. Blue velvet sofa")
     assert "don't have a photo 7" in fam.say(MAYA, "show photo 7")[0].text
     assert len(fam.say(MAYA, "show the living room")) == 1
     assert "don't have photos of the garage" in fam.say(MAYA, "show the garage")[0].text
@@ -237,20 +237,21 @@ def test_commands(fam):
     assert texts(fam.say(MAYA, "2 isn't ours")) == ["Removed the brass floor lamp. Say undo if that was a mistake."]
     assert texts(fam.say(MAYA, "undo")) == ["Undone: it's back on the list."]
     assert texts(fam.say(MAYA, "undo")) == ["There's nothing to undo."]
-    assert texts(fam.say(MAYA, "2 is a Pottery Barn arc lamp")) == ["Updated: Pottery Barn arc lamp ($50–$130)."]
+    assert texts(fam.say(MAYA, "2 is a Pottery Barn arc lamp")) == ["Updated: Pottery Barn arc lamp · $50–$130."]
     assert "don't have a number 9" in fam.say(MAYA, "remove 9")[0].text
 
     assert "Only Mom can export" in fam.say(MAYA, "export")[0].text
     assert "Nothing is confirmed yet" in fam.say(MOM, "export")[0].text
-    assert "list, how much so far" in fam.say(MAYA, "help")[0].text
+    assert "• how much so far" in fam.say(MAYA, "help")[0].text
 
 
 def test_review_ok_and_export(fam):
     fam.say(MAYA, "", [photo(640)])
     fam.wait()
     out = fam.say(MOM, "review")
-    assert out[0].text.startswith('3 new items from Maya, about $980. Reply OK to add all, or tell me what\'s wrong '
-                                  '("remove 4"). 1 blue velvet sofa · 2 oak coffee table · 3 brass floor lamp. See them: ')
+    assert out[0].text.startswith("3 new items from Maya, about $980.\n\n1. Blue velvet sofa · $290–$700\n"
+                                  "2. Oak coffee table · $290–$700\n3. Brass floor lamp · $50–$130\n\n"
+                                  'Reply OK to add them all, or tell me what\'s wrong ("remove 4").\nSee them: ')
     assert texts(fam.say(MOM, "remove 3")) == ["Removed the brass floor lamp. Say undo if that was a mistake."]
     assert texts(fam.say(MOM, "OK")) == ["Added 2 items. 2 items documented so far, about $900."]
     assert [i["status"] for i in fam.store.get_items(fam.case_id, canonical_only=True)].count("confirmed") == 2
@@ -388,7 +389,7 @@ def test_onboarding_from_the_scan_of_the_address(index, monkeypatch):
     assert f.wait(5) == []                                                 # the job runs once
 
     review = f.say(MOM, "review")[0].text
-    assert review.startswith("3 new items from the 3D scan, about $") and "2 × " not in review
+    assert review.startswith("3 new items from the 3D scan, about $") and "1. 2 × oak bar stool" in review
     assert f.say(MOM, "ok")[0].text.startswith("Added 3 items.")
 
 

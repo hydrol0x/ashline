@@ -75,8 +75,8 @@ def meter_line(m: dict) -> str:
     else:
         text = f"{m['items']} items documented so far, about {money(m['documented'])}."
     if m["pending_items"]:
-        text += f" {m['pending_items']} more item{'s' if m['pending_items'] != 1 else ''} " \
+        text += f"\n{m['pending_items']} more item{'s' if m['pending_items'] != 1 else ''} " \
                 f"({money(m['pending'])}) {'are' if m['pending_items'] != 1 else 'is'} waiting for an OK."
     if m["days_left"] is not None:
-        text += f" Proof of loss is due in {m['days_left']} days."
+        text += f"\nProof of loss is due in {m['days_left']} days."
     return text

@@ -109,7 +109,7 @@ def test_meter_separates_backed_memory_and_pending():
     assert (m["items"], m["backed"], m["memory"], m["documented"]) == (2, 1000, 600, 1600)
     assert (m["pending_items"], m["pending"]) == (1, 200)                 # 2 lamps at $100, still a suggestion
     assert m["target"] is None and m["percent"] is None and m["days_left"] is None
-    assert meter_line(m) == "2 items documented so far, about $1,600. 1 more item ($200) is waiting for an OK."
+    assert meter_line(m) == "2 items documented so far, about $1,600.\n1 more item ($200) is waiting for an OK."
 
     store.set_case("fam1", coverage_limit=10_000, loss_date="2026-10-01")
     m = meter("fam1", store, today=date(2026, 11, 14))

@@ -70,8 +70,10 @@ def annotate(photo_path: str | Path, boxes: list[dict], out_path: str | Path | N
 
 
 def legend(entries: list[dict]) -> str:
-    """'1 sectional sofa · 2 floor lamp · 3 bookshelf' for the chat message."""
-    return " · ".join(f"{e['n']} {e['label']}" for e in entries)
+    """One numbered line per item for the chat message:
+    1. Sectional sofa · $900–$2.1k
+    2. Floor lamp · already listed"""
+    return "\n".join(f"{e['n']}. {e['label'][:1].upper()}{e['label'][1:]}" for e in entries)
 
 
 def side_by_side(photo_a: str | Path, bbox_a: list | None, photo_b: str | Path, bbox_b: list | None,

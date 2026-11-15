@@ -111,7 +111,7 @@ def test_chat_simulator_and_page_links(offline, capsys, monkeypatch, tmp_path):
     assert "Ashline → +15550001: I'm Ashline." in text and "Your code is HOME-" in text
     assert "(you are now Maya)" in text and "don't recognise that code" in text and "You've joined the Example home" in text
     assert "could not read" in text and "Ashline → +15550002: Got it, looking at it." in text
-    assert "1 blue velvet sofa" in text and "[attached: " in text and "annotated/fam-1.jpg" in text
+    assert "1. Blue velvet sofa" in text and "[attached: " in text and "annotated/fam-1.jpg" in text
     assert "(talking in the group example)" in text and "see you at six" not in text      # silence in the group
     assert "/photo a.jpg b.jpg" in text and "never sent" not in text
 

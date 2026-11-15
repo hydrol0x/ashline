@@ -44,8 +44,14 @@ DEADLINE_DAYS = (60, 30, 10)            # proof-of-loss reminders, and nothing e
 
 INTRO = ("I'm Ashline. I help families rebuild the list of belongings insurance asks for after a fire. "
          "It takes a few minutes at a time, and you can stop whenever. What should I call your home?")
-HELP = ("Send photos from inside the home, from any year, and I'll list what's in them. You can also say: "
-        "list, how much so far, show photo 3, call me, export, undo, pause.")
+HELP = ("Send me photos from inside the home, from any year, and I'll list what's in them.\n\n"
+        "You can also ask, in your own words:\n"
+        "• list: the full inventory\n"
+        "• how much so far\n"
+        "• show photo 3\n"
+        "• call me: remember things no photo shows\n"
+        "• export: spreadsheet and PDF\n"
+        "• undo · pause")
 # Household things worth noticing when the family mentions them to each other.
 HEARD_WORDS = ("piano", "guitar", "violin", "drum kit", "tv", "television", "sofa", "couch", "dining table", "table",
                "desk", "bed", "dresser", "bike", "bicycle", "treadmill", "freezer", "washer", "dryer", "sewing machine",
@@ -178,7 +184,7 @@ class Engine:
     def _display(self, item: dict) -> str:
         price = money_range(item.get("price_low"), item.get("price_high")) if item.get("price_mid") else ""
         qty = f"{item['qty']} × " if (item.get("qty") or 1) > 1 else ""
-        return f"{qty}{item['label']}" + (f" ({price})" if price else "")
+        return f"{qty}{item['label']}" + (f" · {price}" if price else "")
 
     # ---------------------------------------------------------- entry point
     def handle(self, inbound: Inbound) -> list[Outbound]:
@@ -236,7 +242,7 @@ class Engine:
                         r"👍|❤️|🙏)[ .!]*", text.strip().lower()):
             return [Outbound(inbound.chat_id, "Anytime. Send more photos whenever you have them.")]
         return (self._interpret(inbound, member, case, text, now)
-                or [Outbound(inbound.chat_id, "I'm not sure what you'd like me to do with that. " + HELP)])
+                or [Outbound(inbound.chat_id, "I'm not sure what you'd like me to do with that.\n\n" + HELP)])
 
     def _interpret(self, inbound: Inbound, member: dict, case: dict, text: str, now: datetime):
         """A message no exact command matched: let the model pick a real command or a short reply."""
@@ -495,7 +501,7 @@ class Engine:
         text = None
         if m["days_left"] in DEADLINE_DAYS and m["days_left"] not in sent.get("deadline", []):
             sent.setdefault("deadline", []).append(m["days_left"])
-            text = f"A gentle reminder: proof of loss is due in {m['days_left']} days. " + meter_line(m).split(" Proof of loss")[0]
+            text = f"A gentle reminder: proof of loss is due in {m['days_left']} days. " + meter_line(m).split("\nProof of loss")[0]
         else:
             quiet_since = max(owner.get("last_seen") or "", sent.get("last") or "")       # never two in one week
             if quiet_since and now - datetime.fromisoformat(quiet_since) >= timedelta(days=7) and m["target"]:
@@ -596,18 +602,17 @@ class Engine:
         else:
             years = sorted({p["taken"][:4] for p in photos if p.get("taken")})
             span = f" ({years[0]}–{years[-1]})" if len(years) > 1 else f" ({years[0]})" if years else ""
-            text = f"Got {len(photos)} photos from {who}{span}. Found {found} items, {len(lines)} new to the list."
-            if merged["merged"]:
-                text += f" Merged {merged['merged']} I'd already seen."
-            top = [f"{i['label']} ({money_range(i['price_low'], i['price_high'])})" for i in lines[:3] if i.get("price_mid")]
+            text = (f"Got {len(photos)} photos from {who}{span}.\n"
+                    f"{found} items found · {len(lines)} new" + (f" · {merged['merged']} already listed" if merged["merged"] else ""))
+            top = [f"• {_cap(self._display(i))}" for i in lines[:3] if i.get("price_mid")]
             if top:
-                text += " Biggest finds: " + ", ".join(top) + "."
+                text += "\n\nBiggest finds:\n" + "\n".join(top)
             out.append(Outbound(chat_id, text))
             if len(photos) <= ANNOTATE_UP_TO:                # a few photos: each comes back annotated too,
                 for p in photos:                             # after the summary and any question
                     shot = self._annotated(case_id, chat_id, p, context)
                     if not shot.text.startswith("I couldn't"):
-                        shot.text = f"Photo {p.get('number') or ''}: {shot.text}".replace("Photo : ", "")
+                        shot.text = (f"Photo {p['number']}\n" if p.get("number") else "") + shot.text
                         shots.append(shot)
 
         heard = context.pop("heard", [])
@@ -622,7 +627,7 @@ class Engine:
         owner = self._owner(case_id)
         link_for = sender or owner
         if link_for and len(photos) > 1:
-            out[0].text += f" Full list: {self.link(case, link_for)}"
+            out[0].text += f"\n\nFull list: {self.link(case, link_for)}"
         self._save(chat_id, context)
         # After a digest of several photos only: a single annotated photo is left to stand on its own.
         ask = self._directed_ask(case_id, chat_id, sender, now) if len(out) == 1 and len(photos) > 1 else None
@@ -651,8 +656,8 @@ class Engine:
 
     @staticmethod
     def _counts_line(new: int, merged: int) -> str:
-        text = f"{new} new to the list" if new else "nothing new to the list"
-        return text + (f", {merged} already on it." if merged else ".")
+        text = f"{new} new" if new else "nothing new"
+        return text + (f" · {merged} already listed" if merged else "")
 
     def _annotated(self, case_id: str, chat_id: str, photo: dict, context: dict, extra: str = "") -> Outbound:
         """The original photo with numbered boxes, and a legend in the text."""
@@ -666,14 +671,14 @@ class Engine:
             status = "maybe" if canonical in open_maybe else "new" if item["item_id"] in new_canon else "listed"
             boxes.append({"n": n, "bbox": item["bbox"], "status": status})
             line = self.store.get_item(case_id, canonical) or item
-            entries.append({"n": n, "label": self._display(line) if status != "listed" else f"{line['label']} (already listed)"})
+            entries.append({"n": n, "label": self._display(line) if status != "listed" else f"{line['label']} · already listed"})
             shown[str(n)] = canonical
         out_path = config.case_dir(case_id) / "annotated" / f"{photo['photo_id']}.jpg"
         annotate(photo["path"], boxes, out_path)
         context["list"] = shown
         text = legend(entries) if entries else "I couldn't make out items in this one."
         if extra and entries:
-            text = f"Found {len(entries)} items, {extra} {text}"
+            text = f"Found {len(entries)} item{'s' if len(entries) != 1 else ''} · {extra}\n\n{text}"
         return Outbound(chat_id, text, image=str(out_path))
 
     def _ask_same(self, case_id: str, chat_id: str, pairs: list, now: datetime) -> list[Outbound]:
@@ -943,11 +948,11 @@ class Engine:
         for item in fresh:
             self.store.update_item(case_id, item["item_id"], reviewed=1)
         self.store.set_case(case_id, last_review_at=now.isoformat())
-        top = " · ".join(f"{n} {i['label']}" for n, i in enumerate(fresh[:5], 1))
-        more = f" · and {len(fresh) - 5} more" if len(fresh) > 5 else ""
+        top = "\n".join(f"{n}. {_cap(self._display(i))}" for n, i in enumerate(fresh[:5], 1))
+        more = f"\n…and {len(fresh) - 5} more" if len(fresh) > 5 else ""
         text = (room_note + f"{len(fresh)} new item{'s' if len(fresh) != 1 else ''}"
                 + (f" from {_join(people)}" if people else "") + (f", about {money(total)}" if total else "")
-                + f". Reply OK to add all, or tell me what's wrong (\"remove 4\"). {top}{more}. "
+                + f".\n\n{top}{more}\n\nReply OK to add them all, or tell me what's wrong (\"remove 4\").\n"
                 + f"See them: {self.link(case, member)}")
         return [Outbound(chat_id, text)]
 
@@ -1043,6 +1048,10 @@ class _RoomAware:
 YES_WORDS = {"1", "same", "yes", "y", "yep", "yeah", "ok", "okay", "yup", "sure"}
 NO_WORDS = {"2", "different", "no", "n", "nope", "nah", "separate"}
 FILLER_WORDS = {"it's", "its", "it", "the", "is", "a", "they're", "theyre", "are", "please", "add", "one", "ones"}
+
+
+def _cap(text: str) -> str:
+    return text[:1].upper() + text[1:]
 
 
 def yes_or_no(low: str) -> tuple[bool, bool]:

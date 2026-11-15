@@ -90,7 +90,7 @@ def test_photo_in_reply_with_annotated_image(bridge):
     b.send(b.engine.tick())
     kinds = [getattr(getattr(body.content, "root", body.content), "type", None) for body in projects.sent]
     assert kinds == ["text", "attachment", "text"]                              # ack, annotated photo, legend
-    assert projects.uploads[0].content_type.startswith("multipart/related; boundary=") and "1 blue velvet sofa" in sent_text(projects)[-1]
+    assert projects.uploads[0].content_type.startswith("multipart/related; boundary=") and "1. Blue velvet sofa" in sent_text(projects)[-1]
 
 
 def test_group_chat_agent_events_and_unknown_spaces(bridge):

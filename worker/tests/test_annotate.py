@@ -41,4 +41,4 @@ def test_crop_and_side_by_side(tmp_path):
     out = side_by_side(a, [100, 100, 300, 300], b, [200, 200, 600, 500], tmp_path / "same.jpg")
     sheet = Image.open(out)
     assert sheet.height == 600 and sheet.width > 1200
-    assert legend([{"n": 1, "label": "sectional sofa"}, {"n": 2, "label": "floor lamp"}]) == "1 sectional sofa · 2 floor lamp"
+    assert legend([{"n": 1, "label": "sectional sofa"}, {"n": 2, "label": "floor lamp"}]) == "1. Sectional sofa\n2. Floor lamp"

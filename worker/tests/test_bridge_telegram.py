@@ -356,3 +356,27 @@ def test_two_homes_stay_separate_when_someone_belongs_to_both(tg):
     bridge.poll()
     bridge.send(bridge.engine.tick(owns=lambda c: c.startswith("tg:")))
     assert len(store.get_photos(jacob)) == 1 and len(store.get_photos(tim)) == 1   # and his own stays his
+
+
+def test_a_typed_answer_retires_the_buttons_so_an_old_tap_cannot_replay_it(tg, heard):
+    bridge, api = tg
+    bridge.send([Outbound("tg:1", "Use these prices? Reply yes or no.", choices=[("Use these prices", "yes"), ("No", "no")])])
+    message_id, buttons = keyboard(api)
+    api.message("yes")
+    bridge.poll()
+    assert {"chat_id": "1", "message_id": message_id, "reply_markup": {"inline_keyboard": []}} in calls(api, "editMessageReplyMarkup")
+    assert bridge.state["live"].get("1") != message_id
+    api.sent.clear()
+    press(api, buttons[0]["callback_data"], message_id)
+    bridge.poll()
+    assert calls(api, "answerCallbackQuery")[0]["text"] == MOVED_ON
+    assert [i.text for i in heard] == ["yes"]
+
+
+def test_group_chatter_does_not_take_the_buttons_away(tg, heard):
+    bridge, api = tg
+    bridge.send([Outbound("tg:-40", "Same sofa? 1 = same, 2 = different.", choices=SAME)])
+    message_id, _ = keyboard(api)
+    api.message("lol nice", chat=-40, kind="group")
+    bridge.poll()
+    assert bridge.state["live"].get("-40") == message_id

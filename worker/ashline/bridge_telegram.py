@@ -111,7 +111,11 @@ class TelegramBridge:
                 self.send(self.joined(message))
                 inbound = self.to_inbound(message)
                 if inbound is not None:
-                    self.send(self.engine.handle(inbound))
+                    replies = self.engine.handle(inbound)
+                    chat_key = inbound.chat_id[len(TELEGRAM_PREFIX):]
+                    if inbound.text and replies and chat_key in self.state["live"]:
+                        self.retire(chat_key)             # answered by typing: the old buttons must not answer again
+                    self.send(replies)
                     handled += 1
             self._save()                                  # never handle the same update twice after a restart
         return handled

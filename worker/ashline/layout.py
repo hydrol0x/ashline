@@ -131,6 +131,19 @@ def load_plan(case_id: str) -> dict | None:
         return None
 
 
+def ensure_scan_plan(case_id: str, store, client=None) -> None:
+    """Fetch the scan's geometry once for a case that was seeded before plans existed. Never raises."""
+    if (load_plan(case_id) or {}).get("rooms"):
+        return
+    sid = (store.get_home(case_id) or {}).get("sid")
+    if not sid or (client is None and not config.env("MATTERPORT_API_KEY")):
+        return
+    try:
+        fetch_scan_plan(sid, case_id, client)
+    except Exception as exc:
+        print(f"ashline: no plan geometry from the scan ({exc})")
+
+
 def floor_spot(camera: dict, face: int, bbox: list, size: tuple[int, int], outline: Polygon | None,
                height: float = CAMERA_HEIGHT, others: list[Polygon] | None = None) -> tuple[float, float, bool]:
     """Where on the plan an object seen in one cube face stands: (x, y, exact).
@@ -319,6 +332,7 @@ def _fill_points(outline: Polygon, count: int) -> list[tuple[float, float]]:
 def build(case_id: str, store, drawn: dict | None = None) -> dict:
     """The plan and the pins for a case, ready to draw. `drawn` is an optional model sketch."""
     lines = _lines(store, case_id)
+    ensure_scan_plan(case_id, store)
     plan = load_plan(case_id)
     if not plan or not plan.get("rooms"):
         if drawn is None:

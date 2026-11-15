@@ -195,12 +195,6 @@ def _run(args, parser) -> None:
         case = store.get_case(args.case)
         if not case:
             parser.exit(1, f"No case {args.case!r}.\n")
-        home = store.get_home(args.case) or {}
-        if home.get("sid") and not (layout.load_plan(args.case) or {}).get("rooms"):
-            try:
-                layout.fetch_scan_plan(home["sid"], args.case)
-            except Exception as exc:
-                print(f"Could not read the scan's room outlines ({exc}); sketching from photos instead.")
         if sketch_claude.available():
             try:
                 sketch_claude.refresh(args.case, store, force=args.redraw)

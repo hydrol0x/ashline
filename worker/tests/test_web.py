@@ -51,7 +51,8 @@ def test_owner_page_shows_meter_items_and_export(case):
     assert "The Example home · 3 items" in html and "2 family members contributing" in html
     assert "$1,800" in html and "documented · 2 items" in html                 # no coverage limit yet
     assert "What is the contents coverage limit" in html                        # asked, with a skip
-    assert "Blue velvet sofa" in html and "Table saw" in html and f'data-id="{ids['gone']}"' not in html
+    assert "Blue velvet sofa" in html and "Table saw" in html and f'data-removed="1" hidden data-id="{ids['gone']}"' in html
+    assert "Removed<span>1</span>" in html                                      # only under the Removed tab
     assert f'/p/owner-token/crop/{ids["sofa"]}.jpg' in html and "from memory" in html
     assert "2 × $54–$135" in html                                               # two lamps, priced per unit
     assert "Download PDF for insurer" in html and "noindex" in html
@@ -61,6 +62,7 @@ def test_owner_page_shows_meter_items_and_export(case):
 def test_member_page_has_no_export_or_owner_questions(case):
     client, _, ids = case
     html = client.get("/p/member-token").text
+    assert "data-removed" not in html and "Removed<span>" not in html             # members never see removed items
     assert "Blue velvet sofa" in html and "Download PDF" not in html and "coverage limit" not in html
     assert client.get("/p/member-token/export.csv").status_code == 403
     assert client.post(f"/p/member-token/item/{ids['lamp']}", json={"action": "remove"}).status_code == 403
@@ -107,7 +109,8 @@ def test_owner_actions(case):
     assert (item["price_low"], item["price_mid"], item["price_high"], item["price_source"]) == (150, 150, 150, "set by family")
     assert "Price set by the family." in client.get(f"/p/owner-token/item/{lamp}.json").json()["price_basis"]
     assert client.post(f"/p/owner-token/item/{lamp}", json={"action": "remove"}).status_code == 200
-    assert store.get_item("fam1", lamp)["status"] == "rejected" and "Brass floor lamp" not in client.get("/p/owner-token").text
+    assert store.get_item("fam1", lamp)["status"] == "rejected"
+    assert f'data-removed="1" hidden data-id="{lamp}"' in client.get("/p/owner-token").text
     assert store.last_event("fam1")["action"] == "item.remove"
     assert store.last_event("fam1")["payload"]["before"]["status"] == "confirmed"       # enough to undo
     assert client.post(f"/p/owner-token/item/{lamp}", json={"action": "explode"}).status_code == 400

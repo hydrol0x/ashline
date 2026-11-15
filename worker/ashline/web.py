@@ -105,11 +105,11 @@ def page_data(case_id: str, store: Store, role: str) -> dict:
     by_canonical: dict[int, list[dict]] = {}
     for row in everything:
         by_canonical.setdefault(row["cluster_id"] or row["item_id"], []).append(row)
-    items = []
+    items, removed = [], []
     for row in everything:
-        if (row["cluster_id"] or row["item_id"]) != row["item_id"] or row["status"] == "rejected":
+        if (row["cluster_id"] or row["item_id"]) != row["item_id"]:
             continue
-        items.append(item_view(row, by_canonical[row["item_id"]]))
+        (removed if row["status"] == "rejected" else items).append(item_view(row, by_canonical[row["item_id"]]))
     items.sort(key=lambda i: -i["value"])
 
     rooms: dict[str, int] = {}
@@ -124,6 +124,7 @@ def page_data(case_id: str, store: Store, role: str) -> dict:
         "name": case.get("name") or "Your home",
         "role": role,
         "items": items,
+        "removed": removed if role == "owner" else [],
         "confirmed": sum(1 for i in items if i["status"] == "confirmed"),
         "rooms": sorted(rooms.items(), key=lambda kv: -kv[1]),
         "meter": m,

@@ -45,6 +45,8 @@
   .chip span { color: var(--muted); margin-left: 4px; }
   .chip[aria-pressed=true] { background: var(--ink); border-color: var(--ink); color: #fff; }
   .chip[aria-pressed=true] span { color: #D8D2C8; }
+  .chip.removed-chip { border-style: dashed; color: var(--muted); }
+  .item.rejected { opacity: .6; }
   .tools { display: flex; justify-content: space-between; align-items: center; margin: 2px 0 12px; font-size: 13px; color: var(--muted); }
   .tools select { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 5px 8px; }
 
@@ -131,6 +133,12 @@
   .btn.chosen-yes { box-shadow: 0 0 0 3px rgba(31, 111, 107, .25); }
   .btn.chosen-no { background: #F4E7E3; border-color: #D9B8AE; color: #8A3F2C; }
   .hint-line { grid-column: 1 / -1; text-align: center; margin: 0 !important; }
+  html:has(dialog[open]) { overflow: hidden; }
+  .sheet.loading { opacity: .45; pointer-events: none; transition: opacity .12s; }
+  .error { color: #A1452F; font-size: 13px !important; grid-column: 1 / -1; margin: 4px 0 0 !important; }
+  .toast { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--ink); color: #fff;
+           padding: 10px 16px; border-radius: 999px; font-size: 14px; z-index: 50; transition: opacity .4s; box-shadow: 0 6px 20px rgba(0,0,0,.18); }
+  .toast.gone { opacity: 0; }
   .saved { color: var(--accent); font-weight: 600; font-size: 13px !important; animation: fade 2.4s forwards; }
   @keyframes fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
   dialog { overscroll-behavior: contain; }
@@ -184,6 +192,7 @@
   <nav class="chips" aria-label="Rooms">
     <button class="chip" aria-pressed="true" data-room="">All<span>{{ items|length }}</span></button>
     {% for room, count in rooms %}<button class="chip" aria-pressed="false" data-room="{{ room }}">{{ room }}<span>{{ count }}</span></button>{% endfor %}
+    {% if removed %}<button class="chip removed-chip" aria-pressed="false" data-room="__removed">Removed<span>{{ removed|length }}</span></button>{% endif %}
   </nav>
   <div class="tools">
     <span id="shown">{{ items|length }} shown</span>
@@ -198,10 +207,29 @@
     </select></label>
   </div>
 
-  {% if items %}
+  {% if items or removed %}
   <div class="grid" id="grid">
-    {% for i in items %}
-    <button class="item {{ i.status }}" data-id="{{ i.id }}" data-room="{{ i.room }}" data-value="{{ i.value }}"
+    {% for i in items %}{% set removed_card = false %}
+    <button class="item {{ i.status }}"{% if removed_card %} data-removed="1" hidden{% endif %} data-id="{{ i.id }}" data-room="{{ i.room }}" data-value="{{ i.value }}"
+            data-proof="{{ 1 if i.needs_proof else 0 }}" data-review="{{ 1 if i.status == 'suggested' else 0 }}"
+            data-new="{{ i.created }}" data-name="{{ i.title|lower }}">
+      <div class="shot">
+        {% if i.has_photo %}<img loading="lazy" src="/p/{{ token }}/crop/{{ i.id }}.jpg" alt="">
+        {% else %}<span class="mem">from memory</span>{% endif %}
+      </div>
+      <div class="body">
+        <div class="name">{{ i.title }}</div>
+        <div class="line">{{ i.room }} · {{ i.category }}{% if i.brand %} · {{ i.brand }}{% endif %}</div>
+        {% if i.price %}<div class="price">{{ i.price }}</div>{% endif %}
+        <div class="foot">
+          <span>{% if i.badges.photo %}📷 {{ i.badges.photo }}{% endif %}{% if i.badges.memory %} 🎙 {{ i.badges.memory }}{% endif %}{% if i.badges.receipt %} 🧾 {{ i.badges.receipt }}{% endif %}{% if i.status == 'suggested' %} · to check{% endif %}</span>
+          <span>{{ i.contributors|join(', ') }}</span>
+        </div>
+      </div>
+    </button>
+    {% endfor %}
+    {% for i in removed %}{% set removed_card = true %}
+    <button class="item {{ i.status }}"{% if removed_card %} data-removed="1" hidden{% endif %} data-id="{{ i.id }}" data-room="{{ i.room }}" data-value="{{ i.value }}"
             data-proof="{{ 1 if i.needs_proof else 0 }}" data-review="{{ 1 if i.status == 'suggested' else 0 }}"
             data-new="{{ i.created }}" data-name="{{ i.title|lower }}">
       <div class="shot">
@@ -264,7 +292,8 @@
     var cards = [].slice.call(grid.children), mode = sortBox.value, shown = 0;
     cards.sort(ORDER[mode] || ORDER.value);
     cards.forEach(function (c) {
-      var ok = !room || c.dataset.room === room;
+      var gone = c.dataset.removed === '1';
+      var ok = room === '__removed' ? gone : !gone && (!room || c.dataset.room === room);
       c.hidden = !ok; if (ok) shown++; grid.appendChild(c);
     });
     document.getElementById('shown').textContent = shown + ' shown';
@@ -286,8 +315,28 @@
   }
   function el(tag, text, cls) { var e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; }
 
-  var dialog = document.getElementById('detail'), dirty = false, current = null, trail = [], flash = '';
+  var dialog = document.getElementById('detail'), sheet = document.getElementById('sheet'), strip = document.getElementById('sightings');
+  var dirty = 0, current = null, trail = [], flash = '', cache = {}, readyAt = 0, keys = null;
+
+  // Remember where the person was, so closing the sheet (which refreshes totals) lands them back in place.
+  try {
+    var back = JSON.parse(sessionStorage.getItem('ashline-return') || 'null');
+    sessionStorage.removeItem('ashline-return');
+    if (back) {
+      var chip = chips.filter(function (c) { return c.dataset.room === back.room; })[0];
+      if (chip) chip.click();
+      window.scrollTo(0, back.y || 0);
+      if (back.saved) toast(back.saved === 1 ? 'Saved 1 change' : 'Saved ' + back.saved + ' changes');
+    }
+  } catch (e) {}
+  function toast(text) {
+    var t = el('div', text, 'toast'); document.body.appendChild(t);
+    setTimeout(function () { t.classList.add('gone'); }, 2200);
+    setTimeout(function () { t.remove(); }, 2700);
+  }
+
   function cards() { return grid ? [].slice.call(grid.querySelectorAll('.item')) : []; }
+  function card(id) { return grid && grid.querySelector('.item[data-id="' + id + '"]'); }
   function toCheck() { return cards().filter(function (c) { return !c.hidden && c.dataset.review === '1'; }); }
   function nextAfter(id) {
     var all = cards().filter(function (c) { return !c.hidden; }), i = all.findIndex(function (c) { return c.dataset.id === String(id); });
@@ -295,24 +344,23 @@
     return null;
   }
   function markCard(id, status) {
-    var card = grid && grid.querySelector('.item[data-id="' + id + '"]');
-    if (!card) return;
-    card.classList.remove('suggested', 'confirmed', 'rejected'); card.classList.add(status);
-    card.dataset.review = status === 'suggested' ? '1' : '0';
-    var foot = card.querySelector('.foot span');
-    if (foot) foot.textContent = foot.textContent.replace(/ · (to check|removed|✓)$/, '') + (status === 'rejected' ? ' · removed' : status === 'confirmed' ? ' · ✓' : '');
+    var c = card(id); if (!c) return;
+    c.classList.remove('suggested', 'confirmed', 'rejected'); c.classList.add(status);
+    c.dataset.review = status === 'suggested' ? '1' : '0';
+    var foot = c.querySelector('.foot span');
+    if (foot) foot.textContent = foot.textContent.replace(/ · (to check|removed|✓)$/, '') +
+      (status === 'rejected' ? ' · removed' : status === 'confirmed' ? ' · ✓' : ' · to check');
     refreshReview();
   }
   function updateCard(d) {
-    var card = grid && grid.querySelector('.item[data-id="' + d.id + '"]');
-    if (!card) return;
-    var name = card.querySelector('.name'); if (name) name.textContent = d.title;
-    var price = card.querySelector('.price');
+    var c = card(d.id); if (!c) return;
+    var name = c.querySelector('.name'); if (name) name.textContent = d.title;
+    var price = c.querySelector('.price');
     if (d.price) {
-      if (!price) { price = el('div', null, 'price'); card.querySelector('.line').after(price); }
+      if (!price) { price = el('div', null, 'price'); c.querySelector('.line').after(price); }
       price.textContent = d.price;
     }
-    card.dataset.value = d.value; card.dataset.name = (d.title || '').toLowerCase();
+    c.dataset.value = d.value; c.dataset.name = (d.title || '').toLowerCase();
   }
   function refreshReview() {
     var n = toCheck().length, bar = document.getElementById('review');
@@ -320,136 +368,211 @@
     bar.hidden = n === 0;
     var c = document.getElementById('review-count'); if (c) c.textContent = n + (n === 1 ? ' item' : ' items');
   }
+
+  function load(id) {
+    if (!cache[id]) cache[id] = fetch('/p/' + token + '/item/' + id + '.json').then(function (r) {
+      if (!r.ok) throw new Error('failed'); return r.json();
+    }).catch(function (e) { delete cache[id]; throw e; });
+    return cache[id];
+  }
+  function prefetch(id) {
+    var next = nextAfter(id); if (!next) return;
+    load(next.dataset.id).then(function (d) {
+      d.sightings.forEach(function (s) { if (s.image) { var i = new Image(); i.src = s.image; } });
+    }).catch(function () {});
+  }
   function goNext(id) {
     if (trail[trail.length - 1] !== id) trail.push(id);
     var next = nextAfter(id);
     if (next) open(next.dataset.id); else allDone();
   }
+  function goBack() { if (trail.length) open(trail.pop()); }
+
   function allDone() {
-    var strip = document.getElementById('sightings'), sheet = document.getElementById('sheet');
-    strip.innerHTML = ''; sheet.innerHTML = '';
+    current = null; keys = { back: trail.length ? goBack : null };
+    strip.innerHTML = ''; sheet.innerHTML = ''; sheet.classList.remove('loading');
     var box = el('div', null, 'done');
     box.appendChild(el('div', '✓', 'done-mark'));
     box.appendChild(el('h2', 'All caught up'));
-    box.appendChild(el('p', 'Every item here has an answer. Your totals update when you close this.', 'muted'));
+    box.appendChild(el('p', 'Every item in this view has an answer. Your totals update when you close this.', 'muted'));
     var b = el('button', 'Done', 'btn big'); b.type = 'button';
     b.addEventListener('click', function () { dialog.close(); });
     box.appendChild(b);
     if (trail.length) {
-      var back = el('button', '← Go back to the last item', 'link'); back.type = 'button';
-      back.addEventListener('click', function () { open(trail.pop()); });
-      box.appendChild(back);
+      var bk = el('button', '← Go back to the last item', 'link'); bk.type = 'button';
+      bk.addEventListener('click', goBack);
+      box.appendChild(bk);
     }
     sheet.appendChild(box);
     if (!dialog.open) dialog.showModal();
   }
+
   function open(id) {
-    current = id;
-    fetch('/p/' + token + '/item/' + id + '.json').then(function (r) { return r.json(); }).then(function (d) {
-      if (current !== id) return;
-      var strip = document.getElementById('sightings'), sheet = document.getElementById('sheet');
-      strip.innerHTML = ''; sheet.innerHTML = ''; strip.scrollLeft = 0;
-      d.sightings.forEach(function (s, n) {
-        var fig = el('figure');
-        if (s.image) { var img = el('img'); img.src = s.image; img.alt = s.label; fig.appendChild(img); }
-        else { fig.appendChild(el('div', '“' + s.label + '”', 'quote')); }
-        fig.appendChild(el('figcaption', [d.sightings.length > 1 ? (n + 1) + ' of ' + d.sightings.length : null, s.source, s.by !== s.source ? s.by : null, s.date].filter(Boolean).join(' · ')));
-        strip.appendChild(fig);
+    id = String(id); current = id;
+    if (dialog.open) sheet.classList.add('loading');
+    load(id).then(function (d) { if (current === id) render(id, d); })
+      .catch(function () {
+        if (current !== id) return;
+        sheet.classList.remove('loading'); sheet.innerHTML = '';
+        var box = el('div', null, 'done');
+        box.appendChild(el('h2', 'Couldn’t load this item'));
+        box.appendChild(el('p', 'Check your connection and try again.', 'muted'));
+        var r = el('button', 'Try again', 'btn big'); r.type = 'button';
+        r.addEventListener('click', function () { open(id); });
+        box.appendChild(r); sheet.appendChild(box);
+        if (!dialog.open) dialog.showModal();
       });
-      updateCard(d);
-      var reviewing = d.status === 'suggested';
-      trail = trail.filter(function (t) { return t !== id; });
-      if (d.editable && (reviewing || trail.length || toCheck().length)) {
-        var left = toCheck().length, top = el('div', null, 'progress');
-        if (trail.length) {
-          var back = el('button', '← Back', 'link'); back.type = 'button';
-          back.addEventListener('click', function () { open(trail.pop()); });
-          top.appendChild(back);
-        } else top.appendChild(el('span', ''));
-        top.appendChild(el('span', left ? left + ' left to check' : 'All checked', 'count'));
-        var skip = el('button', left ? 'Skip →' : 'Next →', 'link'); skip.type = 'button';
-        skip.addEventListener('click', function () { goNext(id); });
-        if (left > (reviewing ? 1 : 0)) top.appendChild(skip); else top.appendChild(el('span', ''));
-        sheet.appendChild(top);
-      }
-      sheet.appendChild(el('h2', d.title));
-      sheet.appendChild(el('p', [d.room, d.category, d.brand].filter(Boolean).join(' · '), 'muted'));
-      if (d.price) sheet.appendChild(el('p', d.price, 'price-line'));
-      if (d.qty > 1 && !d.price) sheet.appendChild(el('p', 'Quantity: ' + d.qty, 'price-line'));
-      if (flash) { sheet.appendChild(el('p', flash, 'saved')); flash = ''; }
-      sheet.appendChild(el('p', d.price_basis, 'muted small'));
-      if (d.sightings.length > 1) sheet.appendChild(el('p', 'Seen in ' + d.sightings.length + ' photos. Swipe to see each one.', 'muted small'));
-      if (d.editable) {
-        var main = el('div', null, 'decide'), row = el('div', null, 'row'), editor = el('form', null, 'editor');
-        editor.hidden = true;
-        function send(body, btn, after) {
-          var old = btn ? btn.textContent : '';
-          if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-          return post('/item/' + id, body).then(function () { dirty = true; after(); })
-            .catch(function () { if (btn) { btn.disabled = false; btn.textContent = 'Try again'; } });
-        }
-        function decide(action, status, btn) {
-          send({ action: action }, btn, function () { markCard(id, status); goNext(id); });
-        }
-        function edit(title, hint, value, kind, action) {
-          editor.innerHTML = '';
-          var label = el('label', title, 'editor-label'), input = el('input');
-          input.type = 'text'; input.value = value == null ? '' : value; input.required = true;
-          input.setAttribute('enterkeyhint', 'done');
-          if (kind === 'qty') { input.inputMode = 'numeric'; input.pattern = '[0-9]*'; }
-          if (kind === 'money') { input.inputMode = 'decimal'; input.placeholder = 'e.g. 450'; }
-          var wrap = el('div', null, 'editor-field' + (kind === 'money' ? ' money' : ''));
-          if (kind === 'money') wrap.appendChild(el('span', '$', 'prefix'));
-          wrap.appendChild(input);
-          var buttons = el('div', null, 'editor-buttons'), save = el('button', 'Save', 'btn'), cancel = el('button', 'Cancel', 'btn quiet');
-          save.type = 'submit'; cancel.type = 'button';
-          cancel.addEventListener('click', function () { editor.hidden = true; main.hidden = false; row.hidden = false; });
-          buttons.appendChild(cancel); buttons.appendChild(save);
-          editor.appendChild(label); if (hint) editor.appendChild(el('p', hint, 'editor-hint'));
-          editor.appendChild(wrap); editor.appendChild(buttons);
-          editor.onsubmit = function (e) {
-            e.preventDefault();
-            var v = input.value.trim();
-            if (!v) { input.focus(); return; }
-            send({ action: action, value: v }, save, function () {
-              flash = { rename: '✓ Name saved', qty: '✓ Quantity saved', price: '✓ Price saved' }[action] || '✓ Saved';
-              open(id);
-            });
-          };
-          main.hidden = true; row.hidden = true; editor.hidden = false; input.focus(); input.select();
-        }
-        function act(parent, label, cls, onClick) {
-          var b = el('button', label, 'btn ' + cls); b.type = 'button';
-          b.addEventListener('click', function () { onClick(b); });
-          parent.appendChild(b);
-        }
-        var no = d.status === 'rejected', yes = d.status === 'confirmed';
-        act(main, no ? '✕ Not ours' : 'Not ours', 'quiet big' + (no ? ' chosen-no' : ''), function (b) {
-          if (no) goNext(id); else decide('remove', 'rejected', b); });
-        act(main, yes ? '✓ This was ours' : 'Yes, this was ours', 'big' + (yes ? ' chosen-yes' : ''), function (b) {
-          if (yes) goNext(id); else decide('confirm', 'confirmed', b); });
-        if (yes || no) main.appendChild(el('p', 'Tap the other answer to change it.', 'muted small hint-line'));
-        act(row, 'Fix name', 'quiet', function () { edit('What is it?', 'Be as specific as you can, e.g. "Pottery Barn arc floor lamp".', d.label, 'text', 'rename'); });
-        act(row, 'Quantity', 'quiet', function () { edit('How many were there?', null, d.qty, 'qty', 'qty'); });
-        act(row, 'Set price', 'quiet', function () { edit('What does one cost to buy new?', 'Your number replaces the estimate and is marked as set by the family.', d.price_mid ? Math.round(d.price_mid) : '', 'money', 'price'); });
-        if (main.children.length) sheet.appendChild(main);
-        sheet.appendChild(row); sheet.appendChild(editor);
-      }
-      if (!dialog.open) dialog.showModal();
-      dialog.scrollTop = 0;
-    });
   }
-  if (grid) grid.addEventListener('click', function (e) { var card = e.target.closest('.item'); if (card) open(card.dataset.id); });
+
+  function render(id, d) {
+    sheet.classList.remove('loading');
+    strip.innerHTML = ''; sheet.innerHTML = ''; strip.scrollLeft = 0;
+    readyAt = Date.now() + 350;            // ignore a second tap that was meant for the previous item
+    d.sightings.forEach(function (s, n) {
+      var fig = el('figure');
+      if (s.image) { var img = el('img'); img.src = s.image; img.alt = s.label; fig.appendChild(img); }
+      else { fig.appendChild(el('div', '“' + s.label + '”', 'quote')); }
+      fig.appendChild(el('figcaption', [d.sightings.length > 1 ? (n + 1) + ' of ' + d.sightings.length : null, s.source, s.by !== s.source ? s.by : null, s.date].filter(Boolean).join(' · ')));
+      strip.appendChild(fig);
+    });
+    updateCard(d);
+    markCard(id, d.status);
+    trail = trail.filter(function (t) { return t !== id; });
+    var left = toCheck().length, reviewing = d.status === 'suggested';
+    keys = { back: trail.length ? goBack : null, next: left > (reviewing ? 1 : 0) ? function () { goNext(id); } : null };
+
+    if (d.editable && (reviewing || trail.length || left)) {
+      var top = el('div', null, 'progress');
+      if (keys.back) { var b = el('button', '← Back', 'link'); b.type = 'button'; b.addEventListener('click', goBack); top.appendChild(b); }
+      else top.appendChild(el('span', ''));
+      top.appendChild(el('span', left ? left + ' left to check' : 'All checked', 'count'));
+      if (keys.next) { var sk = el('button', reviewing ? 'Skip →' : 'Next →', 'link'); sk.type = 'button'; sk.addEventListener('click', keys.next); top.appendChild(sk); }
+      else top.appendChild(el('span', ''));
+      sheet.appendChild(top);
+    }
+    sheet.appendChild(el('h2', d.title));
+    sheet.appendChild(el('p', [d.room, d.category, d.brand].filter(Boolean).join(' · '), 'muted'));
+    if (d.price) sheet.appendChild(el('p', d.price, 'price-line'));
+    if (d.qty > 1 && !d.price) sheet.appendChild(el('p', 'Quantity: ' + d.qty, 'price-line'));
+    if (flash) { sheet.appendChild(el('p', flash, 'saved')); flash = ''; }
+    sheet.appendChild(el('p', d.price_basis, 'muted small'));
+    if (d.sightings.length > 1) sheet.appendChild(el('p', 'Seen in ' + d.sightings.length + ' photos. Swipe to see each one.', 'muted small'));
+
+    if (d.editable) {
+      var main = el('div', null, 'decide'), row = el('div', null, 'row'), editor = el('form', null, 'editor');
+      editor.hidden = true;
+      var err = el('p', '', 'error'); err.hidden = true;
+      function send(body, btn, after) {
+        if (Date.now() < readyAt) return;
+        var label = btn ? btn.textContent : '';
+        if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+        err.hidden = true;
+        return post('/item/' + id, body).then(function () { dirty++; delete cache[id]; after(); })
+          .catch(function () {
+            if (btn) { btn.disabled = false; btn.textContent = label; }
+            err.textContent = 'That didn’t save. Check your connection and tap again.'; err.hidden = false;
+          });
+      }
+      function answer(status, btn) {
+        if (d.status === status) {           // tapping the chosen answer again clears it
+          send({ action: 'restore' }, btn, function () { markCard(id, 'suggested'); flash = 'Answer cleared. Choose again when you’re ready.'; open(id); });
+        } else {
+          send({ action: status === 'confirmed' ? 'confirm' : 'remove' }, btn, function () { markCard(id, status); goNext(id); });
+        }
+      }
+      function edit(title, hint, value, kind, action) {
+        editor.innerHTML = '';
+        var label = el('label', title, 'editor-label'), input = el('input');
+        input.type = 'text'; input.value = value == null ? '' : value; input.required = true;
+        input.setAttribute('enterkeyhint', 'done'); input.autocomplete = 'off';
+        if (kind === 'qty') { input.inputMode = 'numeric'; input.pattern = '[0-9]*'; }
+        if (kind === 'money') { input.inputMode = 'decimal'; input.placeholder = 'e.g. 450'; }
+        var wrap = el('div', null, 'editor-field' + (kind === 'money' ? ' money' : ''));
+        if (kind === 'money') wrap.appendChild(el('span', '$', 'prefix'));
+        wrap.appendChild(input);
+        var msg = el('p', '', 'error'); msg.hidden = true;
+        var buttons = el('div', null, 'editor-buttons'), save = el('button', 'Save', 'btn'), cancel = el('button', 'Cancel', 'btn quiet');
+        save.type = 'submit'; cancel.type = 'button';
+        function closeEditor() { editor.hidden = true; main.hidden = false; row.hidden = false; }
+        cancel.addEventListener('click', closeEditor);
+        editor.closeEditor = closeEditor;
+        buttons.appendChild(cancel); buttons.appendChild(save);
+        editor.appendChild(label); if (hint) editor.appendChild(el('p', hint, 'editor-hint'));
+        editor.appendChild(wrap); editor.appendChild(msg); editor.appendChild(buttons);
+        editor.onsubmit = function (e) {
+          e.preventDefault();
+          var v = input.value.trim();
+          if (kind !== 'text' && !/\d/.test(v)) { msg.textContent = 'Type a number.'; msg.hidden = false; input.focus(); return; }
+          if (!v) { input.focus(); return; }
+          save.disabled = true; save.textContent = 'Saving…';
+          post('/item/' + id, { action: action, value: v }).then(function () {
+            dirty++; delete cache[id];
+            flash = { rename: '✓ Name saved', qty: '✓ Quantity saved', price: '✓ Price saved' }[action] || '✓ Saved';
+            open(id);
+          }).catch(function () {
+            save.disabled = false; save.textContent = 'Save';
+            msg.textContent = 'That didn’t save. Check the value and try again.'; msg.hidden = false;
+          });
+        };
+        main.hidden = true; row.hidden = true; editor.hidden = false; input.focus(); input.select();
+      }
+      function act(parent, label, cls, onClick) {
+        var b = el('button', label, 'btn ' + cls); b.type = 'button';
+        b.addEventListener('click', function () { onClick(b); });
+        parent.appendChild(b); return b;
+      }
+      var no = d.status === 'rejected', yes = d.status === 'confirmed';
+      var noBtn = act(main, no ? '✕ Not ours' : 'Not ours', 'quiet big' + (no ? ' chosen-no' : ''), function (b) { answer('rejected', b); });
+      var yesBtn = act(main, yes ? '✓ This was ours' : 'Yes, this was ours', 'big' + (yes ? ' chosen-yes' : ''), function (b) { answer('confirmed', b); });
+      noBtn.setAttribute('aria-pressed', no ? 'true' : 'false'); yesBtn.setAttribute('aria-pressed', yes ? 'true' : 'false');
+      if (yes || no) main.appendChild(el('p', 'Tap your answer again to undo it, or the other one to change it.', 'muted small hint-line'));
+      main.appendChild(err);
+      act(row, 'Fix name', 'quiet', function () { edit('What is it?', 'Be as specific as you can, e.g. "Pottery Barn arc floor lamp".', d.label, 'text', 'rename'); });
+      act(row, 'Quantity', 'quiet', function () { edit('How many were there?', null, d.qty, 'qty', 'qty'); });
+      act(row, 'Set price', 'quiet', function () { edit('What does one cost to buy new?', 'Your number replaces the estimate and is marked as set by the family.', d.price_mid ? Math.round(d.price_mid) : '', 'money', 'price'); });
+      sheet.appendChild(main); sheet.appendChild(row); sheet.appendChild(editor);
+      keys.yes = function () { if (editor.hidden) yesBtn.click(); };
+      keys.no = function () { if (editor.hidden) noBtn.click(); };
+      keys.editor = editor;
+    }
+    if (!dialog.open) dialog.showModal();
+    dialog.scrollTop = 0;
+    prefetch(id);
+  }
+
+  if (grid) grid.addEventListener('click', function (e) { var c = e.target.closest('.item'); if (c) { trail = []; open(c.dataset.id); } });
   var start = document.getElementById('review-start');
-  if (start) start.addEventListener('click', function () { var first = toCheck()[0]; if (first) open(first.dataset.id); });
+  if (start) start.addEventListener('click', function () { var first = toCheck()[0]; trail = []; if (first) open(first.dataset.id); });
   refreshReview();
   document.getElementById('close').addEventListener('click', function () { dialog.close(); });
-  dialog.addEventListener('close', function () { current = null; if (dirty) location.reload(); });
+  dialog.addEventListener('cancel', function (e) {     // Esc closes an open editor first, not the whole sheet
+    if (keys && keys.editor && !keys.editor.hidden) { e.preventDefault(); keys.editor.closeEditor(); }
+  });
+  dialog.addEventListener('close', function () {
+    current = null; keys = null;
+    if (dirty) {
+      try { sessionStorage.setItem('ashline-return', JSON.stringify({ room: room, y: window.scrollY, saved: dirty })); } catch (e) {}
+      location.reload();
+    }
+  });
   dialog.addEventListener('click', function (e) { if (e.target === dialog) dialog.close(); });
+  document.addEventListener('keydown', function (e) {   // laptop shortcuts: Y / N, arrows
+    if (!dialog.open || !keys || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.target.tagName === 'INPUT') return;
+    var k = e.key.toLowerCase();
+    if (k === 'y' && keys.yes) { e.preventDefault(); keys.yes(); }
+    else if (k === 'n' && keys.no) { e.preventDefault(); keys.no(); }
+    else if (k === 'arrowright' && keys.next) { e.preventDefault(); keys.next(); }
+    else if (k === 'arrowleft' && keys.back) { e.preventDefault(); keys.back(); }
+  });
 
   var form = document.getElementById('coverage');
   if (form) {
-    form.addEventListener('submit', function (e) { e.preventDefault(); post('/coverage', { limit: form.limit.value }).then(function () { location.reload(); }); });
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      if (!/\d/.test(form.limit.value)) { form.limit.focus(); return; }
+      post('/coverage', { limit: form.limit.value }).then(function () { location.reload(); });
+    });
     document.getElementById('skip').addEventListener('click', function () { post('/coverage', { skip: true }).then(function () { location.reload(); }); });
   }
 })();

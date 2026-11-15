@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>{{ name }} · Ashline</title>
-<link rel="icon" href="/static/img/favicon.png">
-<link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
-<link rel="stylesheet" href="/static/brand.css">
+<link rel="icon" href="/static/img/favicon.png?v={{ v }}">
+<link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png?v={{ v }}">
+<link rel="stylesheet" href="/static/brand.css?v={{ v }}">
 <style>
   main { max-width: 1160px; margin: 0 auto; padding: 0 18px 120px; }
   .masthead { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--rule); margin-bottom: 26px; }
@@ -134,7 +134,7 @@
 </head>
 <body>
 <main>
-  <div class="masthead"><a class="brand" href="/"><img src="/static/img/logo.png" alt=""><span>Ashline</span></a><small>Private to your family</small></div>
+  <div class="masthead"><a class="brand" href="/"><img src="/static/img/logo.png?v={{ v }}" alt=""><span>Ashline</span></a><small>Private to your family</small></div>
   <h1>{{ name }} <span class="count">{{ items|length }} item{{ '' if items|length == 1 else 's' }}</span></h1>
   <p class="sub">Updated {{ updated }}{% if members %} · {{ members }} family member{{ '' if members == 1 else 's' }} contributing{% endif %}</p>
 

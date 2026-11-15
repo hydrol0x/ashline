@@ -222,3 +222,14 @@ def test_brand_assets_are_served(case):
     assert client.get("/static/../web.py").status_code == 404
     assert client.get("/static/fonts/LICENSE-lora").status_code == 404           # only known file types
     assert '/static/brand.css' in client.get("/p/owner-token").text and '/static/brand.css' in client.get("/").text
+
+
+def test_asset_urls_carry_a_version_and_errors_are_not_cached(case):
+    import re
+    client, _, _ = case
+    page = client.get("/p/owner-token").text
+    v = re.search(r"/static/brand\.css\?v=(\w+)", page).group(1)
+    css = client.get(f"/static/brand.css?v={v}").text
+    assert f"/static/fonts/urbanist-latin-500-normal.woff2?v={v}" in css and f"/static/img/swoosh.jpg?v={v}" in css
+    missing = client.get("/static/nope.css")
+    assert missing.status_code == 404 and missing.headers["cache-control"] == "no-store"

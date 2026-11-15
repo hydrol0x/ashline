@@ -50,8 +50,8 @@
     document.getElementById('page-count').textContent = '—';
   }
   try {
-    const pdfjs = await import('/static/pdfjs/pdf.min.mjs');
-    pdfjs.GlobalWorkerOptions.workerSrc = '/static/pdfjs/pdf.worker.min.mjs';
+    const pdfjs = await import('/static/pdfjs/pdf.min.mjs?v={{ v }}');
+    pdfjs.GlobalWorkerOptions.workerSrc = '/static/pdfjs/pdf.worker.min.mjs?v={{ v }}';
     const doc = await pdfjs.getDocument(url).promise;
     document.getElementById('page-count').textContent = doc.numPages;
     const ratio = Math.min(window.devicePixelRatio || 1, 2.5);

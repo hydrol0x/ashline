@@ -5,9 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ashline · rebuild your home inventory from family photos</title>
 <meta name="description" content="After a fire, insurers ask for a list of everything you owned. Text Ashline your old photos and it builds that list with you.">
-<link rel="icon" href="/static/img/favicon.png">
-<link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
-<link rel="stylesheet" href="/static/brand.css">
+<link rel="icon" href="/static/img/favicon.png?v={{ v }}">
+<link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png?v={{ v }}">
+<link rel="stylesheet" href="/static/brand.css?v={{ v }}">
 <style>
   .wrap { max-width: 1160px; margin: 0 auto; padding: 0 24px; }
   header { padding: 22px 0; }
@@ -73,7 +73,7 @@
 </head>
 <body>
 <header><div class="wrap">
-  <a class="brand" href="/"><img src="/static/img/logo.png" alt=""><span>Ashline</span></a>
+  <a class="brand" href="/"><img src="/static/img/logo.png?v={{ v }}" alt=""><span>Ashline</span></a>
   {% if number %}<a class="num" href="sms:{{ number }}">{{ number_display }}</a>{% endif %}
 </div></header>
 
@@ -130,7 +130,7 @@
 </div></section>
 
 <footer><div class="wrap">
-  <a class="brand" href="/"><img src="/static/img/logo.png" alt=""><span>Ashline</span></a>
+  <a class="brand" href="/"><img src="/static/img/logo.png?v={{ v }}" alt=""><span>Ashline</span></a>
   <div>
     <p class="team">Made at HackPrinceton 2026 by Jacob Ryabinky, Omar Rodriguez, Timoti Kabakov and Bochen Shen.</p>
     <p>Prices are estimates for planning, not legal or insurance advice. Confirm values with your adjuster.</p>

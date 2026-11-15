@@ -299,13 +299,26 @@ def create_app(store_factory=Store) -> FastAPI:
     static_types = {".mjs": "text/javascript", ".js": "text/javascript", ".css": "text/css", ".png": "image/png",
                     ".jpg": "image/jpeg", ".woff2": "font/woff2", ".svg": "image/svg+xml"}
 
+    # A short fingerprint of the static files. Every asset URL carries ?v=<it>, so a new deploy never
+    # gets stuck behind a copy Cloudflare or a phone cached earlier (including a cached 404).
+    digest = hashlib.sha1()
+    for f in sorted(static_root.rglob("*")):
+        if f.is_file() and f.suffix in static_types:
+            digest.update(f.name.encode()); digest.update(f.read_bytes())
+    asset_v = digest.hexdigest()[:10]
+    TEMPLATES.globals["v"] = asset_v
+
     @app.get("/static/{path:path}")
     def static(path: str):
         target = (static_root / path).resolve()
         if static_root not in target.parents or not target.is_file() or target.suffix not in static_types:
-            raise HTTPException(status_code=404)
-        return FileResponse(target, media_type=static_types[target.suffix],
-                            headers={"Cache-Control": "public, max-age=86400"})
+            return Response('{"detail":"Not Found"}', status_code=404, media_type="application/json",
+                            headers={"Cache-Control": "no-store"})
+        headers = {"Cache-Control": "public, max-age=31536000, immutable"}
+        if target.suffix == ".css":                  # pass the fingerprint on to fonts and images the CSS loads
+            css = re.sub(r"url\((/static/[^)?]+)\)", lambda m: f"url({m.group(1)}?v={asset_v})", target.read_text())
+            return Response(css, media_type="text/css", headers=headers)
+        return FileResponse(target, media_type=static_types[target.suffix], headers=headers)
 
     @app.get("/favicon.ico")
     def favicon():

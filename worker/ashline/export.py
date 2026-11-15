@@ -45,11 +45,11 @@ def purchase_text(item: dict) -> str:
         amount = f" (${float(paid['amount']):,.2f})"
     except (KeyError, TypeError, ValueError):
         amount = ""
-    return (f"card purchase at {paid.get('merchant') or 'a store'}"
-            + (f" on {paid['date']}" if paid.get("date") else "") + amount)
+    return (f"{'receipt from' if paid.get('receipt') else 'card purchase at'} {paid.get('merchant') or 'a store'}"
+            + (f" {'dated' if paid.get('receipt') else 'on'} {paid['date']}" if paid.get("date") else "") + amount)
 
 
-BASIS = {"family": "Set by the family", "paid": "Paid: card record", "online": "Online: current listings",
+BASIS = {"family": "Set by the family", "paid": "Paid: card record or receipt", "online": "Online: current listings",
          "estimate": "Estimate: rough allowance", "": ""}
 
 

@@ -26,3 +26,6 @@ uv.lock
 node_modules/
 
 .DS_Store
+
+# Working copies made by coding agents
+.claude/worktrees/

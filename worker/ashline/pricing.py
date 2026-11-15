@@ -184,7 +184,7 @@ def _cache_key(item: dict) -> str:
 
 # ------------------------------------------------- every price an item has
 # An item can have up to three prices at once, kept in `price_ref`:
-#   paid      what the family paid, from a card purchase        {amount, each, merchant, date, description, bank_id}
+#   paid      what the family paid: a card purchase or a receipt {amount, each, merchant, date, description, bank_id | receipt}
 #   online    the closest listings found for it today           {low, mid, high, retailer, matches: [{title, price, retailer, url}]}
 #   estimate  the model's (or the category's) rough allowance   {low, mid, high, source}
 # The strongest one is the item's price (price_low / price_mid / price_high / price_source). A price
@@ -218,7 +218,7 @@ def in_use(item: dict) -> str:
     source = item.get("price_source") or ""
     if source == "set by family":
         return "family"
-    if source.startswith("bank record"):
+    if source.startswith(("bank record", "receipt:")):
         return "paid"
     if source.startswith("web:"):
         return "online"
@@ -246,8 +246,9 @@ def record_price(store, case_id: str, item_id: int, kind: str, data: dict | None
     if in_use(item) != "family":
         if "paid" in kept:
             each = kept["paid"].get("each")
+            proof = "receipt" if kept["paid"].get("receipt") else "bank record"
             fields.update(price_low=each, price_mid=each, price_high=each,
-                          price_source=f"bank record: {str(kept['paid'].get('merchant') or 'card purchase')[:60]}")
+                          price_source=f"{proof}: {str(kept['paid'].get('merchant') or 'purchase')[:60]}")
         elif "online" in kept:
             web = kept["online"]
             fields.update(price_low=web.get("low"), price_mid=web.get("mid"), price_high=web.get("high"),
@@ -264,7 +265,7 @@ def kept_price(item: dict) -> bool:
     """True when the item's price is better than an estimate and must not be replaced by one:
     the family set it, it is what they paid (a bank record), or it was found online."""
     source = item.get("price_source") or ""
-    return source == "set by family" or source.startswith(("bank record", "web:"))
+    return source == "set by family" or source.startswith(("bank record", "receipt:", "web:"))
 
 
 def price_items(case_id: str, store: Store | None = None, pricer=None, only_missing: bool = True) -> dict:

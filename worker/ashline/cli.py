@@ -228,6 +228,7 @@ def _run(args, parser) -> None:
 SIM_HELP = """Type a message and press enter. Lines starting with / are simulator commands:
   /photo a.jpg b.jpg     send photos
   /video walk.mp4        send a video (needs ffmpeg)
+  /receipt r.jpg         send a receipt, order page or PDF invoice
   /wait [seconds]        let time pass (default: just past the photo quiet window) and run what is due
   /as +15550002 Maya     become another family member
   /group rivera          talk in a group chat called "rivera"   (/group off: back to 1:1)
@@ -274,7 +275,7 @@ def simulate(phone: str, name: str | None, url: str | None, lines=None, out=prin
             parts = line.split()
             offset += timedelta(seconds=float(parts[1]) if len(parts) > 1 else engine.batch_seconds + 1)
             show(engine.tick(now()))
-        elif line.startswith(("/photo", "/video")):
+        elif line.startswith(("/photo", "/video", "/receipt")):
             files = []
             for path in line.split()[1:]:
                 try:
@@ -282,7 +283,8 @@ def simulate(phone: str, name: str | None, url: str | None, lines=None, out=prin
                 except OSError as exc:
                     out(f"(could not read {path}: {exc})")
             if files:
-                show(engine.handle(Inbound(group or phone, phone, "", files, bool(group), name, now())))
+                caption = "receipt" if line.startswith("/receipt") else ""
+                show(engine.handle(Inbound(group or phone, phone, caption, files, bool(group), name, now())))
         elif line.startswith("/"):
             out(SIM_HELP)
         else:

@@ -111,6 +111,10 @@ line as the one photographed in the dining room.
   search). The closest match's price replaces the estimate, with its link, and the chat mentions
   once what was found. A match far from the estimate is not used unasked. Turn it off with
   `ASHLINE_AUTO_PRICE=off`. `ashline price-check --case demo --top 20` does the same on request.
+- A receipt, invoice or order page sent in the chat with the word "receipt" (a photo, a screenshot
+  or a PDF; `/receipt file` in the simulator) is read by Claude into its lines (`receipts.py`).
+  Lines that match items are offered as their paid price, with the receipt kept as proof; lines for
+  things not on the list yet can be added as suggestions. Tested with a stand-in reader only.
 - `check my bank` in the chat, or `ashline bank --case demo`, matches the family's card purchases to
   items (`bank.py`, Capital One's Nessie mock bank, `NESSIE_API_KEY`). The owner sees the matches and
   says yes before any price changes; the purchase is kept as a bank record and counts as proof for

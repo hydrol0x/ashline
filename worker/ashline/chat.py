@@ -14,6 +14,7 @@ Principles the code follows:
 from __future__ import annotations
 
 import io
+import json
 import re
 import secrets
 from dataclasses import dataclass, field
@@ -56,6 +57,7 @@ HELP = ("Send me photos from inside the home, from any year, and I'll list what'
         "• show photo 3\n"
         "• map: where things were in the home\n"
         "• check my bank: use what you paid as the price\n"
+        "• send a receipt or order page with the word receipt\n"
         "• call me: remember things no photo shows\n"
         "• export: spreadsheet and PDF\n"
         "• undo · pause")
@@ -178,6 +180,7 @@ class Engine:
             config.env("ASHLINE_BATCH_SECONDS") or BATCH_SECONDS)
         self.video_frames = int(config.env("ASHLINE_VIDEO_FRAMES") or 14)     # stills kept from one video
         self.bank = None                                    # a bank client; built from NESSIE_API_KEY when first needed
+        self.receipt_reader = None                          # reads receipts and order pages; built from the key when first needed
         self.searcher = None                                # looks prices up online; built from the key when first needed
         self.background = True                              # False runs the after-work (price lookups) inline, for tests
 
@@ -238,6 +241,9 @@ class Engine:
             return self._continue_onboarding(inbound, member, case, text)
 
         if inbound.attachments or inbound.missing:
+            from . import receipts
+            if receipts.wanted(inbound.text, inbound.attachments):      # "receipt" in the message, or a PDF
+                return self._receipts(inbound, member, case, now)
             return self._intake(inbound, member, case, now)
 
         if inbound.is_group:
@@ -523,6 +529,98 @@ class Engine:
                                   f"{'they were' if placed != 1 else 'it was'} recorded ({kind}). Tap around it here: "
                                   f"{self.link(case, member)}/plan", image=str(image))]
 
+    def _receipts(self, inbound: Inbound, member: dict, case: dict, now: datetime) -> list[Outbound]:
+        """Receipts, invoices or order pages: read them and offer what was paid as the price of matching items."""
+        from . import bank, receipts
+        chat_id, case_id = inbound.chat_id, case["case_id"]
+        if member["role"] != "owner":
+            owner = self._owner(case_id)
+            return [Outbound(chat_id, f"Thank you. Only {(owner or {}).get('name') or 'the person who started this list'} "
+                                      "can add receipts, since they change prices. Could you send it to them?")]
+        reader = self.receipt_reader or receipts.get_reader()
+        if reader is None:
+            return [Outbound(chat_id, "I can't read receipts yet on this setup. You can still tell me a price: "
+                                      "for example \"price 3 $450\".")]
+        folder = config.case_dir(case_id) / "receipts"
+        folder.mkdir(parents=True, exist_ok=True)
+        bought, shops, unread = [], [], 0
+        for name, data in inbound.attachments:
+            number = len(list(folder.glob("rcpt-*"))) + 1
+            receipt_id = f"rcpt-{number}"
+            (folder / f"{receipt_id}{'.pdf' if receipts.is_pdf(data) else '.jpg'}").write_bytes(data)
+            try:
+                reading = reader.read(data)
+            except receipts.ReceiptError as exc:
+                print(f"ashline: receipt not read ({exc})")
+                unread += 1
+                continue
+            if not reading["is_receipt"] or not reading["lines"]:
+                unread += 1
+                continue
+            (folder / f"{receipt_id}.json").write_text(json.dumps(reading, indent=1))
+            bought += receipts.as_purchases(reading, receipt_id)
+            shops.append(reading.get("merchant") or "a store")
+        if not bought:
+            return [Outbound(chat_id, "I couldn't read that as a receipt or an order. If it is a photo of the home, send it "
+                                      "again without the word receipt." if unread else "I didn't get a file with that.")]
+
+        everything = [i for i in self.store.get_items(case_id, canonical_only=True) if i["status"] != "rejected"]
+        from .pricing import price_sources
+        open_items = [i for i in everything if i.get("price_source") != "set by family" and not price_sources(i).get("paid")]
+        matches = sorted(bank.match_purchases(open_items, bought), key=lambda m: -m["purchase"]["amount"])[:8]
+        matched = {m["purchase"]["id"] for m in matches}
+        extra = [p for p in bought if p["id"] not in matched and p["amount"] >= 20][:8]      # things not on the list yet
+        context = self._context(chat_id)
+        context.pop("bank", None)
+        context.pop("receipt_adds", None)
+        if matches:
+            context["bank"] = [{"item_id": m["item"]["item_id"], "purchase": m["purchase"]} for m in matches]
+        if extra:
+            context["receipt_adds"] = extra
+        self._save(chat_id, context)
+
+        count = len(bought)
+        text = (f"I read the receipt from {shops[0]}" if len(shops) == 1 else f"I read {len(shops)} receipts") \
+            + f": {count} thing{'s' if count != 1 else ''} bought."
+        if matches:
+            lines = "\n".join(f"{n}. {_cap(bank.describe(m))}" for n, m in enumerate(matches, 1))
+            text += (f"\n\n{'These match' if len(matches) != 1 else 'This matches'} things on your list:\n{lines}\n\n"
+                     f"Should I use what you paid as the price for {'these' if len(matches) != 1 else 'it'}? "
+                     "A receipt is also proof for the insurer. Reply yes or no.")
+        if extra:
+            names = "; ".join(f"{_cap(p['description'])} ({money(p['amount'])})" for p in extra)
+            text += (f"\n\n{'Also on it, not' if matches else 'Not'} on your list yet: {names}. "
+                     f"Reply add to list {'them' if len(extra) != 1 else 'it'}.")
+        if not matches and not extra:
+            text += " None of it matches something on your list, and nothing on it looks like a belonging to add."
+        if unread:
+            text += f"\n\nI couldn't read {unread} of the files."
+        return [Outbound(chat_id, text)]
+
+    def _receipt_add(self, case: dict, chat_id: str, member: dict, lines: list) -> list[Outbound]:
+        """Put receipt lines that are not on the list yet onto it, as suggestions priced at what was paid."""
+        from .pricing import record_price
+        case_id, added = case["case_id"], []
+        for line in lines:
+            label = re.sub(r"^\d+ x ", "", line["description"])
+            qty = int(line.get("quantity") or 1)
+            item_id = self.store.add_item(case_id, {"label": label, "category": detect_mod.guess_category(label), "qty": qty,
+                                                    "evidence_date": line.get("date")},
+                                          source="receipt", added_by=member.get("name"))
+            self.store.set_cluster(case_id, item_id, [item_id], qty)
+            record_price(self.store, case_id, item_id, "paid", {
+                "amount": line["amount"], "each": round(line["amount"] / qty, 2), "merchant": line.get("merchant") or "a store",
+                "date": line.get("date"), "description": line["description"], "bank_id": line["id"], "receipt": line.get("receipt")})
+            added.append(item_id)
+        self.store.log_event(case_id, "receipt_add", {"items": added}, member["member_id"])
+        context = self._context(chat_id)
+        context.pop("receipt_adds", None)
+        self._save(chat_id, context)
+        count = len(added)
+        return [Outbound(chat_id, f"Added {count} thing{'s' if count != 1 else ''} from the receipt as "
+                                  f"{'suggestions' if count != 1 else 'a suggestion'}, priced at what you paid. Tell me which room "
+                                  f"{'they were' if count != 1 else 'it was'} in when you review. Say undo to go back.")]
+
     def _bank(self, case: dict, chat_id: str, member: dict) -> list[Outbound]:
         """Look in the family's card purchases for what they paid for things on the list."""
         from . import bank
@@ -558,9 +656,11 @@ class Engine:
         context = self._context(chat_id)
         context.pop("bank", None)
         self._save(chat_id, context)
+        proof = "a receipt" if any(row["purchase"].get("receipt") for row in pending) else "a bank record"
+        more = context.get("receipt_adds")
         return [Outbound(chat_id, f"Done. {done} item{'s now carry' if done != 1 else ' now carries'} the price you "
-                                  f"paid, marked as a bank record. {meter_line(meter(case_id, self.store)).splitlines()[0]} "
-                                  "Say undo to go back.")]
+                                  f"paid, marked as {proof}. {meter_line(meter(case_id, self.store)).splitlines()[0]} "
+                                  "Say undo to go back." + (" Reply add to list the other things on the receipt." if more else ""))]
 
     def _research_later(self, case_id: str, chat_id: str, item_ids: list[int] | None) -> None:
         """Have the price agent look the bigger new items up online, without anyone asking.
@@ -1001,6 +1101,9 @@ class Engine:
             return [Outbound(chat_id, "Okay. I'll stay quiet until you write again.")]
         if low in ("list", "show me everything", "show everything", "the list", "link"):
             return [Outbound(chat_id, f"Here is everything so far: {self.link(case, member)}")]
+        adds = self._context(chat_id).get("receipt_adds") if owner else None
+        if adds and low in ("add", "add them", "add it", "yes add", "add those", "add all"):
+            return self._receipt_add(case, chat_id, member, adds)
         pending = self._context(chat_id).get("bank") if owner else None
         if pending:                                         # purchases were proposed as prices: use them?
             yes, no = yes_or_no(low)
@@ -1167,6 +1270,10 @@ class Engine:
             for item_id in payload["moved"]:
                 self.store.update_item(case_id, item_id, cluster_id=payload["into"])
             text = "Undone: those are one item again."
+        elif action == "receipt_add":                       # things added from a receipt
+            for item_id in payload["items"]:
+                self.store.set_item_status(case_id, item_id, "rejected")
+            text = "Undone: I've taken those off the list."
         elif action == "bank":                              # prices taken from card purchases
             for row in payload["before"]:
                 self.store.update_item(case_id, row["item_id"], **{k: row[k] for k in (

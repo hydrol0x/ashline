@@ -272,7 +272,8 @@ def apply_matches(store, case_id: str, matches: list[dict], member_id: int | Non
             "price_low", "price_mid", "price_high", "price_source", "price_ref")}})
         record_price(store, case_id, item["item_id"], "paid", {
             "amount": purchase["amount"], "each": each, "merchant": purchase["merchant"] or "card purchase",
-            "date": purchase.get("date"), "description": purchase["description"], "bank_id": purchase.get("id")})
+            "date": purchase.get("date"), "description": purchase["description"], "bank_id": purchase.get("id"),
+            **({"receipt": purchase["receipt"]} if purchase.get("receipt") else {})})
         done += 1
     if before:
         store.log_event(case_id, "bank", {"before": before}, member_id)

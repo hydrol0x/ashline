@@ -80,7 +80,7 @@ def item_view(item: dict, sightings: list[dict]) -> dict:
     price = money_range(low, high) if mid else ""
     contributors = sorted({("3D scan" if s["added_by"] == "scan" else s["added_by"])
                            for s in sightings if s.get("added_by")})
-    bank = int((item.get("price_source") or "").startswith("bank record"))     # a card purchase is proof of purchase
+    bank = int(in_use(item) == "paid")                      # a card purchase or a receipt is proof of purchase
     return {
         "id": item["item_id"],
         "title": _title(item["label"]),
@@ -118,7 +118,8 @@ def price_stack(item: dict) -> list[dict]:
                      "amount": money(item.get("price_mid")), "links": []})
     paid = kept.get("paid")
     if paid and paid.get("amount"):
-        where = f"Card purchase at {paid.get('merchant') or 'a store'}" + (f", {paid['date']}" if paid.get("date") else "")
+        where = (f"{'Receipt from' if paid.get('receipt') else 'Card purchase at'} {paid.get('merchant') or 'a store'}"
+                 + (f", {paid['date']}" if paid.get("date") else ""))
         rows.append({"kind": "paid", "title": "What you paid", "detail": where + (f" · for all {qty}" if qty > 1 else ""),
                      "amount": f"${float(paid['amount']):,.2f}", "links": []})
     online = kept.get("online")
@@ -289,6 +290,8 @@ def create_app(store_factory=Store) -> FastAPI:
         evidence = price_evidence(item)
         if source.startswith("bank record"):
             basis = "What the family paid, from their card purchases."
+        elif source.startswith("receipt:"):
+            basis = "What the family paid, from a receipt they sent."
         elif source.startswith("web:"):
             basis = "Price of the closest match found online today."
         elif item.get("price_mid") and source != "set by family":

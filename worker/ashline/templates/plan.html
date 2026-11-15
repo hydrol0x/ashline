@@ -59,10 +59,9 @@
   .bubble circle { fill: var(--paper); stroke: var(--ink); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
   .bubble text { font-size: calc(var(--u) * 0.95px); font-weight: 700; fill: var(--ink); text-anchor: middle; dominant-baseline: central; }
   /* Large furniture as a footprint, shown once the plan is zoomed in or its room is open. */
-  .shape { fill: #fff; stroke: var(--ink-2); stroke-width: 1.4; vector-effect: non-scaling-stroke; cursor: pointer; stroke-linejoin: round; }
-  .shape:hover { fill: #FFF6F3; }
-  .shape.on { stroke: var(--red); stroke-width: 2.4; fill: #FFF6F3; }
-  .shape.rough { stroke-dasharray: 5 4; }
+  .shape { fill: #DDDFE2; stroke: none; cursor: pointer; }
+  .shape:hover { fill: #CFD2D6; }
+  .shape.on { fill: #F3C9C0; stroke: var(--red); stroke-width: 1.6; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
   .shapename { font-size: calc(var(--us, var(--u)) * 0.72px); fill: var(--ink-2); text-anchor: middle; dominant-baseline: central;
                pointer-events: none; font-weight: 600; }
   .halo { fill: #C9CCD1; fill-opacity: 0.55; pointer-events: none; }
@@ -207,7 +206,7 @@
     }
   });
   placed.filter(p => p.shape).forEach(p => {                           // a footprint for the big things
-    const node = gShapes.appendChild(el("polygon", {points: p.shape.map(c => c.join(",")).join(" "), class: "shape" + (rough ? " rough" : "")}));
+    const node = gShapes.appendChild(el("polygon", {points: p.shape.map(c => c.join(",")).join(" "), class: "shape"}));
     node.addEventListener("click", ev => { ev.stopPropagation(); if (!moved) show(p); });
     node.addEventListener("pointerenter", () => { if (!tip.classList.contains("thing")) hint(p, node); });
     node.addEventListener("pointerleave", () => { if (!tip.classList.contains("thing")) tip.hidden = true; });

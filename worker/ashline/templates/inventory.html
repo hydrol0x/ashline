@@ -140,6 +140,8 @@
   .tab { display: inline-flex; align-items: center; gap: 6px; min-height: 42px; padding: 8px 16px; border-radius: 999px; border: 1.5px solid var(--card-line);
          background: var(--paper); font-size: 15px; font-weight: 600; color: var(--ink); cursor: pointer; white-space: nowrap; }
   .tab:hover { border-color: var(--ink); }
+  .tab:disabled { opacity: .45; cursor: default; }
+  .tab:disabled:hover { border-color: var(--card-line); }
   .tab span { font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
   .tab.waiting { border-style: dashed; border-color: var(--wait); }
   .tab[aria-pressed=true] { background: var(--ink); border-color: var(--ink); border-style: solid; color: #fff; }
@@ -400,6 +402,7 @@
       {% if show_essentials and essentials %}<div class="due">{{ essentials }} essential item{{ '' if essentials == 1 else 's' }} marked for FEMA (appliances, furniture, a computer)</div>{% endif %}
       {% if meter.days_left is not none %}<div class="due">Proof of loss due in {{ meter.days_left }} day{{ '' if meter.days_left == 1 else 's' }}</div>{% endif %}
       {% if meter.limit %}<div>Contents coverage limit {{ money(meter.limit) }}</div>{% endif %}
+      {% if meter.limit and meter.advance %}<div>Your insurer must offer {{ money(meter.advance) }} up front. {{ money(meter.target) }} is left to document.</div>{% endif %}
       {% if asking %}
       <div class="ask">
         <div class="ask-row" id="ask-row"><span>Coverage limit not set</span><button class="link" type="button" id="add-limit">Add it</button></div>
@@ -473,6 +476,7 @@
     {% for i in removed %}{{ card(i, true) }}
     {% endfor %}
   </div>
+  <p class="empty card" id="nomatch" hidden><span></span> <button class="link" type="button" id="show-all">Show everything</button></p>
   <p class="shown" id="shown">{{ items|length }} shown</p>
   {% else %}
   <p class="empty card">Nothing here yet. Photos sent to Ashline show up on this page within a minute or two.</p>
@@ -536,6 +540,11 @@
     var total = cards.filter(function (c) { return c.dataset.removed !== '1'; }).length;
     if (room !== '__removed') tabs.forEach(function (t) { var s = t.querySelector('span'); s.textContent = n[t.dataset.status || 'all']; });
     document.getElementById('shown').textContent = shown === total ? shown + ' shown' : 'Showing ' + shown + ' of ' + total;
+    var none = document.getElementById('nomatch'), where = room && room !== '__removed' ? ' in the ' + room.toLowerCase() : '';
+    none.hidden = shown > 0;
+    none.querySelector('span').textContent = status === 'suggested' ? 'Nothing waiting for your OK' + where + '.'
+      : (status === 'confirmed' ? 'Nothing on your list' : 'Nothing here') + where + ' yet.';
+    tabs.forEach(function (t) { t.disabled = room === '__removed'; });   // Removed shows every removed item, whatever the tab
     try { localStorage.setItem('ashline-sort', mode); } catch (e) {}
   }
   chips.forEach(function (chip) {
@@ -564,6 +573,8 @@
     r.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickRoom(r.dataset.room); } });
   });
   sortBox.addEventListener('change', apply);
+  var showAll = document.getElementById('show-all');
+  if (showAll) showAll.addEventListener('click', function () { chips[0].click(); tabs[0].click(); });
 
   // A sort menu in the page's own style instead of the browser's.
   var sortBtn = document.getElementById('sort-btn'), sortList = document.getElementById('sort-list'), activeOpt = -1;
@@ -637,7 +648,7 @@
     sessionStorage.removeItem('ashline-return');
     if (back) {
       var chip = chips.filter(function (c) { return c.dataset.room === back.room; })[0];
-      if (chip) chip.click();
+      if (chip) { chip.click(); chip.scrollIntoView({ inline: 'nearest', block: 'nearest' }); }
       var tab = tabs.filter(function (t) { return t.dataset.status === (back.status || ''); })[0];
       if (tab && back.status) tab.click();
       window.scrollTo(0, back.y || 0);
@@ -703,7 +714,9 @@
       price.innerHTML = ''; price.appendChild(i); price.appendChild(el('b', d.price));
       if (d.price_from) price.appendChild(el('small', d.price_from));
     }
+    var moved = Number(c.dataset.value) !== Number(d.value) || c.dataset.name !== (d.title || '').toLowerCase();
     c.dataset.value = d.value; c.dataset.name = (d.title || '').toLowerCase();
+    if (moved) apply();                                   // keep the sort order after an edit
   }
   function refreshReview() {
     var n = toCheck().length, bar = document.getElementById('review');
@@ -906,6 +919,7 @@
         input.type = 'text'; input.value = value == null ? '' : value; input.required = true;
         input.setAttribute('enterkeyhint', 'done'); input.autocomplete = 'off';
         if (kind === 'qty') { input.inputMode = 'numeric'; input.pattern = '[0-9]*'; }
+        if (kind === 'text') input.maxLength = 120;
         if (kind === 'money') { input.inputMode = 'decimal'; input.placeholder = 'e.g. 450'; }
         var wrap = el('div', null, 'editor-field' + (kind === 'money' ? ' money' : ''));
         if (kind === 'money') wrap.appendChild(el('span', '$', 'prefix'));
@@ -1030,8 +1044,8 @@
     });
     form.addEventListener('submit', function (e) {
       e.preventDefault();
-      if (!/\d/.test(form.limit.value)) { form.limit.focus(); return; }
       var err = document.getElementById('coverage-err'); err.hidden = true;
+      if (!/\d/.test(form.limit.value)) { err.textContent = 'Type a number, like 120000 or 120k.'; err.hidden = false; form.limit.focus(); return; }
       post('/coverage', { limit: form.limit.value }).then(function () { location.reload(); }).catch(function (e) {
         err.textContent = (e.status === 400 && e.detail) || 'That didn’t save. Check your connection and try again.';
         err.hidden = false; form.limit.focus();

@@ -24,6 +24,11 @@ class FakeMessages:
             stop_details=SimpleNamespace(category="general_harms") if self.stop_reason == "refusal" else None,
             content=[SimpleNamespace(type="thinking", thinking=""), SimpleNamespace(type="text", text=self.reply)])
 
+    def stream(self, **kwargs):
+        from contextlib import nullcontext
+        reply = self.create(**kwargs)
+        return nullcontext(SimpleNamespace(get_final_message=lambda: reply))
+
 
 def fake_client(reply, stop_reason="end_turn"):
     plain, beta = FakeMessages(reply, stop_reason), FakeMessages(reply, stop_reason)

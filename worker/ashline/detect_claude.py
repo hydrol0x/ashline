@@ -150,7 +150,7 @@ class ClaudeDetector:
                             "is not inside or around a home." + IN_ROOM)
         request = dict(
             model=self.model,
-            max_tokens=16000,
+            max_tokens=getattr(self, "_max_tokens", 16000),
             output_config={"effort": self.effort, "format": {"type": "json_schema", "schema": schema}},
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
@@ -159,10 +159,13 @@ class ClaudeDetector:
             ]}],
         )
         try:
-            if self.model.startswith(FALLBACK_MODELS):
-                response = self.client.beta.messages.create(betas=[FALLBACK_BETA], fallbacks="default", **request)
+            api = self.client.beta.messages if self.model.startswith(FALLBACK_MODELS) else self.client.messages
+            extra = {"betas": [FALLBACK_BETA], "fallbacks": "default"} if api is not self.client.messages else {}
+            if request["max_tokens"] > 16000:              # a long answer has to be streamed
+                with api.stream(**extra, **request) as stream:
+                    response = stream.get_final_message()
             else:
-                response = self.client.messages.create(**request)
+                response = api.create(**extra, **request)
         except anthropic.AuthenticationError as exc:
             raise DetectionError("Anthropic rejected the key. Check ANTHROPIC_API_KEY in .env.") from exc
         except anthropic.PermissionDeniedError as exc:
@@ -180,8 +183,18 @@ class ClaudeDetector:
         if response.stop_reason == "refusal":
             category = getattr(response.stop_details, "category", None) if response.stop_details else None
             raise DetectionError(f"Claude declined this photo (category: {category}).")
+        if response.stop_reason == "max_tokens" and getattr(self, "_max_tokens", 16000) == 16000 \
+                and not getattr(self, "_retrying", False):
+            # A busy photo used up the room thinking about it. Ask again with much more room at the same
+            # effort: a "low effort" pass lists only the one biggest thing, which is worse than waiting.
+            print(f"ashline: {Path(path).name} needed more room; reading it again")
+            self._max_tokens = 64000
+            try:
+                return self.detect(path, room_hint, rooms)
+            finally:
+                self._max_tokens = 16000
         if response.stop_reason == "max_tokens":
-            if not getattr(self, "_retrying", False):      # a very busy photo: one quicker, shorter pass
+            if not getattr(self, "_retrying", False):      # still too long: one shorter pass as a last resort
                 self._retrying, effort = True, self.effort
                 try:
                     self.effort = "low"

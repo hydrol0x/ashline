@@ -747,22 +747,34 @@ def test_one_unreadable_photo_does_not_stop_the_others_and_is_retried(fam):
     assert "walnut dresser" in labels and calls["bad"] == 2
 
 
-def test_claude_detector_retries_a_cut_off_reply_with_a_shorter_list(tmp_path):
+def test_claude_detector_reads_a_busy_photo_again_with_more_room_not_lower_effort(tmp_path):
+    from contextlib import nullcontext
     from types import SimpleNamespace as NS
     from ashline.detect_claude import ClaudeDetector
-    replies = [NS(stop_reason="max_tokens", content=[], stop_details=None),
-               NS(stop_reason="end_turn", stop_details=None,
-                  content=[NS(type="text", text='{"items": [{"label": "sofa", "category": "furniture", "confidence": 0.9, "box": [0, 0, 500, 500]}]}')])]
+    sofa = '{"items": [{"label": "sofa", "category": "furniture", "confidence": 0.9, "box": [0, 0, 500, 500]}]}'
+    cut, ok = NS(stop_reason="max_tokens", content=[], stop_details=None), \
+        NS(stop_reason="end_turn", stop_details=None, content=[NS(type="text", text=sofa)])
     asked = []
-    client = NS(messages=NS(create=lambda **kw: (asked.append(kw), replies.pop(0))[1]))
-    det = ClaudeDetector(model="claude-sonnet-test", client=client) if "client" in ClaudeDetector.__init__.__code__.co_varnames else None
-    if det is None:
-        pytest.skip("detector takes no client")
+
+    def client(*replies):
+        replies = list(replies)
+        def create(**kw):
+            asked.append(kw)
+            return replies.pop(0)
+        return NS(messages=NS(create=create, stream=lambda **kw: nullcontext(NS(get_final_message=lambda: create(**kw)))))
     path = tmp_path / "p.jpg"
     Image.new("RGB", (640, 480)).save(path)
-    items = det.detect(path)
-    assert [i["label"] for i in items] == ["sofa"]
-    assert "at most 15 items" in asked[1]["messages"][0]["content"][1]["text"] and asked[1]["output_config"]["effort"] == "low"
+
+    det = ClaudeDetector(model="claude-sonnet-test", client=client(cut, ok))
+    assert [i["label"] for i in det.detect(path)] == ["sofa"]
+    assert asked[1]["max_tokens"] > 16000 and asked[1]["output_config"]["effort"] == "medium"
+    assert "at most 30 items" in asked[1]["messages"][0]["content"][1]["text"]
+
+    asked.clear()                                       # still too long: a shorter list as the last resort
+    det = ClaudeDetector(model="claude-sonnet-test", client=client(cut, cut, ok))
+    assert [i["label"] for i in det.detect(path)] == ["sofa"]
+    assert "at most 15 items" in asked[2]["messages"][0]["content"][1]["text"]
+    assert det._max_tokens == 16000 and det.effort == "medium"
 
 
 def listed(fam):

@@ -237,6 +237,13 @@ class Engine:
         if code:
             return self._join_case(inbound, code.group(1).upper(), member)
 
+        attempt = None if member or inbound.is_group else re.search(r"\bhome\s*[-#:]?\s*(\d+)\b", text, re.I)
+        if attempt:                                       # a mistyped join code: never start a new home for it
+            if len(attempt.group(1)) == 4 and self.store.find_case(invite_code=f"HOME-{attempt.group(1)}"):
+                return self._join_case(inbound, f"HOME-{attempt.group(1)}", member)
+            return [Outbound(inbound.chat_id, "That code doesn't look quite right. Codes look like HOME-1234. "
+                                              "Could you check it with the person who sent it to you and send it again?")]
+
         if member is None:
             chat = self.store.get_chat(inbound.chat_id)
             if inbound.is_group and chat:                 # someone new in the family's inventory chat
@@ -539,6 +546,10 @@ class Engine:
                 self.store.set_member(joined["member_id"], dm_chat=inbound.chat_id)
         elif member and member["case_id"] != case["case_id"]:
             pass                                           # also in another case: the code switches them over below
+        if (not existing and member and member["case_id"] != case["case_id"] and member["role"] == "owner"
+                and member["state"].get("step") in ("home_name", "address") and not inbound.is_group
+                and not self.store.get_items(member["case_id"]) and len(self.store.get_members(member["case_id"])) == 1):
+            self._delete(member["case_id"])                # a "hello?" before the code started an empty home: drop it
         self.store.set_chat(inbound.chat_id, case["case_id"], inbound.is_group)
         name = case.get("name") or "the home"
         name = name[:1].lower() + name[1:] if name.startswith("The ") else name

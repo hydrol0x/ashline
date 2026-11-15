@@ -305,6 +305,19 @@ def test_memory_by_text_then_ok(fam):
     assert texts(fam.say(MOM, "stop")) == ["That's fine. Thank you for trying. We can pick it up another day."]
 
 
+def test_a_mistyped_code_does_not_start_a_new_home(fam):
+    cases = len(fam.store.list_cases())
+    for words in ("HOME-12345", "home 99", "my code is home-123"):
+        assert texts(fam.say(DAD, words, name="Dad"))[0].startswith("That code doesn't look quite right.")
+    assert fam.store.get_member(DAD) is None and len(fam.store.list_cases()) == cases
+    assert texts(fam.say(DAD, f"home {fam.code[5:]}", name="Dad"))[0].startswith("You've joined")
+    fam.say("+15550009", "hello?", name="Gran")                    # a plain first message still starts a home...
+    assert len(fam.store.list_cases()) == cases + 1
+    assert texts(fam.say("+15550009", fam.code))[0].startswith("You've joined")
+    assert len(fam.store.list_cases()) == cases                    # ...and the empty one goes when she joins
+    assert fam.store.get_member("+15550009")["case_id"] == fam.case_id
+
+
 def test_a_memory_chat_skips_command_words_keeps_prices_and_can_be_undone(fam):
     voice = lambda: [i for i in fam.store.get_items(fam.case_id) if i["source"] == "voice" and i["status"] != "rejected"]
     fam.say(MOM, "call me")

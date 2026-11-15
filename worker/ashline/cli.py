@@ -8,6 +8,7 @@
     ashline export --case demo --include-suggested
     ashline kit-info
     ashline chat --as +15550001 --name Mom      # talk to Ashline in the terminal
+    ashline serve                               # the inventory page, on http://127.0.0.1:8000
     ashline page --case demo                    # the inventory page links
 """
 from __future__ import annotations
@@ -66,6 +67,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--name", default=None)
     p.add_argument("--url", default=None, help="public address of the inventory page, for links")
 
+    p = sub.add_parser("serve", help="run the inventory page and the bridge endpoints")
+    p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--host", default="127.0.0.1", help="use 0.0.0.0 to accept connections from a tunnel or phone")
+
     sub.add_parser("photon", help="run the conversation on Photon 2.0 (iMessage)")
 
     p = sub.add_parser("page", help="print the inventory page links of a case")
@@ -122,6 +127,15 @@ def _run(args, parser) -> None:
             print(json.dumps(record, indent=1))
     elif args.cmd == "chat":
         simulate(args.phone, args.name, args.url)
+    elif args.cmd == "serve":
+        try:
+            import uvicorn
+
+            from .web import app
+        except ImportError as exc:
+            parser.exit(1, f"The page needs packages that are not installed ({exc.name}). From worker/, run:\n"
+                           "  pip install -e '.[agent,claude,dev]'\n")
+        uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     elif args.cmd == "photon":
         from .bridge_photon import PhotonBridge
         PhotonBridge().run()

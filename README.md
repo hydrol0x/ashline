@@ -89,7 +89,7 @@ aerial photo comes from before it.
 ## Inventory page
 
 ```bash
-cd worker && uvicorn ashline.web:app --port 8000
+ashline serve
 ```
 
 Each case has two long, unguessable links and no login: `/p/<owner_token>` for the survivor (confirm,

@@ -201,6 +201,25 @@ def price_evidence(item: dict) -> list[dict]:
     return out[:5]
 
 
+def mini_plan(case_id: str, store: Store, rooms: dict[str, int]) -> dict | None:
+    """The room outlines of the home's plan, drawn small on the list page. None when there are no rooms.
+
+    A room is tappable (has a name) only when cards carry that room name."""
+    from . import layout
+    try:
+        plan = layout.build(case_id, store)
+    except Exception as exc:                                  # the list must still render without a plan
+        print(f"ashline: no small plan ({exc})")
+        return None
+    if not plan.get("rooms"):
+        return None
+    pad = max(plan["width"], plan["height"]) * 0.03
+    return {"kind": plan["kind"],
+            "box": f"{-pad:.2f} {-pad:.2f} {plan['width'] + 2 * pad:.2f} {plan['height'] + 2 * pad:.2f}",
+            "rooms": [{"id": r["id"], "name": r["name"] if r["name"] in rooms else "",
+                       "points": " ".join(f"{x:g},{y:g}" for x, y in r["points"])} for r in plan["rooms"]]}
+
+
 def page_data(case_id: str, store: Store, role: str) -> dict:
     case = store.get_case(case_id) or {}
     everything = store.get_items(case_id)
@@ -211,15 +230,25 @@ def page_data(case_id: str, store: Store, role: str) -> dict:
     for row in everything:
         if (row["cluster_id"] or row["item_id"]) != row["item_id"]:
             continue
-        (removed if row["status"] == "rejected" else items).append(item_view(row, by_canonical[row["item_id"]], case))
+        view = item_view(row, by_canonical[row["item_id"]], case)
+        view["shot_from"] = {"scan": "3D scan", "photo": "Family photo", "aerial": "Aerial image"}.get(
+            row.get("source"), "") if view["has_photo"] else ""            # where the photo on the card came from
+        view["proof"] = (("Card record" if (row.get("price_source") or "").startswith("bank record") else "Receipt")
+                         if view["badges"]["receipt"] else "")
+        (removed if row["status"] == "rejected" else items).append(view)
     items.sort(key=lambda i: -i["value"])
 
     rooms: dict[str, int] = {}
+    waiting: dict[str, int] = {}
     for item in items:
         rooms[item["room"]] = rooms.get(item["room"], 0) + 1
+        if item["status"] == "suggested":
+            waiting[item["room"]] = waiting.get(item["room"], 0) + 1
     m = meter(case_id, store)
     scale = max(m["target"] or 0, m["documented"] + m["pending"], 1)
     members = store.get_members(case_id)
+    confirmed = [i for i in items if i["status"] == "confirmed"]
+    proven = sum(1 for i in confirmed if not i["memory_only"] or i["badges"]["receipt"])
     latest = max([i["created"] for i in items] + [case.get("created_at") or ""], default="")
     return {
         "case": case,
@@ -239,6 +268,12 @@ def page_data(case_id: str, store: Store, role: str) -> dict:
                 "pending": 100 * m["pending"] / scale},
         "updated": _ago(latest),
         "members": len(members),
+        "member_names": [mb["name"].strip() for mb in members if (mb.get("name") or "").strip()],
+        "room_rows": [{"name": r, "count": n, "waiting": waiting.get(r, 0)}
+                      for r, n in sorted(rooms.items(), key=lambda kv: -kv[1])],
+        "waiting": sum(waiting.values()),
+        "counts": {"backed": proven, "memory": len(confirmed) - proven, "pending": sum(waiting.values())},
+        "plan": mini_plan(case_id, store, rooms),
         "calibrated": load_calibration()["calibrated"],
         "disclaimer": DISCLAIMER,
     }
@@ -376,7 +411,16 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
         elif item.get("price_mid") and source != "set by family":
             basis += (" The range covers 90% of similar items in our test set." if calibrated
                       else " The range is a rough allowance for uncertainty.")
+        where = None                                      # its room and spot on the plan, for the small locator
+        try:
+            from . import layout
+            pin = next((p for p in layout.build(case["case_id"], store)["pins"] if p["id"] == item_id), None)
+            if pin and (pin.get("room_id") is not None or pin.get("x") is not None):
+                where = {"room_id": pin.get("room_id"), "x": pin.get("x"), "y": pin.get("y")}
+        except Exception as exc:                          # the sheet must open without a plan
+            print(f"ashline: no plan spot for item {item_id} ({exc})")
         return JSONResponse({
+            "where": where,
             **view, "label": item["label"], "price_basis": basis, "price_evidence": evidence,
             "shop_search": shop_search(item), "tour": scan_link(store, case["case_id"], item),
             "price_sources": price_stack(item),

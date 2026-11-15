@@ -9,116 +9,234 @@
 <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png?v={{ v }}">
 <link rel="stylesheet" href="/static/brand.css?v={{ v }}">
 <style>
-  main { max-width: 1160px; margin: 0 auto; padding: 0 18px 120px; }
-  .masthead { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--rule); margin-bottom: 26px; }
+  /* The brand's colours and type, in the shapes of the family's mockups (as on the plan page): soft cards
+     with a hairline border, pills, dashed outlines for anything waiting or rough. Three columns on a wide
+     screen (rail, cards, the open item), two on a tablet, one on a phone. */
+  :root { --card-line: #E3E0DB; --r: 18px; --room-on: #FBE4DF; --wait: #8C8882; }
+  main { max-width: 1480px; margin: 0 auto; padding: 0 18px 120px; }
+  @media (min-width: 760px) { main { padding: 0 24px 48px; } }
+  .masthead { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--rule); margin-bottom: 20px; }
   .masthead .brand img { height: 26px; }
   .masthead .brand span { font-size: 19px; }
   .masthead small { color: var(--muted); font-size: 13px; }
-  h1 { font: 700 clamp(28px, 4.4vw, 40px)/1.05 var(--sans); letter-spacing: -0.025em; margin: 0 0 6px; }
-  h1 .count { color: var(--red); font-weight: 400; }
-  .sub { color: var(--muted); font-size: 14px; margin: 0 0 22px; }
+  .card { background: var(--paper); border: 1.5px solid var(--card-line); border-radius: var(--r); }
+  main .btn, dialog .btn, .footer a { border-radius: 14px; }
 
-  .meter { position: relative; overflow: hidden; border-top: 2px solid var(--ink); padding: 18px 0 20px; margin-bottom: 26px; }
-  .meter .figure { font: 700 clamp(34px, 6vw, 48px)/1 var(--sans); letter-spacing: -0.03em; }
-  .meter .figure small { display: block; font-size: 15px; font-weight: 500; color: var(--muted); letter-spacing: 0; margin-top: 8px; }
-  .bar { display: flex; height: 10px; overflow: hidden; background: var(--panel); margin: 16px 0 12px; }
-  .bar span { display: block; height: 100%; }
+  .top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px 24px; margin-bottom: 20px; }
+  h1 { font: 700 clamp(28px, 4.4vw, 38px)/1.08 var(--sans); letter-spacing: -0.025em; margin: 0 0 6px; }
+  .sub { color: var(--ink-2); font-size: 15px; margin: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px; }
+  .sub .count { color: var(--ink); font-weight: 600; }
+  .who { display: inline-flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
+  .faces { display: inline-flex; }
+  .faces i { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font: 700 12px/1 var(--sans); font-style: normal;
+             color: #fff; background: var(--ink); border: 2px solid var(--paper); margin-left: -7px; }
+  .faces i:first-child { margin-left: 0; }
+  .faces i:nth-child(3n+2) { background: var(--red); }
+  .faces i:nth-child(3n+3) { background: #6C6863; }
+  .actions { display: flex; gap: 10px; }
+  .actions .btn { padding: 11px 18px; min-height: 44px; white-space: nowrap; }
+  @media (max-width: 759px) { .actions { display: none; } }
+
+  /* Columns */
+  .layout { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+  .rail { display: grid; gap: 14px; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+  .list { min-width: 0; }
+  .dock { display: contents; }
+  .dock-empty { display: none; }
+  @media (min-width: 760px) {
+    .layout { grid-template-columns: 270px minmax(0, 1fr); gap: 22px; }
+    .rail { position: sticky; top: 16px; max-height: calc(100vh - 32px); overflow-y: auto; scrollbar-width: thin; padding-bottom: 2px; }
+  }
+  @media (min-width: 1180px) {
+    .layout { grid-template-columns: 290px minmax(0, 1fr) 380px; gap: 24px; }
+    .dock { display: block; position: sticky; top: 16px; min-width: 0; }
+    .dock-empty { display: block; padding: 28px 22px; color: var(--muted); font-size: 15px; text-align: center; border-style: dashed; }
+    .dock-empty b { display: block; color: var(--ink); font-size: 17px; margin-bottom: 4px; }
+    .dock dialog[open] + .dock-empty { display: none; }
+  }
+
+  /* Documented so far */
+  .meter { position: relative; padding: 18px 18px 16px; }
+  .meter .label { font-size: 14px; color: var(--muted); margin-bottom: 4px; }
+  .meter .figure { font: 700 clamp(32px, 6vw, 40px)/1.05 var(--sans); letter-spacing: -0.03em; }
+  .meter .figure small { display: block; font-size: 14.5px; font-weight: 500; color: var(--muted); letter-spacing: 0; margin-top: 6px; }
+  .bar { display: flex; gap: 3px; height: 12px; margin: 14px 0 12px; }
+  .bar span { display: block; height: 100%; border-radius: 999px; min-width: 0; }
+  .bar span[style="width: 0.00%"] { display: none; }
   .bar .backed { background: var(--red); }
   .bar .memory { background: var(--flame-soft); }
-  .bar .pending { background: repeating-linear-gradient(135deg, #C9CED2 0 4px, var(--panel) 4px 8px); }
-  .key { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 13.5px; color: var(--muted); }
-  .key i { display: inline-block; width: 10px; height: 10px; margin-right: 7px; vertical-align: -1px; }
-  .key b { color: var(--ink); font-weight: 700; }
-  .due { margin-top: 12px; font-size: 14px; color: var(--red-deep); font-weight: 600; }
-  .ask { margin-top: 16px; padding: 16px 18px; background: var(--panel); font-size: 15px; }
-  .ask form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
-  .ask input[type=text] { flex: 1 1 150px; min-width: 0; padding: 10px 12px; border: 1.5px solid var(--rule); border-radius: 3px; background: #fff; }
+  .bar .pending { border: 1.5px dashed var(--wait); }
+  .bar .rest { flex: 1 1 auto; background: var(--panel); }
+  .key { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 14.5px; }
+  .key li { display: flex; align-items: flex-start; gap: 10px; }
+  .key i { flex: none; width: 12px; height: 12px; border-radius: 3px; margin-top: 5px; }
+  .key i.pending { border: 1.5px dashed var(--wait); border-radius: 50%; }
+  .key span { flex: 1 1 auto; min-width: 0; color: var(--ink-2); }
+  .key span small { color: var(--muted); font-size: 13px; margin-left: 6px; white-space: nowrap; }
+  .key b { font-weight: 700; font-variant-numeric: tabular-nums; }
+  .fine { border-top: 1px solid var(--card-line); margin-top: 14px; padding-top: 10px; display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
+  .due { font-size: 14px; color: var(--red-deep); font-weight: 600; }
+  .ask-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+  .ask form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; align-items: center; color: var(--ink-2); }
+  .ask form p { margin: 0 0 4px; flex: 1 1 100%; font-size: 14px; }
+  .ask input[type=text] { flex: 1 1 120px; min-width: 0; padding: 10px 12px; border: 1.5px solid var(--card-line); border-radius: 12px; background: #fff; }
   .ask input[type=text]:focus { outline: none; border-color: var(--ink); }
-
-  .review { display: flex; align-items: center; gap: 16px; justify-content: space-between; border: 1.5px solid var(--ink); padding: 14px 16px; margin: 0 0 22px; }
-  .review b { display: block; font-size: 17px; font-weight: 700; }
-  .review div > span { font-size: 14px; color: var(--muted); }
-  .review .btn { flex: none; }
-
-  .chips { display: flex; gap: 22px; overflow-x: auto; margin: 0 -18px; padding: 0 18px; border-bottom: 1px solid var(--rule); scrollbar-width: none; }
-  .chips::-webkit-scrollbar { display: none; }
-  .chip { flex: none; padding: 10px 0 11px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none; font-size: 15px; font-weight: 600; color: var(--muted); cursor: pointer; }
-  .chip span { font-weight: 500; margin-left: 5px; color: var(--muted); }
-  .chip[aria-pressed=true] { color: var(--ink); border-bottom-color: var(--red); }
-  .chip.removed-chip { font-weight: 500; }
-  .tools { display: flex; justify-content: space-between; align-items: center; margin: 14px 0 16px; font-size: 14px; color: var(--muted); }
-  .tools select.unused { appearance: none; -webkit-appearance: none; border: 0; border-bottom: 1.5px solid var(--ink); background: transparent; padding: 3px 20px 3px 2px; font-weight: 600; color: var(--ink); cursor: pointer;
-                  background-image: linear-gradient(45deg, transparent 50%, var(--ink) 50%), linear-gradient(135deg, var(--ink) 50%, transparent 50%);
-                  background-position: calc(100% - 9px) 55%, calc(100% - 4px) 55%; background-size: 5px 5px; background-repeat: no-repeat; border-radius: 0; }
-
-  .native-sort { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
-  .sort { position: relative; display: flex; align-items: center; gap: 8px; }
-  .sort-btn { display: inline-flex; align-items: center; gap: 8px; border: 0; border-bottom: 1.5px solid var(--ink); background: none;
-              padding: 4px 2px; font-weight: 700; color: var(--ink); cursor: pointer; border-radius: 0; }
-  .sort-btn::after { content: ""; width: 7px; height: 7px; border-right: 1.5px solid var(--ink); border-bottom: 1.5px solid var(--ink);
-                     transform: translateY(-2px) rotate(45deg); transition: transform .15s; }
-  .sort-btn[aria-expanded=true]::after { transform: translateY(2px) rotate(-135deg); }
-  .sort-list { position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; min-width: 236px; margin: 0; padding: 6px 0; list-style: none;
-               background: #fff; border: 1.5px solid var(--ink); box-shadow: 6px 6px 0 rgba(23, 22, 21, .08); }
-  .sort-list li { display: flex; align-items: center; gap: 10px; padding: 10px 16px 10px 14px; font-size: 15px; font-weight: 500; color: var(--ink); cursor: pointer; }
-  .sort-list li::before { content: ""; width: 3px; height: 18px; background: transparent; flex: none; }
-  .sort-list li[aria-selected=true] { font-weight: 700; }
-  .sort-list li[aria-selected=true]::before { background: var(--red); }
-  .sort-list li.active, .sort-list li:hover { background: var(--panel); }
-  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 14px; }
-  @media (min-width: 640px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px 20px; } }
-  @media (min-width: 920px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
-  .item { background: none; border: 0; cursor: pointer; display: flex; flex-direction: column; text-align: left; padding: 0; width: 100%; }
-  .item .shot { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: var(--panel); display: flex; align-items: center; justify-content: center; flex: none; }
-  .item .shot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .25s; }
-  .item:hover .shot img { transform: scale(1.03); }
-  .item .shot .mem { font: 700 italic 15px var(--serif); color: var(--ink-2); padding: 0 14px; text-align: center; }
-  .item.suggested .shot::after { content: "To check"; position: absolute; left: 0; top: 0; background: #fff; color: var(--red); font-size: 12px; font-weight: 700; padding: 4px 8px; }
-  .item.confirmed .shot::after { content: "Yours"; position: absolute; left: 0; top: 0; background: var(--ink); color: #fff; font-size: 12px; font-weight: 700; padding: 4px 8px; }
-  .item.rejected { opacity: .55; }
-  .item.rejected .shot::after { content: "Removed"; position: absolute; left: 0; top: 0; background: var(--panel); color: var(--ink); font-size: 12px; font-weight: 700; padding: 4px 8px; }
-  .item .body { padding: 10px 0 0; border-top: 0; }
-  .item .name { font-size: 16px; font-weight: 700; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .item .line { font-size: 13px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .item .price { font-size: 15px; font-weight: 600; margin-top: 6px; font-variant-numeric: tabular-nums; }
-  .item .foot { font-size: 12.5px; color: var(--muted); margin-top: 4px; display: flex; justify-content: space-between; gap: 8px; }
-  .item .foot span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .claims { margin-top: 16px; border-top: 1px solid var(--rule); }
-  .claim { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid var(--rule); font-size: 15px; }
+  .ask .btn { padding: 9px 14px; }
+  .claims { margin-top: 12px; border-top: 1px solid var(--card-line); }
+  .claim { display: flex; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; padding: 8px 0; border-bottom: 1px solid var(--card-line); font-size: 14px; }
   .claim b { font-weight: 700; }
   .claim span { color: var(--ink-2); font-variant-numeric: tabular-nums; }
   .claims-note { font-size: 12.5px; color: var(--muted); margin: 8px 0 0; }
+
+  /* Check N items */
+  .review { margin: 0; }
+  .check { width: 100%; display: flex; align-items: center; gap: 12px; text-align: left; border: 0; border-radius: var(--r); padding: 16px 18px;
+           background: var(--ink); color: #fff; cursor: pointer; min-height: 64px; }
+  .check:hover { background: #000; }
+  .check span { flex: 1 1 auto; min-width: 0; }
+  .check b { display: block; font-size: 18px; font-weight: 700; }
+  .check small { display: block; font-size: 14px; color: #D8D4CF; }
+  .check svg { flex: none; width: 20px; height: 20px; }
+
+  /* Rooms: the small plan and one row per room */
+  .rooms { padding: 8px; }
+  .mini { padding: 6px 6px 4px; }
+  .mini svg { display: block; width: 100%; height: auto; max-height: 150px; }
+  .mini .rm { fill: #F5F5F3; stroke: #2B2927; stroke-width: 1.4; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+  .mini.sketch .rm, .locator.sketch .rm { fill: var(--paper); stroke-dasharray: 5 4; }
+  .mini .rm.go { cursor: pointer; }
+  .mini .rm.go:hover { fill: #EEEDEA; }
+  .mini .rm.on, .locator .rm.on { fill: var(--room-on); stroke: var(--red); stroke-width: 2; }
+  .mini .rm:focus-visible { outline: none; stroke: var(--red); stroke-width: 2.4; }
+  .fullplan { display: inline-block; margin: 4px 2px 2px; color: var(--muted); font-size: 13.5px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--card-line); }
+  .fullplan:hover { color: var(--red); }
+  .chips { display: grid; gap: 2px; margin-top: 4px; }
+  .chip { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 8px 12px; border: 0; border-radius: 12px; background: none;
+          font-size: 15.5px; font-weight: 500; color: var(--ink); cursor: pointer; text-align: left; }
+  .chip:hover { background: var(--panel); }
+  .chip span { margin-left: auto; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .chip em { font-style: normal; font-size: 12.5px; color: var(--ink-2); border: 1.5px dashed var(--wait); border-radius: 999px; padding: 1px 8px; white-space: nowrap; margin-left: auto; }
+  .chip em + span { margin-left: 10px; }
+  .chip[aria-pressed=true] { background: var(--room-on); font-weight: 700; }
+  .chip.removed-chip { color: var(--muted); }
+  @media (max-width: 759px) {
+    .rooms { border: 0; padding: 0; background: none; }
+    .mini { border: 1.5px solid var(--card-line); border-radius: var(--r); padding: 10px 12px 6px; }
+    .mini svg { max-height: 170px; }
+    .chips { display: flex; gap: 8px; overflow-x: auto; margin: 10px -18px 0; padding: 0 18px 2px; scrollbar-width: none; }
+    .chips::-webkit-scrollbar { display: none; }
+    .chip { flex: none; width: auto; border: 1.5px solid var(--card-line); border-radius: 999px; padding: 8px 16px; white-space: nowrap; }
+    .chip span { margin-left: 6px; font-weight: 500; }
+    .chip em { display: none; }
+    .chip[aria-pressed=true] { background: var(--ink); border-color: var(--ink); color: #fff; }
+  }
+
+  /* Status tabs and sort */
+  .tools { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px 14px; margin: 0 0 16px; font-size: 14px; color: var(--muted); }
+  .tabs { display: flex; gap: 8px; flex-wrap: wrap; }
+  .tab { display: inline-flex; align-items: center; gap: 6px; min-height: 42px; padding: 8px 16px; border-radius: 999px; border: 1.5px solid var(--card-line);
+         background: var(--paper); font-size: 15px; font-weight: 600; color: var(--ink); cursor: pointer; white-space: nowrap; }
+  .tab:hover { border-color: var(--ink); }
+  .tab span { font-weight: 500; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .tab.waiting { border-style: dashed; border-color: var(--wait); }
+  .tab[aria-pressed=true] { background: var(--ink); border-color: var(--ink); border-style: solid; color: #fff; }
+  .tab[aria-pressed=true] span { color: #D8D4CF; }
+  @media (max-width: 759px) {
+    .tools { margin-top: 14px; }
+    .tabs { flex-wrap: nowrap; overflow-x: auto; margin: 0 -18px; padding: 0 18px; scrollbar-width: none; width: calc(100% + 36px); }
+    .tabs::-webkit-scrollbar { display: none; }
+  }
+  .native-sort { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  .sort { position: relative; display: flex; align-items: center; gap: 8px; margin-left: auto; }
+  .sort-btn { display: inline-flex; align-items: center; gap: 10px; min-height: 42px; border: 1.5px solid var(--card-line); background: var(--paper);
+              padding: 8px 14px; font-weight: 600; color: var(--ink); cursor: pointer; border-radius: 999px; }
+  .sort-btn:hover { border-color: var(--ink); }
+  .sort-btn::after { content: ""; width: 7px; height: 7px; border-right: 1.5px solid var(--ink); border-bottom: 1.5px solid var(--ink);
+                     transform: translateY(-2px) rotate(45deg); transition: transform .15s; }
+  .sort-btn[aria-expanded=true]::after { transform: translateY(2px) rotate(-135deg); }
+  .sort-list { position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; min-width: 236px; margin: 0; padding: 6px; list-style: none;
+               background: #fff; border: 1.5px solid var(--card-line); border-radius: 14px; box-shadow: 0 10px 28px rgba(23, 22, 21, .12); }
+  .sort-list li { display: flex; align-items: center; gap: 10px; padding: 10px 14px 10px 10px; border-radius: 10px; font-size: 15px; font-weight: 500; color: var(--ink); cursor: pointer; }
+  .sort-list li::before { content: ""; width: 3px; height: 18px; background: transparent; flex: none; border-radius: 2px; }
+  .sort-list li[aria-selected=true] { font-weight: 700; }
+  .sort-list li[aria-selected=true]::before { background: var(--red); }
+  .sort-list li.active, .sort-list li:hover { background: var(--panel); }
+
+  /* Cards */
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  @media (min-width: 760px) { .grid { grid-template-columns: repeat(auto-fill, minmax(196px, 1fr)); gap: 16px; } }
+  .item { background: var(--paper); border: 1.5px solid var(--card-line); border-radius: var(--r); overflow: hidden; cursor: pointer; display: flex; flex-direction: column;
+          text-align: left; padding: 0; width: 100%; color: var(--ink); transition: border-color .12s, box-shadow .12s; }
+  .item:hover { border-color: #C9C4BD; }
+  .item.suggested { border-style: dashed; border-color: var(--wait); }
+  .item.open { border: 2px solid var(--ink); box-shadow: 0 0 0 3px var(--room-on); }
+  .item .shot { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: var(--panel); display: flex; flex-direction: column; gap: 6px;
+                align-items: center; justify-content: center; flex: none; color: var(--muted); font-size: 13.5px; }
+  .item .shot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .25s; }
+  .item:hover .shot img { transform: scale(1.03); }
+  .item .shot svg { width: 20px; height: 20px; }
+  .item .shot .from { position: absolute; left: 8px; bottom: 8px; background: rgba(255, 255, 255, .94); color: var(--ink); font-size: 12px; font-weight: 600;
+                      padding: 3px 9px; border-radius: 999px; max-width: calc(100% - 16px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .shot::after { position: absolute; right: 8px; top: 8px; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; }
+  .item.suggested .shot::after { content: "Waiting for OK"; background: var(--ink); color: #fff; }
+  .item.rejected { opacity: .6; }
+  .item.rejected .shot::after { content: "Removed"; background: #fff; color: var(--ink); }
+  .item .body { padding: 11px 13px 13px; display: flex; flex-direction: column; flex: 1 1 auto; min-width: 0; }
+  .item .name { font-size: 16px; font-weight: 700; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .item .line { font-size: 13.5px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .price { display: flex; align-items: center; flex-wrap: wrap; gap: 2px 7px; font-size: 16px; font-weight: 700; margin-top: 8px; font-variant-numeric: tabular-nums; }
+  .item .price small { font-weight: 500; color: var(--muted); font-size: 12.5px; }
+  .pi { flex: none; width: 22px; height: 22px; border-radius: 50%; display: inline-grid; place-items: center; border: 1.5px solid var(--ink); color: var(--ink); }
+  .pi svg { width: 12px; height: 12px; }
+  .pi.paid { background: var(--red); border-color: var(--red); color: #fff; }
+  .pi.estimate { border-style: dashed; }
   .item .acv { font-size: 13px; color: var(--muted); margin-top: 1px; }
-  .tags { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
-  .tag { font-size: 11.5px; font-weight: 700; padding: 2px 7px; border: 1.5px solid var(--rule); color: var(--ink-2); }
-  .tag.flood { border-color: #2F5D8A; color: #2F5D8A; }
-  .tag.wind { border-color: var(--muted); }
-  .tag.essential { border-color: var(--red); color: var(--red); }
+  .tags { display: flex; gap: 5px; margin-top: 8px; flex-wrap: wrap; }
+  .tag { font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; background: var(--panel); color: var(--ink-2); white-space: nowrap; }
+  .tag.memory { background: var(--room-on); }
+  .tag.flood { background: none; border: 1.5px solid #2F5D8A; color: #2F5D8A; padding: 1px 8px; }
+  .tag.wind { background: none; border: 1.5px solid var(--muted); padding: 1px 8px; }
+  .tag.essential { background: none; border: 1.5px solid var(--red); color: var(--red); padding: 1px 8px; }
+  .item .foot { font-size: 12.5px; color: var(--muted); margin-top: auto; padding-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .claim-pick { display: flex; gap: 8px; align-items: center; margin-top: 12px; font-size: 14px; color: var(--muted); }
   .claim-pick .btn { flex: 1; padding: 9px 8px; font-size: 14px; }
-  .empty { color: var(--muted); padding: 48px 0; font-size: 16px; }
+  .empty { color: var(--muted); padding: 48px 20px; font-size: 16px; text-align: center; }
+  .shown { color: var(--muted); font-size: 14px; margin: 16px 2px 0; }
 
   .footer { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid var(--rule); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); z-index: 5; }
   .footer div { max-width: 1160px; margin: 0 auto; display: flex; gap: 10px; }
-  .footer a { flex: 1; text-align: center; text-decoration: none; padding: 12px 10px; border-radius: 3px; font-size: 15px; font-weight: 600; white-space: nowrap; }
+  .footer a { flex: 1; text-align: center; text-decoration: none; padding: 12px 10px; font-size: 15px; font-weight: 600; white-space: nowrap; }
   .footer .wide { display: none; }
   @media (min-width: 520px) { .footer .wide { display: inline; } .footer .narrow { display: none; } }
-  .footer a.sheet { border: 1.5px solid var(--rule); color: var(--ink); background: #fff; }
+  @media (min-width: 760px) { .footer { display: none; } }
+  .footer a.sheet { border: 1.5px solid var(--card-line); color: var(--ink); background: #fff; }
   .footer a.pdf { background: var(--ink); color: #fff; border: 1.5px solid var(--ink); }
-  .note { color: var(--muted); font-size: 12.5px; margin: 36px 0 0; max-width: 46em; }
+  .note { color: var(--muted); font-size: 12.5px; margin: 28px 0 0; max-width: 46em; }
 
-  dialog { border: 0; padding: 0; width: min(580px, 100vw); max-width: 100vw; max-height: 94vh; border-radius: 6px 6px 0 0; margin: auto auto 0; background: #fff; color: var(--ink); overscroll-behavior: contain; }
-  @media (min-width: 640px) { dialog { border-radius: 4px; margin: auto; } }
+  /* The open item: a sheet from the bottom on a phone, a centred box on a tablet, docked on the right on a wide screen. */
+  dialog { border: 0; padding: 0; width: min(580px, 100vw); max-width: 100vw; max-height: 94vh; border-radius: 22px 22px 0 0; margin: auto auto 0; background: #fff; color: var(--ink); overscroll-behavior: contain; }
+  @media (min-width: 640px) { dialog { border-radius: var(--r); margin: auto; } }
+  @media (min-width: 1180px) {
+    .dock dialog:not(:modal) { position: relative; inset: auto; width: 100%; max-width: none; max-height: calc(100vh - 32px); margin: 0; overflow-y: auto;
+                               border: 1.5px solid var(--card-line); border-radius: var(--r); scrollbar-width: thin; }
+  }
   dialog::backdrop { background: rgba(23, 22, 21, .55); }
-  html:has(dialog[open]) { overflow: hidden; }
-  .close { position: absolute; top: 10px; right: 10px; width: 34px; height: 34px; border-radius: 2px; border: 0; background: #fff; color: var(--ink); font-size: 16px; cursor: pointer; z-index: 2; }
-  .sightings { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; background: #121110; }
+  html:has(dialog:modal) { overflow: hidden; }
+  .close { position: absolute; top: 20px; right: 20px; width: 40px; height: 40px; border-radius: 50%; border: 0; background: #fff; color: var(--ink); font-size: 16px; cursor: pointer; z-index: 2;
+           box-shadow: 0 1px 4px rgba(0, 0, 0, .18); }
+  .sightings { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; background: #121110; margin: 12px 12px 0; border-radius: 14px; }
+  .sightings:empty { display: none; }
   .sightings figure { flex: 0 0 100%; margin: 0; scroll-snap-align: center; position: relative; }
   .sightings img { width: 100%; max-height: 46vh; object-fit: contain; display: block; }
-  .sightings figcaption { position: absolute; left: 0; bottom: 0; font-size: 12px; color: #fff; background: rgba(0,0,0,.6); padding: 4px 10px; }
+  .dock .sightings img { max-height: 300px; }
+  .sightings figcaption { position: absolute; left: 10px; bottom: 10px; font-size: 12px; font-weight: 600; color: var(--ink); background: rgba(255, 255, 255, .94); padding: 3px 10px; border-radius: 999px; }
   .sightings .quote { color: #F1EEE9; padding: 30px 22px; font: 700 italic 18px/1.4 var(--serif); }
   .sheet { padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }
   .sheet h2 { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 2px; line-height: 1.15; }
+  .sheet .titlerow { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .state { flex: none; display: inline-flex; align-items: center; border-radius: 999px; padding: 3px 11px; font-size: 13px; font-weight: 600; background: var(--panel); white-space: nowrap; margin-top: 4px; }
+  .state.suggested { background: none; border: 1.5px dashed var(--wait); }
+  .state.rejected { color: var(--muted); }
   .sheet p { margin: 6px 0; font-size: 15px; }
   .sheet .muted { color: var(--muted); }
   .sheet .small { font-size: 13.5px; }
@@ -143,26 +261,34 @@
   .prices-head { display: flex; justify-content: space-between; align-items: baseline; margin-top: 14px; }
   .prices-head b { font-size: 15px; }
   .prices-head span { font-size: 13px; color: var(--muted); }
-  .item .price small { font-weight: 500; color: var(--muted); font-size: 12.5px; margin-left: 4px; }
+  .locator { display: flex; align-items: center; gap: 12px; margin: 12px 0 4px; padding: 8px 12px 8px 8px; border: 1.5px solid var(--card-line); border-radius: 14px;
+             text-decoration: none; color: var(--ink); }
+  .locator:hover { border-color: var(--ink); }
+  .locator svg { flex: none; width: 96px; height: 64px; }
+  .locator .rm { fill: #F5F5F3; stroke: #2B2927; stroke-width: 1.2; vector-effect: non-scaling-stroke; stroke-linejoin: round; }
+  .locator circle { fill: var(--red); stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; }
+  .locator b { display: block; font-size: 14.5px; }
+  .locator span { font-size: 13px; color: var(--muted); }
   .progress { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: var(--muted); padding-bottom: 12px; margin: 0 0 14px; border-bottom: 1px solid var(--rule); }
   .progress .count { text-align: center; flex: 1; }
   .progress > * { min-width: 70px; }
   .progress > :last-child { text-align: right; }
   .link { border: 0; background: none; color: var(--ink); font: inherit; font-weight: 700; padding: 4px 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--red); text-decoration-thickness: 2px; }
+  .progress .link { min-height: 40px; }
   .decide { display: grid; grid-template-columns: 1fr 1.6fr; gap: 10px; margin-top: 18px; }
   .btn.big { padding: 15px 16px; font-size: 17px; }
   .btn.chosen-yes { background: var(--red); border-color: var(--red); }
   .btn.chosen-no { background: var(--panel); border-color: var(--ink); color: var(--ink); }
   .hint-line { grid-column: 1 / -1; text-align: center; margin: 0 !important; }
   .sheet .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-  .sheet .row .btn { flex: 1 1 0; font-size: 14px; padding: 10px 8px; }
+  .sheet .row .btn { flex: 1 1 0; font-size: 14px; padding: 10px 8px; min-height: 42px; }
   .saved { color: var(--red); font-weight: 700; font-size: 14px !important; animation: fade 2.4s forwards; }
   @keyframes fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
   .error { color: var(--red-deep); font-size: 14px !important; font-weight: 600; grid-column: 1 / -1; margin: 4px 0 0 !important; }
-  .editor { margin-top: 16px; padding: 16px; background: var(--panel); }
+  .editor { margin-top: 16px; padding: 16px; background: var(--panel); border-radius: 14px; }
   .editor-label { display: block; font-weight: 700; font-size: 17px; }
   .editor-hint { color: var(--muted); font-size: 14px !important; margin: 4px 0 0 !important; }
-  .editor-field { display: flex; align-items: center; margin-top: 12px; background: #fff; border: 1.5px solid var(--rule); border-radius: 3px; padding: 0 12px; }
+  .editor-field { display: flex; align-items: center; margin-top: 12px; background: #fff; border: 1.5px solid var(--rule); border-radius: 12px; padding: 0 12px; }
   .editor-field:focus-within { border-color: var(--ink); }
   .editor-field .prefix { color: var(--muted); margin-right: 4px; font-size: 17px; font-weight: 600; }
   .editor-field input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; padding: 13px 0; font-size: 17px; font-weight: 600; }
@@ -174,18 +300,70 @@
   .done .btn { width: 100%; margin-top: 18px; }
   .done .link { margin-top: 14px; }
   .toast { position: fixed; left: 50%; bottom: calc(86px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--ink); color: #fff;
-           padding: 11px 18px; border-radius: 2px; font-size: 15px; font-weight: 600; z-index: 50; transition: opacity .4s; }
+           padding: 11px 18px; border-radius: 999px; font-size: 15px; font-weight: 600; z-index: 50; transition: opacity .4s; }
   .toast.gone { opacity: 0; }
   @media (max-width: 639px) { dialog { width: 100vw; } .sightings img { max-height: 40vh; } }
 </style>
 </head>
 <body>
+{%- macro icon(kind) -%}
+<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+{%- if kind == 'paid' %}<rect x="2.5" y="5" width="15" height="10" rx="2"/><path d="M2.5 9h15"/>
+{%- elif kind == 'online' %}<path d="M8.5 11.5a3 3 0 0 0 4.2 0l2.6-2.6a3 3 0 0 0-4.2-4.2l-.9.9"/><path d="M11.5 8.5a3 3 0 0 0-4.2 0l-2.6 2.6a3 3 0 0 0 4.2 4.2l.9-.9"/>
+{%- elif kind == 'yours' %}<path d="M13 3.5l3.5 3.5L7 16.5l-4 .5.5-4z"/>
+{%- else %}<path d="M4 8c2-2.2 4-2.2 6 0s4 2.2 6 0"/><path d="M4 12.5c2-2.2 4-2.2 6 0s4 2.2 6 0"/>{% endif -%}
+</svg>
+{%- endmacro -%}
+{%- macro and_list(words) -%}{{ words[:-1]|join(', ') ~ ' and ' ~ words[-1] if words|length > 1 else words|join('') }}{%- endmacro -%}
+{%- macro card(i, removed_card) -%}
+    <button class="item {{ i.status }}"{% if removed_card %} data-removed="1" hidden{% endif %} data-id="{{ i.id }}" data-room="{{ i.room }}" data-value="{{ i.value }}"
+            data-proof="{{ 1 if i.needs_proof else 0 }}" data-review="{{ 1 if i.status == 'suggested' else 0 }}"
+            data-new="{{ i.created }}" data-name="{{ i.title|lower }}">
+      <div class="shot">
+        {% if i.has_photo %}<img loading="lazy" src="/p/{{ token }}/crop/{{ i.id }}.jpg" alt="">
+        {% else %}<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M13 3.5l3.5 3.5L7 16.5l-4 .5.5-4z"/></svg><span>No photo yet</span>{% endif %}
+        {% if i.shot_from %}<span class="from">{{ i.shot_from }}</span>{% endif %}
+      </div>
+      <div class="body">
+        <div class="name">{{ i.title }}</div>
+        <div class="line">{{ i.room }} · {{ i.category|capitalize }}{% if i.brand %} · {{ i.brand }}{% endif %}</div>
+        {% if i.price %}<div class="price"><i class="pi {{ i.price_from or 'estimate' }}">{{ icon(i.price_from) }}</i><b>{{ i.price }}</b>{% if i.price_from %}<small>{{ i.price_from }}</small>{% endif %}</div>{% endif %}
+        {% if i.acv_text %}<div class="acv">about {{ i.acv_text }} depreciated</div>{% endif %}
+        {% set photos = i.badges.photo %}
+        {% if photos or i.proof or i.badges.memory or i.cause or (show_essentials and i.essential) %}<div class="tags">
+          {%- if photos %}<span class="tag">{{ photos }} photo{{ '' if photos == 1 else 's' }}</span>{% endif %}
+          {%- if i.proof %}<span class="tag">{{ i.proof }}{% if i.badges.receipt > 1 %} · {{ i.badges.receipt }}{% endif %}</span>{% endif %}
+          {%- if i.badges.memory %}<span class="tag memory">From memory</span>{% endif %}
+          {%- if i.cause %}<span class="tag {{ i.cause }}">{{ 'Flood' if i.cause == 'flood' else 'Wind & rain' }}</span>{% endif %}
+          {%- if show_essentials and i.essential %}<span class="tag essential">Essential</span>{% endif -%}
+        </div>{% endif %}
+        {% set people = i.contributors|reject('equalto', '3D scan')|list %}
+        <div class="foot"><span>{% if people %}{{ 'Told to Ashline by ' if i.memory_only else 'From ' }}{{ and_list(people) }}{% elif i.contributors %}From the 3D scan{% endif %}</span></div>
+      </div>
+    </button>
+{%- endmacro %}
 <main>
   <div class="masthead"><a class="brand" href="/"><img src="/static/img/logo.png?v={{ v }}" alt=""><span>Ashline</span></a><small>Private to your family</small></div>
-  <h1>{{ name }} <span class="count">{{ items|length }} item{{ '' if items|length == 1 else 's' }}</span></h1>
-  <p class="sub">Updated {{ updated }}{% if members %} · {{ members }} family member{{ '' if members == 1 else 's' }} contributing{% endif %} · <a href="/p/{{ token }}/plan" style="color: var(--red); font-weight: 600">See where things were</a></p>
+  <header class="top">
+    <div>
+      <h1>{{ name }}</h1>
+      <p class="sub"><span><span class="count">{{ items|length }} item{{ '' if items|length == 1 else 's' }}</span> · updated {{ updated }}</span>
+        {% if member_names %}<span class="who"><span class="faces" aria-hidden="true">{% for n in member_names[:4] %}<i>{{ n[:1]|upper }}</i>{% endfor %}</span>
+          {%- set shown_names = member_names[:3] if member_names|length > 4 else member_names %}
+          {{ and_list(shown_names + ([(member_names|length - 3)|string ~ ' others'] if member_names|length > 4 else [])) }} {{ 'is' if member_names|length == 1 else 'are' }} on this list</span>{% endif %}</p>
+    </div>
+    {% if role == 'owner' %}
+    <div class="actions">
+      <a class="btn quiet" href="/p/{{ token }}/view/sheet">View spreadsheet</a>
+      <a class="btn" href="/p/{{ token }}/view/pdf">View PDF for insurer</a>
+    </div>
+    {% endif %}
+  </header>
 
-  <section class="meter" aria-label="Progress">
+  <div class="layout">
+  <aside class="rail">
+  <section class="card meter" aria-label="Progress">
+    <div class="label">Documented so far</div>
     {% if meter.target %}
       <div class="figure">{{ money(meter.documented) }} <small>of {{ money(meter.target) }} documented</small></div>
     {% else %}
@@ -195,12 +373,13 @@
       <span class="backed" style="width: {{ '%.2f'|format(bar.backed) }}%"></span>
       <span class="memory" style="width: {{ '%.2f'|format(bar.memory) }}%"></span>
       <span class="pending" style="width: {{ '%.2f'|format(bar.pending) }}%"></span>
+      <span class="rest"></span>
     </div>
-    <div class="key">
-      <span><i style="background: var(--red)"></i><b>{{ money(meter.backed) }}</b> with a photo or receipt</span>
-      {% if meter.memory %}<span><i style="background: var(--flame-soft)"></i><b>{{ money(meter.memory) }}</b> from memory</span>{% endif %}
-      {% if meter.pending %}<span><i style="background: #C9CED2"></i><b>{{ money(meter.pending) }}</b> waiting for an OK ({{ meter.pending_items }})</span>{% endif %}
-    </div>
+    <ul class="key">
+      <li><i style="background: var(--red)"></i><span>Backed by a photo or receipt<small>{{ money(meter.backed) }}</small></span><b>{{ counts.backed }}</b></li>
+      {% if meter.memory or counts.memory %}<li><i style="background: var(--flame-soft)"></i><span>From memory only<small>{{ money(meter.memory) }}</small></span><b>{{ counts.memory }}</b></li>{% endif %}
+      {% if meter.pending_items %}<li><i class="pending"></i><span>Waiting for your OK<small>{{ money(meter.pending) }}</small></span><b>{{ meter.pending_items }}</b></li>{% endif %}
+    </ul>
     {% set claims = claims or [] %}{% if claims|length > 1 or (claims and claims[0].basis == 'acv') %}
     <div class="claims">
       {% for c in claims %}
@@ -212,33 +391,61 @@
       {% if claims|selectattr('basis', 'equalto', 'acv')|list %}<p class="claims-note">Flood insurance pays depreciated value. Those figures are estimates for typical age and wear.</p>{% endif %}
     </div>
     {% endif %}
-    {% if show_essentials and essentials %}<div class="due">{{ essentials }} essential item{{ '' if essentials == 1 else 's' }} marked for FEMA (appliances, furniture, a computer)</div>{% endif %}
-    {% if meter.days_left is not none %}<div class="due">Proof of loss due in {{ meter.days_left }} day{{ '' if meter.days_left == 1 else 's' }}</div>{% endif %}
-    {% if not meter.limit and not case.coverage_skipped and role == 'owner' %}
+    {% set asking = not meter.limit and not case.coverage_skipped and role == 'owner' %}
+    {% if (show_essentials and essentials) or meter.days_left is not none or asking or meter.limit %}
+    <div class="fine">
+      {% if show_essentials and essentials %}<div class="due">{{ essentials }} essential item{{ '' if essentials == 1 else 's' }} marked for FEMA (appliances, furniture, a computer)</div>{% endif %}
+      {% if meter.days_left is not none %}<div class="due">Proof of loss due in {{ meter.days_left }} day{{ '' if meter.days_left == 1 else 's' }}</div>{% endif %}
+      {% if meter.limit %}<div>Contents coverage limit {{ money(meter.limit) }}</div>{% endif %}
+      {% if asking %}
       <div class="ask">
-        What is the contents coverage limit on the policy? It shows how much there is left to document. You can skip this.
-        <form id="coverage">
+        <div class="ask-row" id="ask-row"><span>Coverage limit not set</span><button class="link" type="button" id="add-limit">Add it</button></div>
+        <form id="coverage" hidden>
+          <p>What is the contents coverage limit on the policy? It shows how much there is left to document. You can skip this.</p>
           <input type="text" name="limit" inputmode="numeric" placeholder="e.g. 400,000" aria-label="Contents coverage limit in dollars">
           <button class="btn" type="submit">Save</button>
           <button class="btn quiet" type="button" id="skip">Skip</button>
         </form>
       </div>
+      {% endif %}
+    </div>
     {% endif %}
   </section>
 
   {% if role == 'owner' %}
   <div class="review" id="review" hidden>
-    <div><b><span id="review-count"></span> to check</b><span>Yes or no on each one. A few seconds an item.</span></div>
-    <button class="btn" type="button" id="review-start">Start</button>
+    <button class="check" type="button" id="review-start">
+      <span><b>Check <span id="review-count"></span></b><small>Yes or no, a few seconds each</small></span>
+      <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4.5l5.5 5.5L8 15.5"/></svg>
+    </button>
   </div>
   {% endif %}
-  <nav class="chips" aria-label="Rooms">
-    <button class="chip" aria-pressed="true" data-room="">All<span>{{ items|length }}</span></button>
-    {% for room, count in rooms %}<button class="chip" aria-pressed="false" data-room="{{ room }}">{{ room }}<span>{{ count }}</span></button>{% endfor %}
-    {% if removed %}<button class="chip removed-chip" aria-pressed="false" data-room="__removed">Removed<span>{{ removed|length }}</span></button>{% endif %}
-  </nav>
+
+  <section class="card rooms" aria-label="Rooms">
+    {% if plan %}
+    <div class="mini {{ plan.kind }}">
+      <svg id="mini-plan" viewBox="{{ plan.box }}" role="group" aria-label="Plan of the home. Tap a room to show only its things.">
+        {% for r in plan.rooms %}<polygon class="rm{% if r.name %} go{% endif %}" data-id="{{ r.id }}" points="{{ r.points }}"{% if r.name %} data-room="{{ r.name }}" tabindex="0" role="button" aria-label="{{ r.name }}"{% endif %}><title>{{ r.name or 'Room' }}</title></polygon>{% endfor %}
+      </svg>
+      <a class="fullplan" href="/p/{{ token }}/plan">Open the full plan</a>
+    </div>
+    {% endif %}
+    <nav class="chips" aria-label="Rooms">
+      <button class="chip" aria-pressed="true" data-room="">All rooms<span>{{ items|length }}</span></button>
+      {% for r in room_rows %}<button class="chip" aria-pressed="false" data-room="{{ r.name }}">{{ r.name }}{% if r.waiting %}<em>{{ r.waiting }} to check</em>{% endif %}<span>{{ r.count }}</span></button>{% endfor %}
+      {% if removed %}<button class="chip removed-chip" aria-pressed="false" data-room="__removed">Removed<span>{{ removed|length }}</span></button>{% endif %}
+    </nav>
+    {% if not plan %}<a class="fullplan" href="/p/{{ token }}/plan">Where things were</a>{% endif %}
+  </section>
+  </aside>
+
+  <section class="list" aria-label="Items">
   <div class="tools">
-    <span id="shown">{{ items|length }} shown</span>
+    <div class="tabs" role="group" aria-label="Show">
+      <button class="tab" type="button" data-status="" aria-pressed="true">All <span data-n="all">{{ items|length }}</span></button>
+      <button class="tab" type="button" data-status="confirmed" aria-pressed="false">On your list <span data-n="confirmed">{{ confirmed }}</span></button>
+      <button class="tab waiting" type="button" data-status="suggested" aria-pressed="false">Waiting for OK <span data-n="suggested">{{ waiting }}</span></button>
+    </div>
     <div class="sort">
       <span class="sort-label" id="sort-label">Sort</span>
       <button class="sort-btn" id="sort-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="sort-label sort-btn"></button>
@@ -257,54 +464,28 @@
 
   {% if items or removed %}
   <div class="grid" id="grid">
-    {% for i in items %}{% set removed_card = false %}
-    <button class="item {{ i.status }}"{% if removed_card %} data-removed="1" hidden{% endif %} data-id="{{ i.id }}" data-room="{{ i.room }}" data-value="{{ i.value }}"
-            data-proof="{{ 1 if i.needs_proof else 0 }}" data-review="{{ 1 if i.status == 'suggested' else 0 }}"
-            data-new="{{ i.created }}" data-name="{{ i.title|lower }}">
-      <div class="shot">
-        {% if i.has_photo %}<img loading="lazy" src="/p/{{ token }}/crop/{{ i.id }}.jpg" alt="">
-        {% else %}<span class="mem">“From memory”</span>{% endif %}
-      </div>
-      <div class="body">
-        <div class="name">{{ i.title }}</div>
-        <div class="line">{{ i.room }} · {{ i.category }}{% if i.brand %} · {{ i.brand }}{% endif %}</div>
-        {% if i.price %}<div class="price">{{ i.price }}{% if i.price_from and i.price_from != 'estimate' %}<small>{{ i.price_from }}</small>{% endif %}</div>{% endif %}
-        {% if i.acv_text %}<div class="acv">about {{ i.acv_text }} depreciated</div>{% endif %}
-        {% if i.cause or (show_essentials and i.essential) %}<div class="tags">{% if i.cause %}<span class="tag {{ i.cause }}">{{ 'Flood' if i.cause == 'flood' else 'Wind & rain' }}</span>{% endif %}{% if show_essentials and i.essential %}<span class="tag essential">Essential</span>{% endif %}</div>{% endif %}
-        <div class="foot">
-          <span>{{ [(i.badges.photo ~ (' photo' if i.badges.photo == 1 else ' photos')) if i.badges.photo else none, ('from memory' if i.badges.memory else none), ((i.badges.receipt ~ ' receipt') if i.badges.receipt else none)]|select|join(' · ') }}</span>
-          <span>{{ i.contributors|join(', ') }}</span>
-        </div>
-      </div>
-    </button>
+    {% for i in items %}{{ card(i, false) }}
     {% endfor %}
-    {% for i in removed %}{% set removed_card = true %}
-    <button class="item {{ i.status }}"{% if removed_card %} data-removed="1" hidden{% endif %} data-id="{{ i.id }}" data-room="{{ i.room }}" data-value="{{ i.value }}"
-            data-proof="{{ 1 if i.needs_proof else 0 }}" data-review="{{ 1 if i.status == 'suggested' else 0 }}"
-            data-new="{{ i.created }}" data-name="{{ i.title|lower }}">
-      <div class="shot">
-        {% if i.has_photo %}<img loading="lazy" src="/p/{{ token }}/crop/{{ i.id }}.jpg" alt="">
-        {% else %}<span class="mem">“From memory”</span>{% endif %}
-      </div>
-      <div class="body">
-        <div class="name">{{ i.title }}</div>
-        <div class="line">{{ i.room }} · {{ i.category }}{% if i.brand %} · {{ i.brand }}{% endif %}</div>
-        {% if i.price %}<div class="price">{{ i.price }}{% if i.price_from and i.price_from != 'estimate' %}<small>{{ i.price_from }}</small>{% endif %}</div>{% endif %}
-        {% if i.acv_text %}<div class="acv">about {{ i.acv_text }} depreciated</div>{% endif %}
-        {% if i.cause or (show_essentials and i.essential) %}<div class="tags">{% if i.cause %}<span class="tag {{ i.cause }}">{{ 'Flood' if i.cause == 'flood' else 'Wind & rain' }}</span>{% endif %}{% if show_essentials and i.essential %}<span class="tag essential">Essential</span>{% endif %}</div>{% endif %}
-        <div class="foot">
-          <span>{{ [(i.badges.photo ~ (' photo' if i.badges.photo == 1 else ' photos')) if i.badges.photo else none, ('from memory' if i.badges.memory else none), ((i.badges.receipt ~ ' receipt') if i.badges.receipt else none)]|select|join(' · ') }}</span>
-          <span>{{ i.contributors|join(', ') }}</span>
-        </div>
-      </div>
-    </button>
+    {% for i in removed %}{{ card(i, true) }}
     {% endfor %}
   </div>
+  <p class="shown" id="shown">{{ items|length }} shown</p>
   {% else %}
-  <p class="empty">Nothing here yet. Photos sent to Ashline show up on this page within a minute or two.</p>
+  <p class="empty card">Nothing here yet. Photos sent to Ashline show up on this page within a minute or two.</p>
   {% endif %}
 
   <p class="note">{{ disclaimer }}{% if not calibrated %} Price ranges are a rough allowance, not a measured one.{% endif %}</p>
+  </section>
+
+  <aside class="dock" aria-label="Open item">
+    <dialog id="detail" aria-label="Item detail">
+      <button class="close" id="close" aria-label="Close">✕</button>
+      <div class="sightings" id="sightings"></div>
+      <div class="sheet" id="sheet"></div>
+    </dialog>
+    <div class="card dock-empty"><b>No item open</b>Tap a card to see its photos and prices here.</div>
+  </aside>
+  </div>
 </main>
 
 {% if role == 'owner' %}
@@ -314,16 +495,12 @@
 </div></div>
 {% endif %}
 
-<dialog id="detail" aria-label="Item detail">
-  <button class="close" id="close" aria-label="Close">✕</button>
-  <div class="sightings" id="sightings"></div>
-  <div class="sheet" id="sheet"></div>
-</dialog>
-
 <script>
 (function () {
   var token = {{ token|tojson }}, grid = document.getElementById('grid'), DISASTER = {{ (disaster or 'fire')|tojson }};
   var chips = [].slice.call(document.querySelectorAll('.chip')), room = '';
+  var tabs = [].slice.call(document.querySelectorAll('.tab')), status = '';
+  var rooms = [].slice.call(document.querySelectorAll('#mini-plan .rm'));
   var sortBox = document.getElementById('sort');
   try { var saved = localStorage.getItem('ashline-sort'); if (saved && sortBox.querySelector('option[value="' + saved + '"]')) sortBox.value = saved; } catch (e) {}
   function num(c, k) { return parseFloat(c.dataset[k]) || 0; }
@@ -339,24 +516,47 @@
     old: function (a, b) { return -byNew(a, b) || byName(a, b); },
     name: function (a, b) { return byName(a, b) || byValue(a, b); }
   };
+  function hasStatus(c, s) { return !s || (s === 'suggested' ? c.dataset.review === '1' : c.classList.contains(s)); }
   function apply() {
     if (!grid) return;
-    var cards = [].slice.call(grid.children), mode = sortBox.value, shown = 0;
+    var cards = [].slice.call(grid.children), mode = sortBox.value, shown = 0, n = { all: 0, confirmed: 0, suggested: 0 };
     cards.sort(ORDER[mode] || ORDER.value);
     cards.forEach(function (c) {
       var gone = c.dataset.removed === '1';
-      var ok = room === '__removed' ? gone : !gone && (!room || c.dataset.room === room);
+      var here = room === '__removed' ? gone : !gone && (!room || c.dataset.room === room);
+      if (here && !gone) { n.all++; if (hasStatus(c, 'confirmed')) n.confirmed++; if (hasStatus(c, 'suggested')) n.suggested++; }
+      var ok = here && (gone || hasStatus(c, status));
       c.hidden = !ok; if (ok) shown++; grid.appendChild(c);
     });
-    document.getElementById('shown').textContent = shown + ' shown';
+    var total = cards.filter(function (c) { return c.dataset.removed !== '1'; }).length;
+    if (room !== '__removed') tabs.forEach(function (t) { var s = t.querySelector('span'); s.textContent = n[t.dataset.status || 'all']; });
+    document.getElementById('shown').textContent = shown === total ? shown + ' shown' : 'Showing ' + shown + ' of ' + total;
     try { localStorage.setItem('ashline-sort', mode); } catch (e) {}
   }
   chips.forEach(function (chip) {
     chip.addEventListener('click', function () {
       room = chip.dataset.room;
       chips.forEach(function (c) { c.setAttribute('aria-pressed', c === chip ? 'true' : 'false'); });
+      rooms.forEach(function (r) { r.classList.toggle('on', !!room && r.dataset.room === room); });
       apply();
     });
+  });
+  tabs.forEach(function (tab) {
+    tab.addEventListener('click', function () {
+      status = tab.dataset.status;
+      tabs.forEach(function (t) { t.setAttribute('aria-pressed', t === tab ? 'true' : 'false'); });
+      apply(); refreshReview();
+    });
+  });
+  // The small plan is the room filter too: tap a room for its things, tap it again for every room.
+  function pickRoom(name) {
+    var target = room === name ? '' : name, chip = chips.filter(function (c) { return c.dataset.room === target; })[0];
+    if (chip) { chip.click(); refreshReview(); }
+  }
+  rooms.forEach(function (r) {
+    if (!r.dataset.room) return;
+    r.addEventListener('click', function () { pickRoom(r.dataset.room); });
+    r.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pickRoom(r.dataset.room); } });
   });
   sortBox.addEventListener('change', apply);
 
@@ -401,7 +601,22 @@
   function el(tag, text, cls) { var e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; }
 
   var dialog = document.getElementById('detail'), sheet = document.getElementById('sheet'), strip = document.getElementById('sightings');
-  var dirty = 0, current = null, trail = [], flash = '', cache = {}, readyAt = 0, keys = null;
+  var dirty = 0, current = null, trail = [], flash = '', cache = {}, readyAt = 0, keys = null, moving = false;
+  // On a wide screen the open item sits in the right-hand column beside the list; otherwise it is a sheet over the page.
+  var wide = window.matchMedia('(min-width: 1180px)');
+  function showSheet() {
+    if (dialog.open) return;
+    if (wide.matches) dialog.show(); else dialog.showModal();
+  }
+  wide.addEventListener('change', function () {           // move an open item between the side column and the sheet
+    if (!dialog.open || dialog.matches(':modal') !== wide.matches) return;
+    moving = true; dialog.close(); moving = false; showSheet();
+  });
+  function markOpen(id) {
+    cards().forEach(function (c) { c.classList.toggle('open', c.dataset.id === id); });
+    var c = id && wide.matches && card(id);
+    if (c && !c.hidden) c.scrollIntoView({ block: 'nearest' });
+  }
 
   // Remember where the person was, so closing the sheet (which refreshes totals) lands them back in place.
   try {
@@ -410,6 +625,8 @@
     if (back) {
       var chip = chips.filter(function (c) { return c.dataset.room === back.room; })[0];
       if (chip) chip.click();
+      var tab = tabs.filter(function (t) { return t.dataset.status === (back.status || ''); })[0];
+      if (tab && back.status) tab.click();
       window.scrollTo(0, back.y || 0);
       if (back.saved) toast(back.saved === 1 ? 'Saved 1 change' : 'Saved ' + back.saved + ' changes');
     }
@@ -436,14 +653,25 @@
     if (foot) foot.textContent = foot.textContent.replace(/ · (to check|removed|✓)$/, '');
     refreshReview();
   }
+  var ICON = {
+    paid: '<rect x="2.5" y="5" width="15" height="10" rx="2"/><path d="M2.5 9h15"/>',
+    online: '<path d="M8.5 11.5a3 3 0 0 0 4.2 0l2.6-2.6a3 3 0 0 0-4.2-4.2l-.9.9"/><path d="M11.5 8.5a3 3 0 0 0-4.2 0l-2.6 2.6a3 3 0 0 0 4.2 4.2l.9-.9"/>',
+    estimate: '<path d="M4 8c2-2.2 4-2.2 6 0s4 2.2 6 0"/><path d="M4 12.5c2-2.2 4-2.2 6 0s4 2.2 6 0"/>',
+    yours: '<path d="M13 3.5l3.5 3.5L7 16.5l-4 .5.5-4z"/>'
+  };
+  function svg(paths, width) {
+    return '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="' + (width || 1.8) + '" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + paths + '</svg>';
+  }
   function updateCard(d) {
     var c = card(d.id); if (!c) return;
     var name = c.querySelector('.name'); if (name) name.textContent = d.title;
     var price = c.querySelector('.price');
     if (d.price) {
       if (!price) { price = el('div', null, 'price'); c.querySelector('.line').after(price); }
-      price.textContent = d.price;
-      if (d.price_from && d.price_from !== 'estimate') price.appendChild(el('small', d.price_from));
+      var kind = d.price_from || 'estimate', i = el('i', null, 'pi ' + kind);
+      i.innerHTML = svg(ICON[kind] || ICON.estimate);
+      price.innerHTML = ''; price.appendChild(i); price.appendChild(el('b', d.price));
+      if (d.price_from) price.appendChild(el('small', d.price_from));
     }
     c.dataset.value = d.value; c.dataset.name = (d.title || '').toLowerCase();
   }
@@ -474,7 +702,7 @@
   function goBack() { if (trail.length) open(trail.pop()); }
 
   function allDone() {
-    current = null; keys = { back: trail.length ? goBack : null };
+    current = null; keys = { back: trail.length ? goBack : null }; markOpen(null);
     strip.innerHTML = ''; sheet.innerHTML = ''; sheet.classList.remove('loading');
     var box = el('div', null, 'done');
     box.appendChild(el('div', '✓', 'done-mark'));
@@ -489,11 +717,11 @@
       box.appendChild(bk);
     }
     sheet.appendChild(box);
-    if (!dialog.open) dialog.showModal();
+    showSheet();
   }
 
   function open(id) {
-    id = String(id); current = id;
+    id = String(id); current = id; markOpen(id);
     if (dialog.open) sheet.classList.add('loading');
     load(id).then(function (d) { if (current === id) render(id, d); })
       .catch(function () {
@@ -505,8 +733,34 @@
         var r = el('button', 'Try again', 'btn big'); r.type = 'button';
         r.addEventListener('click', function () { open(id); });
         box.appendChild(r); sheet.appendChild(box);
-        if (!dialog.open) dialog.showModal();
+        showSheet();
       });
+  }
+
+  // Where the thing was: the small plan of the home with its room filled in and, when known, a dot.
+  function locator(id, where) {
+    var plan = document.getElementById('mini-plan');
+    if (!plan || !where || (where.room_id == null && where.x == null)) return null;
+    var room = where.room_id == null ? null : plan.querySelector('.rm[data-id="' + String(where.room_id).replace(/"/g, '') + '"]');
+    if (!room && where.x == null) return null;
+    var a = document.createElement('a'), pic = document.createElementNS('http://www.w3.org/2000/svg', 'svg'), text = el('div');
+    a.className = 'locator ' + (plan.parentNode.classList.contains('sketch') ? 'sketch' : '');
+    a.href = '/p/' + token + '/plan#item-' + id;
+    pic.setAttribute('viewBox', plan.getAttribute('viewBox')); pic.setAttribute('aria-hidden', 'true');
+    [].forEach.call(plan.querySelectorAll('.rm'), function (r) {
+      var p = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+      p.setAttribute('points', r.getAttribute('points')); p.setAttribute('class', 'rm' + (r === room ? ' on' : ''));
+      pic.appendChild(p);
+    });
+    if (where.x != null && where.y != null) {
+      var box = plan.viewBox.baseVal, dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      dot.setAttribute('cx', where.x); dot.setAttribute('cy', where.y); dot.setAttribute('r', Math.max(box.width, box.height) / 28);
+      pic.appendChild(dot);
+    }
+    text.appendChild(el('b', room && room.dataset.room ? 'In the ' + room.dataset.room.toLowerCase() : 'Where it was'));
+    text.appendChild(el('span', 'See it on the plan of the home'));
+    a.appendChild(pic); a.appendChild(text);
+    return a;
   }
 
   function render(id, d) {
@@ -535,7 +789,10 @@
       else top.appendChild(el('span', ''));
       sheet.appendChild(top);
     }
-    sheet.appendChild(el('h2', d.title));
+    var titleRow = el('div', null, 'titlerow');
+    titleRow.appendChild(el('h2', d.title));
+    titleRow.appendChild(el('span', { confirmed: '✓ On your list', suggested: 'Waiting for OK', rejected: 'Removed' }[d.status] || '', 'state ' + d.status));
+    sheet.appendChild(titleRow);
     sheet.appendChild(el('p', [d.room, d.category, d.brand].filter(Boolean).join(' · '), 'muted'));
     if (d.price) sheet.appendChild(el('p', d.price, 'price-line'));
     if (d.acv_text) sheet.appendChild(el('p', 'About ' + d.acv_text + ' depreciated, which is what flood insurance pays (an estimate).', 'muted small'));
@@ -556,7 +813,7 @@
       d.price_sources.forEach(function (p) {
         var row = el('div', null, 'pricerow ' + p.kind + (p.in_use ? ' used' : '')), ico = el('div', null, 'ico'),
             left = el('div', null, 'what'), right = el('div', null, 'amt');
-        ico.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[p.kind] || ICONS.estimate) + '</svg>';
+        ico.innerHTML = svg(ICONS[p.kind] || ICONS.estimate, 1.7);
         left.appendChild(el('b', p.title)); left.appendChild(el('span', p.detail));
         (p.links || []).forEach(function (l) {
           if (!l.url) { left.appendChild(el('span', l.text)); return; }
@@ -568,6 +825,8 @@
       });
       sheet.appendChild(stack);
     } else sheet.appendChild(el('p', d.price_basis, 'muted small'));
+    var spot = locator(id, d.where);
+    if (spot) sheet.appendChild(spot);
     if (d.tour) {                                                        // walk to it in the scan of the home
       var walk = el('p', null, 'muted small'), w = document.createElement('a');
       w.href = d.tour; w.target = '_blank'; w.rel = 'noopener noreferrer'; w.textContent = 'See it in the 3D scan of the home';
@@ -675,7 +934,7 @@
       keys.no = function () { if (editor.hidden) noBtn.click(); };
       keys.editor = editor;
     }
-    if (!dialog.open) dialog.showModal();
+    showSheet();
     dialog.scrollTop = 0;
     prefetch(id);
   }
@@ -689,16 +948,23 @@
     if (keys && keys.editor && !keys.editor.hidden) { e.preventDefault(); keys.editor.closeEditor(); }
   });
   dialog.addEventListener('close', function () {
-    current = null; keys = null;
+    if (moving) return;
+    current = null; keys = null; markOpen(null);
     if (dirty) {
-      try { sessionStorage.setItem('ashline-return', JSON.stringify({ room: room, y: window.scrollY, saved: dirty })); } catch (e) {}
+      try { sessionStorage.setItem('ashline-return', JSON.stringify({ room: room, status: status, y: window.scrollY, saved: dirty })); } catch (e) {}
       location.reload();
     }
   });
-  dialog.addEventListener('click', function (e) { if (e.target === dialog) dialog.close(); });
+  dialog.addEventListener('click', function (e) { if (e.target === dialog && dialog.matches(':modal')) dialog.close(); });
   document.addEventListener('keydown', function (e) {   // laptop shortcuts: Y / N, arrows
-    if (!dialog.open || !keys || e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.target.tagName === 'INPUT') return;
+    if (!dialog.open || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.target.closest && e.target.closest('.sort')) return;
+    if (e.key === 'Escape' && !dialog.matches(':modal')) {   // the docked item has no Esc of its own
+      e.preventDefault();
+      if (keys && keys.editor && !keys.editor.hidden) keys.editor.closeEditor(); else dialog.close();
+      return;
+    }
+    if (!keys || e.target.tagName === 'INPUT') return;
     var k = e.key.toLowerCase();
     if (k === 'y' && keys.yes) { e.preventDefault(); keys.yes(); }
     else if (k === 'n' && keys.no) { e.preventDefault(); keys.no(); }
@@ -708,6 +974,9 @@
 
   var form = document.getElementById('coverage');
   if (form) {
+    document.getElementById('add-limit').addEventListener('click', function () {
+      document.getElementById('ask-row').hidden = true; form.hidden = false; form.limit.focus();
+    });
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       if (!/\d/.test(form.limit.value)) { form.limit.focus(); return; }

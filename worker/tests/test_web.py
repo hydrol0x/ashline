@@ -211,3 +211,14 @@ def test_preview_pages_for_owner_only(case):
     assert client.get("/static/pdfjs/../web.py").status_code == 404
     page = client.get("/p/owner-token").text
     assert "/p/owner-token/view/pdf" in page and "/p/owner-token/view/sheet" in page
+
+
+def test_brand_assets_are_served(case):
+    client, _, _ = case
+    for path, kind in (("/static/brand.css", "text/css"), ("/static/img/logo.png", "image/png"),
+                       ("/static/fonts/urbanist-latin-500-normal.woff2", "font/woff2"), ("/favicon.ico", "image/png")):
+        r = client.get(path)
+        assert r.status_code == 200 and r.headers["content-type"].startswith(kind), path
+    assert client.get("/static/../web.py").status_code == 404
+    assert client.get("/static/fonts/LICENSE-lora").status_code == 404           # only known file types
+    assert '/static/brand.css' in client.get("/p/owner-token").text and '/static/brand.css' in client.get("/").text

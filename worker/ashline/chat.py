@@ -37,6 +37,7 @@ BATCH_SECONDS = 60                      # wait this long after the last photo of
 ANNOTATE_UP_TO = 5                       # bursts this small get every photo back annotated
 QUESTION_HOURS = 4                      # an unanswered "same item?" expires after this
 CODE = re.compile(r"\b(HOME-\d{4})\b", re.I)
+TELEGRAM_PREFIX = "tg:"                            # chat and sender ids that came from the Telegram bridge
 ADDRESSED = re.compile(r"^\s*@?ashline\b[,:]?\s*", re.I)
 MEMORY_QUESTIONS = 6                    # a text "call" asks at most this many questions
 REVIEW_AT_ONCE = 30                     # more than this waiting: the review goes one room at a time
@@ -166,6 +167,8 @@ class Engine:
         self._interpreter = interpreter                  # photo path -> fingerprint, to spot repeats
         self.public_url = (public_url or config.env("ASHLINE_PUBLIC_URL") or "").rstrip("/")
         self.number = number or config.env("ASHLINE_NUMBER") or "this number"
+        handle = (config.env("TELEGRAM_BOT_USERNAME") or "").lstrip("@")
+        self.telegram_handle = f"@{handle}" if handle else "the Ashline bot"        # the Telegram bridge fills this in
         self.batch_seconds = batch_seconds if batch_seconds is not None else int(
             config.env("ASHLINE_BATCH_SECONDS") or BATCH_SECONDS)
 
@@ -360,6 +363,12 @@ class Engine:
     def _invite_messages(self, inbound: Inbound, case: dict) -> list[Outbound]:
         case = self.store.get_case(case["case_id"])
         short = re.sub(r"^The ", "", case["name"])
+        if inbound.chat_id.startswith(TELEGRAM_PREFIX):
+            return [Outbound(inbound.chat_id,
+                             f"You're set up. Now make a new Telegram group for the family and add me ({self.telegram_handle}) "
+                             "when you create it. I'll link the group to this list on my own, and every photo anyone "
+                             "drops in it goes into the same list. You can keep sending me photos here too.\n\n"
+                             f"If I ever don't link a group, post {case['invite_code']} in it.")]
         forward = (f"We're using Ashline to rebuild the {short} inventory. Text {case['invite_code']} to "
                    f"{self.number}, then send any photos from inside the house, from any year.")
         return [
@@ -480,12 +489,17 @@ class Engine:
         self._save(inbound.chat_id, context)
         return out + ([note] if unreadable else [])
 
-    def tick(self, now: datetime | None = None) -> list[Outbound]:
-        """Things that happen later. Call every few seconds."""
+    def tick(self, now: datetime | None = None, owns=None) -> list[Outbound]:
+        """Things that happen later. Call every few seconds.
+        owns(chat_id) -> bool limits the work to one bridge's chats, so the iMessage and Telegram bridges
+        can run side by side without taking (and losing) each other's digests and reminders."""
         now = _now(now)
+        owns = owns or (lambda chat_id: True)
         out: list[Outbound] = []
         for case in self.store.list_cases():
             for chat in self.store.get_chats(case["case_id"]):
+                if not owns(chat["chat_id"]):
+                    continue
                 context = self._context(chat["chat_id"])
                 job = context.pop("seed", None)
                 if job:                                       # the owner agreed to start from the scan
@@ -500,8 +514,10 @@ class Engine:
             for question in self.store.get_questions(case["case_id"]):
                 if question.get("expires_at") and question["expires_at"] <= now.isoformat():
                     self.store.close_question(question["question_id"], "expired")     # both stay as suggestions
-            out += self._daily_review(case, now)
-            out += self._reminders(case, now)
+            owner = self._owner(case["case_id"])
+            if owner and owns(owner.get("dm_chat") or owner["phone"]):   # the owner's own platform sends these
+                out += self._daily_review(case, now)
+                out += self._reminders(case, now)
         return out
 
     def _reminders(self, case: dict, now: datetime) -> list[Outbound]:

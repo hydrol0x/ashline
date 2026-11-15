@@ -72,6 +72,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--host", default="127.0.0.1", help="use 0.0.0.0 to accept connections from a tunnel or phone")
 
     sub.add_parser("photon", help="run the conversation on Photon 2.0 (iMessage)")
+    sub.add_parser("telegram", help="run the conversation on Telegram (works in family group chats)")
 
     p = sub.add_parser("page", help="print the inventory page links of a case")
     p.add_argument("--case", required=True)
@@ -139,6 +140,9 @@ def _run(args, parser) -> None:
     elif args.cmd == "photon":
         from .bridge_photon import PhotonBridge
         PhotonBridge().run()
+    elif args.cmd == "telegram":
+        from .bridge_telegram import TelegramBridge
+        TelegramBridge().run()
     elif args.cmd == "page":
         store = Store()
         case = store.get_case(args.case)

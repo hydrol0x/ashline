@@ -23,7 +23,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from . import config
-from .chat import Engine, Inbound, Outbound
+from .chat import TELEGRAM_PREFIX, Engine, Inbound, Outbound
 
 POLL_SECONDS = 2.0
 DOWNLOAD_TRIES = 5              # a photo's file can lag its message by a few seconds
@@ -159,6 +159,8 @@ class PhotonBridge:
     # ---------------------------------------------------------------- send
     def send(self, messages: list[Outbound]) -> None:
         for message in messages:
+            if message.chat_id.startswith(TELEGRAM_PREFIX):
+                continue                                 # the Telegram bridge sends those
             sender_id = self.state["senders"].get(message.chat_id)
             if not sender_id:
                 print(f"photon: no known conversation for {message.chat_id}; message not sent")
@@ -199,7 +201,7 @@ class PhotonBridge:
         while True:
             try:
                 self.poll()
-                self.send(self.engine.tick())
+                self.send(self.engine.tick(owns=lambda chat_id: not chat_id.startswith(TELEGRAM_PREFIX)))
             except KeyboardInterrupt:
                 return
             except Exception as exc:                     # a bad poll must not stop the bridge

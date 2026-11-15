@@ -182,16 +182,23 @@ def _cache_key(item: dict) -> str:
     return "|".join(str(item.get(k) or "").strip().lower() for k in ("label", "category", "brand_guess"))
 
 
+def kept_price(item: dict) -> bool:
+    """True when the item's price is better than an estimate and must not be replaced by one:
+    the family set it, it is what they paid (a bank record), or it was found online."""
+    source = item.get("price_source") or ""
+    return source == "set by family" or source.startswith(("bank record", "web:"))
+
+
 def price_items(case_id: str, store: Store | None = None, pricer=None, only_missing: bool = True) -> dict:
     """Price the inventory lines of a case. Returns {priced, source, calibrated}.
 
-    A price the family set is never overwritten. Estimates are cached per case
+    A price the family set, a card purchase or a price found online is never overwritten. Estimates are cached per case
     by label, so re-seeding a case does not pay for the same item twice. If the
     model call fails, category defaults are used and the reason is reported.
     """
     store = store or Store()
     items = [i for i in store.get_items(case_id, canonical_only=True) if i["status"] != "rejected"
-             and i.get("price_source") != "set by family" and not (only_missing and i.get("price_mid"))]
+             and not kept_price(i) and not (only_missing and i.get("price_mid"))]
     if not items:
         return {"priced": 0, "source": None, "calibrated": load_calibration()["calibrated"]}
 

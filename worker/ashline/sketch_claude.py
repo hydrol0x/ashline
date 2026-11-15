@@ -24,7 +24,7 @@ from . import config, layout
 from .rooms import tidy_room
 
 MAX_PHOTOS = 16                 # stills sent to the model, spread evenly over what the family sent
-MAX_SIDE = 768
+MAX_SIDE = 1024
 
 SKETCH_SCHEMA = {
     "type": "object",

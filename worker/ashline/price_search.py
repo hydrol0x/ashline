@@ -15,7 +15,7 @@ import json
 import re
 
 from . import config
-from .pricing import money, nice
+from .pricing import kept_price, money, nice
 from .store import Store
 
 SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search", "max_uses": 3}
@@ -123,6 +123,8 @@ def apply_price(store: Store, case_id: str, item_id: int, found: dict, member_id
         return "That item is not on the list."
     if item.get("price_source") == "set by family":
         return "The family set this price themselves, so it was left as it is."
+    if (item.get("price_source") or "").startswith("bank record"):
+        return "This price is what the family paid, from their card purchases, so it was left as it is."
     try:
         price = float(found["price"])
         low, high = float(found.get("low") or price), float(found.get("high") or price)
@@ -149,8 +151,7 @@ def price_check(case_id: str, store: Store | None = None, top: int = 20, searche
     if searcher is None:
         return {"checked": 0, "found": 0, "reason": "Online price lookup needs ANTHROPIC_API_KEY."}
     items = [i for i in store.get_items(case_id, canonical_only=True)
-             if i["status"] != "rejected" and i.get("price_source") != "set by family"
-             and not (i.get("price_source") or "").startswith("web:")]
+             if i["status"] != "rejected" and not kept_price(i)]
     items.sort(key=lambda i: -((i.get("price_mid") or 0) * (i.get("qty") or 1)))
     checked = found = 0
     for item in items[:max(0, top)]:

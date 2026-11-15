@@ -195,3 +195,37 @@ def test_demo_purchases_can_be_written_to_the_mock_bank(nessie, client):
     matches = bank.match_purchases([i for i in f.store.get_items(f.case_id, canonical_only=True)],
                                    bank.purchases(client, account_id=made["account_id"]))
     assert len(matches) == 2                                  # the demo purchases match the items they were made from
+
+
+def test_a_price_that_was_paid_or_found_is_not_replaced_by_an_estimate(client):
+    from ashline.price_search import apply_price, price_check
+    from ashline.pricing import DefaultPricer, price_items
+    f = Family().setup()
+    f.engine.bank = client
+    f.say(MOM, photos=[photo(640)])
+    f.wait()
+    f.say(MOM, "check my bank")
+    f.say(MOM, "yes")
+    sofa = next(i for i in f.store.get_items(f.case_id) if "sofa" in i["label"])
+    table = next(i for i in f.store.get_items(f.case_id) if "coffee table" in i["label"])
+    found = {"price": 240.0, "low": 200.0, "high": 260.0, "retailer": "Wayfair", "url": "https://example.com/t"}
+    assert apply_price(f.store, f.case_id, table["item_id"], found).startswith("Recorded $240")
+    assert "left as it is" in apply_price(f.store, f.case_id, sofa["item_id"], found)       # paid beats found
+
+    f.say(MOM, photos=[photo(656)])                             # a later burst re-prices the estimates only
+    f.wait()
+    price_items(f.case_id, f.store, DefaultPricer())
+    after = {i["item_id"]: i for i in f.store.get_items(f.case_id)}
+    assert after[sofa["item_id"]]["price_mid"] == 1149.0 and after[sofa["item_id"]]["price_source"] == "bank record: IKEA"
+    assert after[table["item_id"]]["price_mid"] == 240.0 and after[table["item_id"]]["price_source"] == "web: Wayfair"
+
+    class Searcher:
+        def __init__(self):
+            self.asked = []
+
+        def search(self, description, brand=None):
+            self.asked.append(description)
+            return [{"title": description, "price": 99.0, "retailer": "Target", "url": "https://example.com/x"}]
+    searcher = Searcher()
+    price_check(f.case_id, f.store, top=50, searcher=searcher)
+    assert not any("sofa" in a or "coffee table" in a for a in searcher.asked)

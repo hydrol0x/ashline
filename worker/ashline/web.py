@@ -323,6 +323,23 @@ def page_data(case_id: str, store: Store, role: str) -> dict:
     }
 
 
+def rail_numbers(data: dict) -> dict:
+    """The meter card's figures, as the list page shows them, from page_data (so the page can update in place)."""
+    m, counts, n = data["meter"], data["counts"], data["confirmed"]
+    return {
+        "documented": money(m["documented"]),
+        "figure_note": (f"of {money(m['target'])} documented" if m["target"]
+                        else f"documented · {n} item{'' if n == 1 else 's'}"),
+        "bar": {k: f"{v:.2f}" for k, v in data["bar"].items()},
+        "bar_label": f"{money(m['backed'])} backed by photos or receipts, {money(m['memory'])} from memory, "
+                     f"{money(m['pending'])} waiting for an OK",
+        "backed": {"amount": money(m["backed"]), "count": counts["backed"]},
+        "memory": {"amount": money(m["memory"]), "count": counts["memory"], "shown": bool(m["memory"] or counts["memory"])},
+        "pending": {"amount": money(m["pending"]), "count": m["pending_items"], "shown": bool(m["pending_items"])},
+        "confirmed": n, "waiting": data["waiting"],
+    }
+
+
 def create_app(store_factory=Store, lookup=None) -> FastAPI:
     app = FastAPI(title="Ashline", docs_url=None, redoc_url=None)
 
@@ -395,6 +412,13 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
         store, case, role = resolve(token)
         data = page_data(case["case_id"], store, role)
         return TEMPLATES.get_template("inventory.html").render(token=token, **data)
+
+    @app.get("/p/{token}/meter.json")
+    def meter_json(token: str):
+        """The meter card's numbers, read again after each answer so the total climbs without a reload."""
+        store, case, role = resolve(token)
+        return JSONResponse(rail_numbers(page_data(case["case_id"], store, role)),
+                            headers={"Cache-Control": "no-store"})
 
     @app.get("/p/{token}/plan", response_class=HTMLResponse)
     def plan(token: str):

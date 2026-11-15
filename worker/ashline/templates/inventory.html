@@ -72,6 +72,7 @@
   .bar .rest { flex: 1 1 auto; background: var(--panel); }
   .key { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; font-size: 14.5px; }
   .key li { display: flex; align-items: flex-start; gap: 10px; }
+  .key li[hidden] { display: none; }
   .key i { flex: none; width: 12px; height: 12px; border-radius: 3px; margin-top: 5px; }
   .key i.pending { border: 1.5px dashed var(--wait); border-radius: 50%; }
   .key span { flex: 1 1 auto; min-width: 0; color: var(--ink-2); }
@@ -391,20 +392,20 @@
   <section class="card meter" aria-label="Progress">
     <div class="label">Documented so far</div>
     {% if meter.target %}
-      <div class="figure">{{ money(meter.documented) }} <small>of {{ money(meter.target) }} documented</small></div>
+      <div class="figure"><span data-m="documented">{{ money(meter.documented) }}</span> <small data-m="figure_note">of {{ money(meter.target) }} documented</small></div>
     {% else %}
-      <div class="figure">{{ money(meter.documented) }} <small>documented · {{ confirmed }} item{{ '' if confirmed == 1 else 's' }}</small></div>
+      <div class="figure"><span data-m="documented">{{ money(meter.documented) }}</span> <small data-m="figure_note">documented · {{ confirmed }} item{{ '' if confirmed == 1 else 's' }}</small></div>
     {% endif %}
-    <div class="bar" role="img" aria-label="{{ money(meter.backed) }} backed by photos or receipts, {{ money(meter.memory) }} from memory, {{ money(meter.pending) }} waiting for an OK">
+    <div class="bar" id="meter-bar" role="img" aria-label="{{ money(meter.backed) }} backed by photos or receipts, {{ money(meter.memory) }} from memory, {{ money(meter.pending) }} waiting for an OK">
       <span class="backed" style="width: {{ '%.2f'|format(bar.backed) }}%"></span>
       <span class="memory" style="width: {{ '%.2f'|format(bar.memory) }}%"></span>
       <span class="pending" style="width: {{ '%.2f'|format(bar.pending) }}%"></span>
       <span class="rest"></span>
     </div>
     <ul class="key">
-      <li><i style="background: var(--red)"></i><span>Backed by a photo or receipt<small>{{ money(meter.backed) }}</small></span><b>{{ counts.backed }}</b></li>
-      {% if meter.memory or counts.memory %}<li><i style="background: var(--flame-soft)"></i><span>From memory only<small>{{ money(meter.memory) }}</small></span><b>{{ counts.memory }}</b></li>{% endif %}
-      {% if meter.pending_items %}<li><i class="pending"></i><span>Waiting for your OK<small>{{ money(meter.pending) }}</small></span><b>{{ meter.pending_items }}</b></li>{% endif %}
+      <li data-m="backed"><i style="background: var(--red)"></i><span>Backed by a photo or receipt<small>{{ money(meter.backed) }}</small></span><b>{{ counts.backed }}</b></li>
+      <li data-m="memory"{% if not (meter.memory or counts.memory) %} hidden{% endif %}><i style="background: var(--flame-soft)"></i><span>From memory only<small>{{ money(meter.memory) }}</small></span><b>{{ counts.memory }}</b></li>
+      <li data-m="pending"{% if not meter.pending_items %} hidden{% endif %}><i class="pending"></i><span>Waiting for your OK<small>{{ money(meter.pending) }}</small></span><b>{{ meter.pending_items }}</b></li>
     </ul>
     {% set claims = claims or [] %}{% if claims|length > 1 or (claims and claims[0].basis == 'acv') %}
     <div class="claims">
@@ -641,11 +642,30 @@
   function post(path, body) {
     return fetch('/p/' + token + path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body) }).then(function (r) {
-      if (r.ok) return r.json();
+      if (r.ok) { if (path.indexOf('/item/') === 0) refreshMeter(); return r.json(); }
       return r.json().catch(function () { return {}; }).then(function (b) {   // keep the server's short message
         var e = new Error('failed'); e.status = r.status; e.detail = typeof b.detail === 'string' ? b.detail : ''; throw e;
       });
     });
+  }
+  // The meter card follows each answer and edit: the server's own figures, put in place without a reload.
+  var meterAt = 0;
+  function refreshMeter() {
+    var ask = ++meterAt;
+    fetch('/p/' + token + '/meter.json', { cache: 'no-store' }).then(function (r) { return r.ok ? r.json() : null; }).then(function (m) {
+      if (!m || ask !== meterAt) return;                  // a newer answer is already on its way
+      var box = document.querySelector('.meter'); if (!box) return;
+      box.querySelector('[data-m="documented"]').textContent = m.documented;
+      box.querySelector('[data-m="figure_note"]').textContent = m.figure_note;
+      var bar = document.getElementById('meter-bar');
+      ['backed', 'memory', 'pending'].forEach(function (k) {
+        bar.querySelector('.' + k).setAttribute('style', 'width: ' + m.bar[k] + '%');
+        var li = box.querySelector('li[data-m="' + k + '"]'), v = m[k];
+        li.querySelector('small').textContent = v.amount; li.querySelector('b').textContent = v.count;
+        if (k !== 'backed') li.hidden = !v.shown;
+      });
+      bar.setAttribute('aria-label', m.bar_label);
+    }).catch(function () {});
   }
   function el(tag, text, cls) { var e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; }
 
@@ -793,7 +813,7 @@
     var box = el('div', null, 'done');
     box.appendChild(el('div', '✓', 'done-mark'));
     box.appendChild(el('h2', 'All caught up'));
-    box.appendChild(el('p', 'Every item in this view has an answer. Your totals update when you close this.', 'muted'));
+    box.appendChild(el('p', 'Every item in this view has an answer.', 'muted'));
     var b = el('button', 'Done', 'btn big'); b.type = 'button';
     b.addEventListener('click', function () { dialog.close(); });
     box.appendChild(b);

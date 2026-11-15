@@ -261,9 +261,10 @@ def page_data(case_id: str, store: Store, role: str) -> dict:
         view["shot_from"] = {"scan": "3D scan", "photo": "Family photo", "aerial": "Aerial image"}.get(
             row.get("source"), "") if view["has_photo"] else ""            # where the photo on the card came from
         paid = price_sources(row).get("paid") or {}
-        view["proof"] = (("Card record" if paid.get("bank_id") or (row.get("price_source") or "").startswith("bank record")
-                          and not (paid.get("receipt") or paid.get("order")) else "Receipt")
-                         if view["badges"]["receipt"] else "")
+        source = row.get("price_source") or ""                              # a receipt line carries an id too, so ask it first
+        on_paper = paid.get("receipt") or paid.get("order") or source.startswith(("receipt", "order"))
+        view["proof"] = ("" if not view["badges"]["receipt"] else "Receipt" if on_paper or not source.startswith("bank record")
+                         and not paid.get("bank_id") else "Card record")
         (removed if row["status"] == "rejected" else items).append(view)
     items.sort(key=lambda i: -i["value"])
 

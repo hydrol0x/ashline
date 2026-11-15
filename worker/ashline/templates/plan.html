@@ -414,9 +414,10 @@
     const table = card.appendChild(html("table")), head = table.appendChild(html("thead")).appendChild(html("tr"));
     head.appendChild(html("th", "", "Room")); head.appendChild(html("th", "n", "Items")); head.appendChild(html("th", "n", "Rough allowance"));
     const body = table.appendChild(html("tbody"));
-    // Every room, so an empty one can be opened too; with one kind chosen, only rooms holding that kind.
+    // In a small home every room is listed, so an empty one can be opened too. A large scanned home would
+    // get a column of zeros, so there only rooms that held something; with one kind chosen, only its rooms.
     const rows = L.rooms.map(r => ({r: r, pins: shownIn(r.id), name: r.name || "Room"}))
-      .filter(x => x.pins.length || only === null)
+      .filter(x => x.pins.length || (only === null && L.rooms.length <= 8))
       .sort((a, b) => worth(b.pins) - worth(a.pins) || b.pins.length - a.pins.length)
       .concat(offRooms.map(r => ({r: r, pins: shownIn(r.id), name: r.name + " · not on the plan"})).filter(x => x.pins.length));
     rows.forEach(x => {

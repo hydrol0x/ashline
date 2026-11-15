@@ -55,7 +55,7 @@ def test_owner_page_shows_meter_items_and_export(case):
     assert "Removed<span>1</span>" in html                                      # only under the Removed tab
     assert f'/p/owner-token/crop/{ids["sofa"]}.jpg' in html and "from memory" in html
     assert "2 × $54–$135" in html                                               # two lamps, priced per unit
-    assert "Download PDF for insurer" in html and "noindex" in html
+    assert "View PDF for insurer" in html and "noindex" in html
     assert html.count('class="item suggested"') == 1 and html.count('class="item confirmed"') == 2
 
 
@@ -191,3 +191,23 @@ def test_prices_typed_with_symbols():
     from ashline.web import parse_price
     assert parse_price("$450") == 450 and parse_price("1,200") == 1200 and parse_price("1.2k") == 1200
     assert parse_price("about 80 dollars") == 80 and parse_price("no idea") is None
+
+
+def test_preview_pages_for_owner_only(case):
+    client, _, _ = case
+    sheet = client.get("/p/owner-token/view/sheet")
+    assert sheet.status_code == 200 and "Blue velvet sofa" in sheet.text and "Table saw" in sheet.text
+    assert "/p/owner-token/export.xlsx" in sheet.text and "/p/owner-token/export.csv" in sheet.text
+    assert "1 more is waiting for your OK" in sheet.text                       # the lamp is still unconfirmed
+    pdf = client.get("/p/owner-token/view/pdf")
+    assert pdf.status_code == 200 and "/static/pdfjs/pdf.min.mjs" in pdf.text and "export.pdf?inline=1" in pdf.text
+    assert client.get("/p/member-token/view/sheet").status_code == 403
+    assert client.get("/p/owner-token/view/other").status_code == 404
+    inline = client.get("/p/owner-token/export.pdf?inline=1")
+    assert inline.headers["content-type"] == "application/pdf" and inline.headers["content-disposition"].startswith("inline")
+    assert client.get("/p/owner-token/export.pdf").headers["content-disposition"].startswith("attachment")
+    js = client.get("/static/pdfjs/pdf.worker.min.mjs")
+    assert js.status_code == 200 and "javascript" in js.headers["content-type"]
+    assert client.get("/static/pdfjs/../web.py").status_code == 404
+    page = client.get("/p/owner-token").text
+    assert "/p/owner-token/view/pdf" in page and "/p/owner-token/view/sheet" in page

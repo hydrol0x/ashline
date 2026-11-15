@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+{% include "_preview_head.html" %}
+<title>PDF for insurer · {{ name }} · Ashline</title>
+<style>
+  .pages { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+  .page { width: 100%; max-width: 820px; background: #fff; border-radius: 6px; box-shadow: 0 1px 3px rgba(0,0,0,.08), 0 8px 24px rgba(0,0,0,.06); overflow: hidden; }
+  .page canvas { display: block; width: 100%; height: auto; }
+  .page-no { font-size: 11.5px; color: var(--muted); margin-top: -8px; }
+  .loading { text-align: center; color: var(--muted); padding: 40px 0; }
+  .spinner { width: 28px; height: 28px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; margin: 0 auto 12px; animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .fallback { text-align: center; }
+  .fallback iframe { width: 100%; height: 80vh; border: 1px solid var(--line); border-radius: 10px; background: #fff; margin-top: 12px; }
+</style>
+</head>
+<body>
+<div class="top"><div>
+  <a class="back" href="/p/{{ token }}">← List</a>
+  <h1>PDF for insurer</h1>
+  <a class="dl" href="/p/{{ token }}/export.pdf" download>Download PDF</a>
+</div></div>
+<main>
+  <div class="summary">
+    <div><b>{{ total["items"] }}</b>item{{ '' if total["items"] == 1 else 's' }}</div>
+    <div><b>{{ money(total["mid"]) }}</b>estimated replacement cost</div>
+    <div><b id="page-count">…</b>pages</div>
+  </div>
+  <p class="notice">This is exactly the file your adjuster gets. Only confirmed items are included.{% if pending %} {{ pending }} more {{ 'is' if pending == 1 else 'are' }} waiting for your OK on <a href="/p/{{ token }}">the list</a>.{% endif %}</p>
+  <div class="loading" id="loading"><div class="spinner"></div>Building your PDF…</div>
+  <div class="pages" id="pages"></div>
+  <div class="fallback" id="fallback" hidden>
+    <p class="notice">Your browser couldn't show the preview here. <a href="/p/{{ token }}/export.pdf?inline=1" target="_blank" rel="noopener">Open the PDF</a> instead.</p>
+    <iframe src="about:blank" title="PDF preview" id="frame"></iframe>
+  </div>
+  <p class="note">{{ disclaimer }}</p>
+</main>
+<div class="bottom"><div>
+  <a class="dl quiet" href="/p/{{ token }}/export.pdf?inline=1" target="_blank" rel="noopener">Open full screen</a>
+  <a class="dl" href="/p/{{ token }}/export.pdf" download>Download PDF</a>
+</div></div>
+<script type="module">
+  const url = {{ ("/p/" ~ token ~ "/export.pdf?inline=1")|tojson }};
+  const pages = document.getElementById('pages'), loading = document.getElementById('loading');
+  function fallback() {
+    loading.hidden = true;
+    document.getElementById('fallback').hidden = false;
+    document.getElementById('frame').src = url;
+    document.getElementById('page-count').textContent = '—';
+  }
+  try {
+    const pdfjs = await import('/static/pdfjs/pdf.min.mjs');
+    pdfjs.GlobalWorkerOptions.workerSrc = '/static/pdfjs/pdf.worker.min.mjs';
+    const doc = await pdfjs.getDocument(url).promise;
+    document.getElementById('page-count').textContent = doc.numPages;
+    const ratio = Math.min(window.devicePixelRatio || 1, 2.5);
+    for (let n = 1; n <= doc.numPages; n++) {
+      const page = await doc.getPage(n);
+      const width = Math.min(pages.clientWidth || 820, 820);
+      const base = page.getViewport({ scale: 1 });
+      const view = page.getViewport({ scale: (width / base.width) * ratio });
+      const box = document.createElement('div'); box.className = 'page';
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.floor(view.width); canvas.height = Math.floor(view.height);
+      canvas.setAttribute('aria-label', 'Page ' + n);
+      box.appendChild(canvas); pages.appendChild(box);
+      const label = document.createElement('div'); label.className = 'page-no'; label.textContent = 'Page ' + n + ' of ' + doc.numPages;
+      pages.appendChild(label);
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport: view }).promise;
+      if (n === 1) loading.hidden = true;
+    }
+  } catch (e) {
+    console.error(e);
+    fallback();
+  }
+</script>
+<script nomodule>document.getElementById('loading').hidden = true; document.getElementById('fallback').hidden = false; document.getElementById('frame').src = {{ ("/p/" ~ token ~ "/export.pdf?inline=1")|tojson }};</script>
+</body>
+</html>

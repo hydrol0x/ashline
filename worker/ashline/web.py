@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from . import config
@@ -274,8 +274,36 @@ def create_app(store_factory=Store) -> FastAPI:
                 store.set_case(case["case_id"], loss_date=str(body["loss_date"])[:10])
         return {"ok": True}
 
+    def preview_context(token: str, store: Store, case: dict) -> dict:
+        from . import export as exporter
+        m = meter(case["case_id"], store)
+        rows = exporter.export_rows(case["case_id"], store)
+        total = {"items": sum(int(r["qty"] or 1) for r in rows),
+                 "low": sum(float(r["rcv_low"] or 0) * int(r["qty"] or 1) for r in rows),
+                 "mid": sum(float(r["rcv_mid"] or 0) * int(r["qty"] or 1) for r in rows),
+                 "high": sum(float(r["rcv_high"] or 0) * int(r["qty"] or 1) for r in rows)}
+        return {"token": token, "name": case.get("name") or "Your home", "rows": rows,
+                "groups": exporter.category_totals(rows), "total": total, "pending": m.get("pending_items") or 0,
+                "money": money, "money_range": money_range, "disclaimer": DISCLAIMER}
+
+    @app.get("/p/{token}/view/{kind}", response_class=HTMLResponse)
+    def preview(token: str, kind: str):
+        store, case, role = resolve(token)
+        if role != "owner":
+            raise HTTPException(status_code=403, detail="Only the case owner can see the exports.")
+        if kind not in ("sheet", "pdf"):
+            raise HTTPException(status_code=404)
+        return TEMPLATES.get_template(f"preview_{kind}.html").render(**preview_context(token, store, case))
+
+    @app.get("/static/pdfjs/{name}")
+    def pdfjs(name: str):
+        path = Path(__file__).parent / "static" / "pdfjs" / name
+        if name not in ("pdf.min.mjs", "pdf.worker.min.mjs") or not path.exists():
+            raise HTTPException(status_code=404)
+        return FileResponse(path, media_type="text/javascript", headers={"Cache-Control": "public, max-age=86400"})
+
     @app.get("/p/{token}/export.{kind}")
-    def export(token: str, kind: str):
+    def export(token: str, kind: str, inline: int = 0):
         store, case, role = resolve(token)
         if role != "owner":
             raise HTTPException(status_code=403, detail="Only the case owner can export.")
@@ -290,7 +318,7 @@ def create_app(store_factory=Store) -> FastAPI:
                             headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'})
         if kind == "pdf":
             return Response(exporter.export_pdf(case["case_id"], store).read_bytes(), media_type="application/pdf",
-                            headers={"Content-Disposition": f'attachment; filename="{name}.pdf"'})
+                            headers={"Content-Disposition": f'{"inline" if inline else "attachment"}; filename="{name}.pdf"'})
         raise HTTPException(status_code=404)
 
     # ------------------------------------------------------------ messaging bridge (build spec 6.1)

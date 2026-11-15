@@ -33,7 +33,7 @@ build-backend = "setuptools.build_meta"
 include = ["ashline*"]
 
 [tool.setuptools.package-data]
-ashline = ["templates/*.html"]
+ashline = ["templates/*.html", "static/pdfjs/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+{% include "_preview_head.html" %}
+<title>Spreadsheet · {{ name }} · Ashline</title>
+<style>
+  .sheet-wrap { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: auto; -webkit-overflow-scrolling: touch; }
+  table { border-collapse: separate; border-spacing: 0; width: 100%; min-width: 760px; font-size: 13px; }
+  th, td { padding: 9px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; white-space: nowrap; }
+  thead th { position: sticky; top: 0; background: #F4F0E9; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; z-index: 2; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  td.item { white-space: normal; min-width: 150px; max-width: 220px; }
+  td.item small { display: block; color: var(--muted); }
+  th:first-child, td:first-child { position: sticky; left: 0; background: var(--card); z-index: 1; box-shadow: 1px 0 0 var(--line); }
+  thead th:first-child { background: #F4F0E9; z-index: 3; }
+  tr.group td { background: #FBF9F5; font-weight: 600; font-size: 12.5px; }
+  tr.group td:first-child { background: #FBF9F5; }
+  tr.group td.num { color: var(--muted); font-weight: 500; }
+  tr.total td { font-weight: 700; border-bottom: 0; background: #F4F0E9; }
+  tr.total td:first-child { background: #F4F0E9; }
+  .muted { color: var(--muted); }
+  .hint { font-size: 12px; color: var(--muted); margin: 8px 2px 0; }
+  @media (min-width: 761px) { .hint { display: none; } }
+</style>
+</head>
+<body>
+<div class="top"><div>
+  <a class="back" href="/p/{{ token }}">← List</a>
+  <h1>Spreadsheet</h1>
+  <a class="dl" href="/p/{{ token }}/export.xlsx" download>Download .xlsx</a>
+</div></div>
+<main>
+  <div class="summary">
+    <div><b>{{ total["items"] }}</b>item{{ '' if total["items"] == 1 else 's' }}</div>
+    <div><b>{{ money(total["mid"]) }}</b>estimated replacement cost</div>
+    <div><b>{{ money_range(total["low"], total["high"]) if total["mid"] else "—" }}</b>range</div>
+  </div>
+  <p class="notice">Only items you have confirmed are included.{% if pending %} {{ pending }} more {{ 'is' if pending == 1 else 'are' }} waiting for your OK on <a href="/p/{{ token }}">the list</a>.{% endif %}</p>
+
+  {% if rows %}
+  <div class="sheet-wrap">
+    <table>
+      <thead><tr>
+        <th>Item</th><th class="num">Total</th><th class="num">Qty</th><th>Room</th><th class="num">Each (low–high)</th><th>Evidence</th><th>Added by</th>
+      </tr></thead>
+      <tbody>
+      {% for category, t in groups.items() %}
+        <tr class="group"><td>{{ category|capitalize }}</td><td class="num">{{ money(t["mid"]) }}</td><td class="num">{{ t["items"] }}</td><td></td><td></td><td></td><td></td></tr>
+        {% for r in rows if (r.category or "other") == category %}
+        <tr>
+          <td class="item">{{ r.item[:1]|upper }}{{ r.item[1:] }}{% if r.brand_model %}<small>{{ r.brand_model }}</small>{% endif %}</td>
+          <td class="num">{% if r.rcv_mid != "" %}{{ money(r.rcv_mid * r.qty) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td class="num">{{ r.qty }}</td>
+          <td>{{ r.room or "—" }}</td>
+          <td class="num">{% if r.rcv_mid != "" %}{{ money_range(r.rcv_low, r.rcv_high) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+          <td>{{ r.evidence }}</td>
+          <td>{{ r.contributor or "—" }}</td>
+        </tr>
+        {% endfor %}
+      {% endfor %}
+        <tr class="total"><td>Total</td><td class="num">{{ money(total["mid"]) }}</td><td class="num">{{ total["items"] }}</td><td></td><td></td><td></td><td></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="hint">Swipe the table sideways to see every column.</p>
+  {% else %}
+  <div class="empty">Nothing confirmed yet. Confirm items on <a href="/p/{{ token }}">the list</a> and they show up here.</div>
+  {% endif %}
+  <p class="note">{{ disclaimer }} The downloaded file also has photo references and links to each photo.</p>
+</main>
+<div class="bottom"><div>
+  <a class="dl quiet" href="/p/{{ token }}/export.csv" download>Download .csv</a>
+  <a class="dl" href="/p/{{ token }}/export.xlsx" download>Download .xlsx</a>
+</div></div>
+</body>
+</html>

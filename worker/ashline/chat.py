@@ -705,7 +705,8 @@ class Engine:
             return None
         if state.get("step") == "delete" and not inbound.is_group:
             self.store.set_member(member["member_id"], state={})
-            if low in ("yes", "delete", "yes delete", "yes, delete"):
+            if low in ("yes", "delete", "yes delete", "yes, delete") or yes_or_no(low)[0] or re.search(
+                    r"\b(yes|yeah|yep|confirm)\b.*\bdelete\b|\bdelete\b.*\b(it|everything|my case)\b", low):
                 self._delete(case_id)
                 return [Outbound(inbound.chat_id, "Everything for this case has been deleted: photos, items and messages.")]
             return [Outbound(inbound.chat_id, "Okay, nothing was deleted.")]
@@ -864,7 +865,10 @@ class Engine:
                                       "advice; confirm values with your adjuster.", files=files)]
         if low in ("call me", "call", "let's talk", "lets talk"):
             return self._memory_start(inbound, member, case)
-        if low in ("delete my case", "delete everything", "delete all") and owner and not inbound.is_group:
+        if (low in ("delete my case", "delete everything", "delete all")
+                or re.fullmatch(r"(?:can you |could you |please |pls )*(?:delete|erase|wipe|remove)\s+"
+                                r"(?:my |the |this |our )?(?:case|data|list|everything|all of it)(?: please| pls)?", low)) \
+                and owner and not inbound.is_group:
             self.store.set_member(member["member_id"], state={"step": "delete"})
             return [Outbound(chat_id, "This removes every photo, item and message for this case, for everyone. "
                                       "Reply yes to delete, or anything else to keep it.")]

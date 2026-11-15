@@ -511,7 +511,7 @@ def test_free_text_is_mapped_to_a_real_command_or_a_reply():
         asked.append((message, context))
         table = {"can u send me the lsit pls": {"command": "list", "reply": None},
                  "how r u": {"command": None, "reply": "Doing fine, thanks for asking."},
-                 "delete everything now": {"command": None, "reply": 'Type "delete my case" if you mean it.'},
+                 "get rid of all my stuff in here": {"command": "delete my case", "reply": None},
                  "make me a sandwich": {"command": valid_command("make sandwich"), "reply": None}}
         return table[message]
 
@@ -520,11 +520,19 @@ def test_free_text_is_mapped_to_a_real_command_or_a_reply():
     out = fam.say(MOM, "can u send me the lsit pls")
     assert "/p/" in out[0].text                                         # the list link, as if "list" was typed
     assert texts(fam.say(MOM, "how r u")) == ["Doing fine, thanks for asking."]
-    assert texts(fam.say(MOM, "delete everything now")) == ['Type "delete my case" if you mean it.']
-    assert fam.store.get_case(fam.case_id) is not None                  # nothing was deleted
+    assert "Reply yes to delete" in fam.say(MOM, "get rid of all my stuff in here")[0].text
+    assert fam.store.get_case(fam.case_id) is not None                  # only asked; nothing deleted yet
+    assert texts(fam.say(MOM, "no wait")) == ["Okay, nothing was deleted."]
     assert "I'm not sure" in fam.say(MOM, "make me a sandwich")[0].text  # an invented command is refused
     assert "owns the case" in asked[0][1]
 
 
 def test_without_a_key_only_exact_commands_work(fam):
     assert "I'm not sure" in fam.say(MOM, "can u send me the lsit pls")[0].text
+
+
+
+def test_plain_requests_to_delete_still_ask_first(fam):
+    assert "Reply yes to delete" in fam.say(MOM, "Can you please delete my case")[0].text
+    assert "deleted" in fam.say(MOM, "Yes really delete my case")[0].text
+    assert fam.store.get_case(fam.case_id) is None

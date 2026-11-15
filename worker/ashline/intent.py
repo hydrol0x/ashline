@@ -4,8 +4,8 @@ People mistype, ramble and phrase things their own way ("can u send me the list 
 "the second one is a different chair", "how much have we got"). When a message matches no
 command, Claude maps it to ONE of Ashline's real commands, written in its exact form, or to a
 short reply. The chat engine then runs that command through the same code as a typed one, so
-the model can choose an action but never invent one. Destructive actions (deleting the case) are
-not offered: those still have to be typed.
+the model can choose an action but never invent one. Deleting the case is offered, but it only
+starts Ashline's own confirmation question; nothing is deleted until the person replies yes.
 """
 from __future__ import annotations
 
@@ -53,6 +53,7 @@ last numbered list, X is text the person gave):
 - export             (send the spreadsheet and PDF)
 - call me            (start a memory conversation about things no photo shows)
 - pause              (stop prompts and reminders for now)
+- delete my case     (the owner wants everything deleted; Ashline then asks them to confirm with yes)
 - help               (what Ashline can do)
 
 Rules:
@@ -60,9 +61,11 @@ Rules:
 - If the message is small talk, thanks, a feeling, or a question you can answer in a sentence, set command to
   null and give a short reply (one or two sentences, no lists). Do not promise anything Ashline cannot do.
 - If it is unclear, set command to null and reply with one short question that would make it clear.
-- Never choose deleting the case, even if asked; reply that they can type "delete my case" if they mean it."""
+- Choose "delete my case" only when the person clearly asks to delete or erase their case, list or data.
+  It does not delete anything by itself: Ashline asks them to confirm first."""
 
-ALLOWED = ("1", "2", "list", "how much so far", "review", "ok", "undo", "export", "call me", "pause", "help")
+ALLOWED = ("1", "2", "list", "how much so far", "review", "ok", "undo", "export", "call me", "pause", "help",
+           "delete my case")
 PREFIXES = ("show ", "remove ", "split ", "price ")
 
 

@@ -760,7 +760,7 @@ def test_claude_detector_reads_a_busy_photo_again_with_more_room_not_lower_effor
         replies = list(replies)
         def create(**kw):
             asked.append(kw)
-            return replies.pop(0)
+            return replies.pop(0) if replies else ok
         return NS(messages=NS(create=create, stream=lambda **kw: nullcontext(NS(get_final_message=lambda: create(**kw)))))
     path = tmp_path / "p.jpg"
     Image.new("RGB", (640, 480)).save(path)
@@ -919,3 +919,18 @@ def test_demo_setup_skips_the_address_and_what_happened_questions():
     assert out[-1] == "Send photos from inside the home whenever you're ready." and "HOME-" in out[0]
     assert not any("what happened" in t.lower() or "address" in t.lower() for t in out)
     assert texts(f.say(MOM, "address 12 Example Ave, Los Angeles, CA 90001"))[0].startswith("Saved the address")
+
+
+def test_claude_detector_looks_again_when_a_photo_gives_one_thing(tmp_path):
+    import json
+    from types import SimpleNamespace as NS
+    from ashline.detect_claude import ClaudeDetector
+    def reply(*labels):
+        items = [{"label": l, "category": "furniture", "confidence": 0.9, "box": [0, 0, 500, 500]} for l in labels]
+        return NS(stop_reason="end_turn", stop_details=None, content=[NS(type="text", text=json.dumps({"items": items}))])
+    replies, asked = [reply("bed"), reply("bed", "lamp", "nightstand", "desk chair")], []
+    client = NS(messages=NS(create=lambda **kw: (asked.append(kw), replies.pop(0))[1]))
+    path = tmp_path / "p.jpg"
+    Image.new("RGB", (640, 480)).save(path)
+    items = ClaudeDetector(model="claude-sonnet-test", client=client).detect(path)
+    assert len(items) == 4 and "A first look found only: bed" in asked[1]["messages"][0]["content"][1]["text"]

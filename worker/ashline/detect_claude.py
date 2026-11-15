@@ -78,7 +78,10 @@ Use the room names of this home when they fit."""
 
 INSTRUCTIONS = """
 
-List at most 30 items. Give each physical object its own entry with its own box: two matching chairs
+List every separate belonging you can name, not only the main piece of furniture. A typical room photo
+has 5 to 20 entries: in a living room the sofa, each throw pillow and blanket, the coffee table, the rug,
+lamps, plants, books, the TV; in a bedroom the bed, its bedding, nightstands, lamps, a desk and chair, a
+fan. List at most 30 items. Give each physical object its own entry with its own box: two matching chairs
 are two entries, four bar stools are four entries, even when they look identical or overlap. Do not
 split ONE object into several entries: a sofa partly hidden or cut off by the frame is one entry with
 one box around all of it. Skip what people are wearing (clothes, earbuds, watches, glasses) and what they
@@ -155,7 +158,10 @@ class ClaudeDetector:
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
                                              "data": base64.standard_b64encode(buf.getvalue()).decode("utf-8")}},
-                {"type": "text", "text": task + INSTRUCTIONS.replace("30", str(getattr(self, "_limit", 30))) + ask_room},
+                {"type": "text", "text": task + INSTRUCTIONS.replace("30", str(getattr(self, "_limit", 30))) + ask_room
+                 + (f"\n\nA first look found only: {', '.join(self._found) or 'nothing'}. Look again at the whole "
+                    "photo, corner to corner, and list every belonging you can name, including those."
+                    if getattr(self, "_again", False) else "")},
             ]}],
         )
         try:
@@ -209,6 +215,18 @@ class ClaudeDetector:
         except (json.JSONDecodeError, AttributeError) as exc:
             raise DetectionError(f"Unexpected reply from Claude: {text[:200]}") from exc
         parsed = parse_items(json.dumps(items), width, height)
+        print(f"ashline: {Path(path).name}: {len(parsed)} item(s) from {getattr(response, 'model', self.model)}")
+        if len(parsed) <= 2 and not getattr(self, "_again", False) and not getattr(self, "_retrying", False):
+            # One or two things from a whole room is almost always a lazy read: look once more, keep the longer list.
+            self._again, self._found = True, [i["label"] for i in parsed]
+            try:
+                second = self.detect(path, room_hint, rooms)
+            except DetectionError:
+                second = []
+            finally:
+                self._again, self._found = False, None
+            if len(second) > len(parsed):
+                return second
         guess = reply.get("room") if isinstance(reply.get("room"), str) else None
         if rooms is None:                                  # a scan face: its room is known from the scan
             return parsed

@@ -293,7 +293,8 @@ class Engine:
             if addressed:
                 from . import assistant
                 return (assistant.converse(self, inbound, member, case, text, now)
-                        or self._interpret(inbound, member, case, text, now) or [Outbound(inbound.chat_id, HELP)])
+                        or self._interpret(inbound, member, case, text, now)
+                        or self._plain(inbound, member, case, text, now) or [Outbound(inbound.chat_id, HELP)])
             self._listen(inbound.chat_id, text)           # unsure = silent
             return []
 
@@ -308,7 +309,61 @@ class Engine:
         from . import assistant                             # the LangChain agent, when a model is available
         return (assistant.converse(self, inbound, member, case, text, now)
                 or self._interpret(inbound, member, case, text, now)
+                or self._plain(inbound, member, case, text, now)
                 or [Outbound(inbound.chat_id, "I'm not sure what you'd like me to do with that.\n\n" + HELP)])
+
+    def _plain(self, inbound: Inbound, member: dict, case: dict, text: str, now: datetime):
+        """Before the "not sure" reply: a greeting, an emoji, a command with a typo, or "we had a piano"."""
+        chat_id, low = inbound.chat_id, text.lower().strip(" .!?,")
+        if text.strip() == "?":
+            return [Outbound(chat_id, HELP)]
+        if not re.search(r"\w", text):                      # only emoji, or nothing at all
+            return [Outbound(chat_id, "I'm here whenever you're ready. Send a photo any time.")]
+        if re.fullmatch(r"(?:hi+|hello|hey+|hiya|howdy|yo|good (?:morning|afternoon|evening)|morning|evening)"
+                        r"(?: there| ashline)?[\W_]*", low):
+            m = meter(case["case_id"], self.store)
+            name = f", {member['name']}" if member.get("name") else ""
+            if m["pending_items"] and member["role"] == "owner":
+                n = m["pending_items"]
+                return [Outbound(chat_id, f"Hi{name}. {n} thing{'s are' if n != 1 else ' is'} waiting for your OK. "
+                                          "Say review to go through them, or send a photo any time.")]
+            if m["items"] or m["pending_items"]:
+                n = m["items"] + m["pending_items"]
+                return [Outbound(chat_id, f"Hi{name}. The list has {n} thing{'s' if n != 1 else ''} on it so far. "
+                                          "Send a photo any time to add more.")]
+            return [Outbound(chat_id, f"Hi{name}. Nothing is on the list yet. Send a photo from inside the home, "
+                                      "from any year, and I'll start it.")]
+        words = low.split()
+        if 0 < len(words) <= 3:                             # "hlep", "lsit", "chek my bank": one letter off
+            fixed = [next((c for c in TYPO_WORDS if len(w) >= 4 and _one_edit(w, c)), w)
+                     if w not in TYPO_WORDS and w not in NOT_TYPOS else w for w in words]
+            if fixed != words:
+                reply = self._command(inbound, member, case, " ".join(fixed), now)
+                if reply is not None:
+                    return reply
+        said = re.fullmatch(r"(?:(?:we|i)\s+(?:also\s+)?(?:had|owned|used to have)|there\s+(?:was|were)(?:\s+also)?)"
+                            r"\s+(.+)", low)
+        if said and not inbound.is_group and not re.match(
+                r"(?:a |an |the |some )?(?:fire|flood|storm|hurricane|tornado|leak|smoke|water|damage|lot of)\b", said.group(1)):
+            thing, room = said.group(1), None
+            where = re.search(r"\s+in (?:the |our |my )?([a-z' ]{3,30})$", thing)
+            if where:
+                thing, room = thing[:where.start()], tidy_room(where.group(1))
+            added = self._add_remembered(case["case_id"], member, thing)
+            if not added:
+                return None
+            if room:
+                for item_id in added:
+                    self.store.update_item(case["case_id"], item_id, room_label=room)
+            self.store.log_event(case["case_id"], "memory_add", {"items": added}, member["member_id"])
+            price_items(case["case_id"], self.store, self.pricer)
+            names = _join([_cap(self._display(self.store.get_item(case["case_id"], i))) for i in added])
+            boss = "your" if member["role"] == "owner" else \
+                f"{(self._owner(case['case_id']) or {}).get('name') or 'the owner'}'s"
+            return [Outbound(chat_id, f"Added from memory: {names}. {'They wait' if len(added) != 1 else 'It waits'} "
+                                      f"for {boss} OK before {'they count' if len(added) != 1 else 'it counts'}. "
+                                      "Say undo if that was a mistake.")]
+        return None
 
     def _interpret(self, inbound: Inbound, member: dict, case: dict, text: str, now: datetime):
         """A message no exact command matched: let the model pick a real command or a short reply."""
@@ -1739,6 +1794,23 @@ FILLER_WORDS = {"it's", "its", "it", "the", "is", "a", "they're", "theyre", "are
 
 def _cap(text: str) -> str:
     return text[:1].upper() + text[1:]
+
+
+TYPO_WORDS = ("help", "list", "export", "review", "undo", "check", "bank", "total", "receipt", "much")
+NOT_TYPOS = {"last", "lost", "lust", "mist", "lisa", "back", "band", "tank", "hell", "held", "hemp", "heap", "kelp",
+             "yelp", "chuck", "cheek", "expert", "such", "unto", "reviews", "totally"}
+
+
+def _one_edit(word: str, target: str) -> bool:
+    """One letter added, dropped, changed, or two side by side swapped."""
+    if word == target or abs(len(word) - len(target)) > 1:
+        return False
+    if len(word) == len(target):
+        diff = [i for i, (a, b) in enumerate(zip(word, target)) if a != b]
+        return len(diff) == 1 or (len(diff) == 2 and diff[1] == diff[0] + 1
+                                  and word[diff[0]] == target[diff[1]] and word[diff[1]] == target[diff[0]])
+    short, long_ = sorted((word, target), key=len)
+    return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
 
 
 def yes_or_no(low: str) -> tuple[bool, bool]:

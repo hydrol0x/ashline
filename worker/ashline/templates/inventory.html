@@ -612,11 +612,14 @@
 
   var dialog = document.getElementById('detail'), sheet = document.getElementById('sheet'), strip = document.getElementById('sightings');
   var dirty = 0, current = null, trail = [], flash = '', cache = {}, readyAt = 0, keys = null, moving = false;
+  var pushed = false, afterBack = null;      // pushed: the modal sheet added a history entry
   // On a wide screen the open item sits in the right-hand column beside the list; otherwise it is a sheet over the page.
   var wide = window.matchMedia('(min-width: 1180px)');
   function showSheet() {
     if (dialog.open) return;
-    if (wide.matches) dialog.show(); else dialog.showModal();
+    if (wide.matches) { dialog.show(); return; }
+    dialog.showModal();
+    if (!pushed) { pushed = true; history.pushState({ ashlineItem: true }, '', location.href); }   // Back closes the sheet
   }
   wide.addEventListener('change', function () {           // move an open item between the side column and the sheet
     if (!dialog.open || dialog.matches(':modal') !== wide.matches) return;
@@ -661,7 +664,24 @@
     c.dataset.review = status === 'suggested' ? '1' : '0';
     var foot = c.querySelector('.foot span');
     if (foot) foot.textContent = foot.textContent.replace(/ · (to check|removed|✓)$/, '');
-    refreshReview();
+    recount(); refreshReview();
+  }
+  function recount() {                                    // the tab and room-row counts, without re-sorting or hiding cards
+    var n = { all: 0, confirmed: 0, suggested: 0 }, waiting = {};
+    cards().forEach(function (c) {
+      if (c.dataset.removed === '1') return;
+      if (c.dataset.review === '1') waiting[c.dataset.room] = (waiting[c.dataset.room] || 0) + 1;
+      if (room && c.dataset.room !== room) return;
+      n.all++; if (hasStatus(c, 'confirmed')) n.confirmed++; if (hasStatus(c, 'suggested')) n.suggested++;
+    });
+    if (room !== '__removed') tabs.forEach(function (t) { t.querySelector('span').textContent = n[t.dataset.status || 'all']; });
+    chips.forEach(function (chip) {
+      var r = chip.dataset.room; if (!r || r === '__removed') return;
+      var em = chip.querySelector('em'), w = waiting[r] || 0;
+      if (!w) { if (em) em.remove(); return; }
+      if (!em) { em = el('em'); chip.insertBefore(em, chip.querySelector('span')); }
+      em.textContent = w + ' to check';
+    });
   }
   var ICON = {
     paid: '<rect x="2.5" y="5" width="15" height="10" rx="2"/><path d="M2.5 9h15"/>',
@@ -694,7 +714,7 @@
 
   function load(id) {
     if (!cache[id]) cache[id] = fetch('/p/' + token + '/item/' + id + '.json').then(function (r) {
-      if (!r.ok) throw new Error('failed'); return r.json();
+      if (!r.ok) { var e = new Error('failed'); e.status = r.status; throw e; } return r.json();
     }).catch(function (e) { delete cache[id]; throw e; });
     return cache[id];
   }
@@ -727,23 +747,27 @@
       box.appendChild(bk);
     }
     sheet.appendChild(box);
-    showSheet();
+    showSheet(); b.focus({ preventScroll: true });
   }
 
   function open(id) {
     id = String(id); current = id; markOpen(id);
     if (dialog.open) sheet.classList.add('loading');
     load(id).then(function (d) { if (current === id) render(id, d); })
-      .catch(function () {
+      .catch(function (e) {
         if (current !== id) return;
-        sheet.classList.remove('loading'); sheet.innerHTML = '';
-        var box = el('div', null, 'done');
-        box.appendChild(el('h2', 'Couldn’t load this item'));
-        box.appendChild(el('p', 'Check your connection and try again.', 'muted'));
-        var r = el('button', 'Try again', 'btn big'); r.type = 'button';
-        r.addEventListener('click', function () { open(id); });
-        box.appendChild(r); sheet.appendChild(box);
-        showSheet();
+        sheet.classList.remove('loading'); sheet.innerHTML = ''; strip.innerHTML = '';
+        var box = el('div', null, 'done'), gone = e && e.status === 404, r;
+        if (gone) {
+          box.appendChild(el('h2', 'This item is no longer on the list.'));
+          r = el('button', 'Close', 'btn big'); r.addEventListener('click', function () { dialog.close(); });
+        } else {
+          box.appendChild(el('h2', 'Couldn’t load this item'));
+          box.appendChild(el('p', 'Check your connection and try again.', 'muted'));
+          r = el('button', 'Try again', 'btn big'); r.addEventListener('click', function () { open(id); });
+        }
+        r.type = 'button'; box.appendChild(r); sheet.appendChild(box);
+        showSheet(); r.focus({ preventScroll: true });
       });
   }
 
@@ -947,6 +971,9 @@
     }
     showSheet();
     dialog.scrollTop = 0;
+    var aim = sheet.querySelector('.decide .btn:not(.quiet)');            // the Yes button, else the heading
+    if (!aim) { aim = titleRow.querySelector('h2'); aim.tabIndex = -1; }
+    aim.focus({ preventScroll: true });
     prefetch(id);
   }
 
@@ -961,10 +988,23 @@
   dialog.addEventListener('close', function () {
     if (moving) return;
     current = null; keys = null; markOpen(null);
-    if (dirty) {
-      try { sessionStorage.setItem('ashline-return', JSON.stringify({ room: room, status: status, y: window.scrollY, saved: dirty })); } catch (e) {}
-      location.reload();
+    function finish() {
+      if (/^#item-/.test(location.hash)) history.replaceState(history.state, '', location.pathname + location.search);
+      if (dirty) {
+        try { sessionStorage.setItem('ashline-return', JSON.stringify({ room: room, status: status, y: window.scrollY, saved: dirty })); } catch (e) {}
+        location.reload();
+      }
     }
+    if (pushed) { pushed = false; afterBack = finish; history.back(); }   // closed with ✕ or Esc: drop the sheet's entry
+    else finish();
+  });
+  window.addEventListener('popstate', function () {
+    if (afterBack) { var f = afterBack; afterBack = null; f(); return; }
+    if (pushed && dialog.open) { pushed = false; dialog.close(); }       // Back closes the sheet, not the page
+  });
+  window.addEventListener('hashchange', function () {                   // a same-page #item-<id> link
+    var m = /^#item-(\d+)$/.exec(location.hash);
+    if (m) { trail = []; open(Number(m[1])); }
   });
   dialog.addEventListener('click', function (e) { if (e.target === dialog && dialog.matches(':modal')) dialog.close(); });
   document.addEventListener('keydown', function (e) {   // laptop shortcuts: Y / N, arrows

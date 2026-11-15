@@ -124,6 +124,15 @@
   .done { text-align: center; padding: 26px 8px 8px; }
   .done-mark { width: 56px; height: 56px; border-radius: 28px; background: var(--accent); color: #fff; font-size: 28px; line-height: 56px; margin: 0 auto 12px; }
   .done .btn { width: 100%; margin-top: 14px; }
+  .done .link { margin-top: 12px; }
+  .progress .count { text-align: center; flex: 1; }
+  .progress > * { min-width: 64px; }
+  .progress > :last-child { text-align: right; }
+  .btn.chosen-yes { box-shadow: 0 0 0 3px rgba(31, 111, 107, .25); }
+  .btn.chosen-no { background: #F4E7E3; border-color: #D9B8AE; color: #8A3F2C; }
+  .hint-line { grid-column: 1 / -1; text-align: center; margin: 0 !important; }
+  .saved { color: var(--accent); font-weight: 600; font-size: 13px !important; animation: fade 2.4s forwards; }
+  @keyframes fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
   dialog { overscroll-behavior: contain; }
   .sheet { padding-bottom: max(18px, env(safe-area-inset-bottom)); }
   @media (max-width: 639px) {
@@ -277,7 +286,7 @@
   }
   function el(tag, text, cls) { var e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; }
 
-  var dialog = document.getElementById('detail'), dirty = false, current = null;
+  var dialog = document.getElementById('detail'), dirty = false, current = null, trail = [], flash = '';
   function cards() { return grid ? [].slice.call(grid.querySelectorAll('.item')) : []; }
   function toCheck() { return cards().filter(function (c) { return !c.hidden && c.dataset.review === '1'; }); }
   function nextAfter(id) {
@@ -291,8 +300,19 @@
     card.classList.remove('suggested', 'confirmed', 'rejected'); card.classList.add(status);
     card.dataset.review = status === 'suggested' ? '1' : '0';
     var foot = card.querySelector('.foot span');
-    if (foot) foot.textContent = foot.textContent.replace(' · to check', '') + (status === 'rejected' ? ' · removed' : status === 'confirmed' ? ' · ✓' : '');
+    if (foot) foot.textContent = foot.textContent.replace(/ · (to check|removed|✓)$/, '') + (status === 'rejected' ? ' · removed' : status === 'confirmed' ? ' · ✓' : '');
     refreshReview();
+  }
+  function updateCard(d) {
+    var card = grid && grid.querySelector('.item[data-id="' + d.id + '"]');
+    if (!card) return;
+    var name = card.querySelector('.name'); if (name) name.textContent = d.title;
+    var price = card.querySelector('.price');
+    if (d.price) {
+      if (!price) { price = el('div', null, 'price'); card.querySelector('.line').after(price); }
+      price.textContent = d.price;
+    }
+    card.dataset.value = d.value; card.dataset.name = (d.title || '').toLowerCase();
   }
   function refreshReview() {
     var n = toCheck().length, bar = document.getElementById('review');
@@ -301,6 +321,7 @@
     var c = document.getElementById('review-count'); if (c) c.textContent = n + (n === 1 ? ' item' : ' items');
   }
   function goNext(id) {
+    if (trail[trail.length - 1] !== id) trail.push(id);
     var next = nextAfter(id);
     if (next) open(next.dataset.id); else allDone();
   }
@@ -313,7 +334,13 @@
     box.appendChild(el('p', 'Every item here has an answer. Your totals update when you close this.', 'muted'));
     var b = el('button', 'Done', 'btn big'); b.type = 'button';
     b.addEventListener('click', function () { dialog.close(); });
-    box.appendChild(b); sheet.appendChild(box);
+    box.appendChild(b);
+    if (trail.length) {
+      var back = el('button', '← Go back to the last item', 'link'); back.type = 'button';
+      back.addEventListener('click', function () { open(trail.pop()); });
+      box.appendChild(back);
+    }
+    sheet.appendChild(box);
     if (!dialog.open) dialog.showModal();
   }
   function open(id) {
@@ -329,22 +356,29 @@
         fig.appendChild(el('figcaption', [d.sightings.length > 1 ? (n + 1) + ' of ' + d.sightings.length : null, s.source, s.by !== s.source ? s.by : null, s.date].filter(Boolean).join(' · ')));
         strip.appendChild(fig);
       });
+      updateCard(d);
       var reviewing = d.status === 'suggested';
-      if (reviewing && d.editable) {
+      trail = trail.filter(function (t) { return t !== id; });
+      if (d.editable && (reviewing || trail.length || toCheck().length)) {
         var left = toCheck().length, top = el('div', null, 'progress');
-        top.appendChild(el('span', left + ' left to check'));
-        var skip = el('button', 'Skip →', 'link'); skip.type = 'button';
+        if (trail.length) {
+          var back = el('button', '← Back', 'link'); back.type = 'button';
+          back.addEventListener('click', function () { open(trail.pop()); });
+          top.appendChild(back);
+        } else top.appendChild(el('span', ''));
+        top.appendChild(el('span', left ? left + ' left to check' : 'All checked', 'count'));
+        var skip = el('button', left ? 'Skip →' : 'Next →', 'link'); skip.type = 'button';
         skip.addEventListener('click', function () { goNext(id); });
-        if (left > 1) top.appendChild(skip);
+        if (left > (reviewing ? 1 : 0)) top.appendChild(skip); else top.appendChild(el('span', ''));
         sheet.appendChild(top);
       }
       sheet.appendChild(el('h2', d.title));
       sheet.appendChild(el('p', [d.room, d.category, d.brand].filter(Boolean).join(' · '), 'muted'));
       if (d.price) sheet.appendChild(el('p', d.price, 'price-line'));
+      if (d.qty > 1 && !d.price) sheet.appendChild(el('p', 'Quantity: ' + d.qty, 'price-line'));
+      if (flash) { sheet.appendChild(el('p', flash, 'saved')); flash = ''; }
       sheet.appendChild(el('p', d.price_basis, 'muted small'));
       if (d.sightings.length > 1) sheet.appendChild(el('p', 'Seen in ' + d.sightings.length + ' photos. Swipe to see each one.', 'muted small'));
-      if (d.status === 'confirmed') sheet.appendChild(el('p', '✓ Confirmed as yours', 'state ok'));
-      if (d.status === 'rejected') sheet.appendChild(el('p', 'Removed from the list', 'state'));
       if (d.editable) {
         var main = el('div', null, 'decide'), row = el('div', null, 'row'), editor = el('form', null, 'editor');
         editor.hidden = true;
@@ -377,7 +411,10 @@
             e.preventDefault();
             var v = input.value.trim();
             if (!v) { input.focus(); return; }
-            send({ action: action, value: v }, save, function () { open(id); });
+            send({ action: action, value: v }, save, function () {
+              flash = { rename: '✓ Name saved', qty: '✓ Quantity saved', price: '✓ Price saved' }[action] || '✓ Saved';
+              open(id);
+            });
           };
           main.hidden = true; row.hidden = true; editor.hidden = false; input.focus(); input.select();
         }
@@ -386,16 +423,15 @@
           b.addEventListener('click', function () { onClick(b); });
           parent.appendChild(b);
         }
-        if (reviewing) {
-          act(main, 'Not ours', 'quiet big', function (b) { decide('remove', 'rejected', b); });
-          act(main, 'Yes, this was ours', 'big', function (b) { decide('confirm', 'confirmed', b); });
-        } else if (d.status === 'rejected') {
-          act(main, 'Put it back', 'quiet big', function (b) { send({ action: 'restore' }, b, function () { markCard(id, 'suggested'); open(id); }); });
-        }
+        var no = d.status === 'rejected', yes = d.status === 'confirmed';
+        act(main, no ? '✕ Not ours' : 'Not ours', 'quiet big' + (no ? ' chosen-no' : ''), function (b) {
+          if (no) goNext(id); else decide('remove', 'rejected', b); });
+        act(main, yes ? '✓ This was ours' : 'Yes, this was ours', 'big' + (yes ? ' chosen-yes' : ''), function (b) {
+          if (yes) goNext(id); else decide('confirm', 'confirmed', b); });
+        if (yes || no) main.appendChild(el('p', 'Tap the other answer to change it.', 'muted small hint-line'));
         act(row, 'Fix name', 'quiet', function () { edit('What is it?', 'Be as specific as you can, e.g. "Pottery Barn arc floor lamp".', d.label, 'text', 'rename'); });
         act(row, 'Quantity', 'quiet', function () { edit('How many were there?', null, d.qty, 'qty', 'qty'); });
         act(row, 'Set price', 'quiet', function () { edit('What does one cost to buy new?', 'Your number replaces the estimate and is marked as set by the family.', d.price_mid ? Math.round(d.price_mid) : '', 'money', 'price'); });
-        if (d.status === 'confirmed') act(row, 'Remove', 'quiet', function (b) { decide('remove', 'rejected', b); });
         if (main.children.length) sheet.appendChild(main);
         sheet.appendChild(row); sheet.appendChild(editor);
       }

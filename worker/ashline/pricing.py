@@ -95,6 +95,8 @@ def money_range(low: float | None, high: float | None) -> str:
     """$400–$750, $4–7k."""
     if low is None or high is None:
         return "?"
+    if round(low) == round(high):
+        return money(low)
     if low >= 1000 and high >= 1000:
         def k(v):
             return f"{v / 1000:.1f}".rstrip("0").rstrip(".")

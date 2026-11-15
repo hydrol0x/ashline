@@ -46,6 +46,8 @@ INSURED_Q = "Do you have insurance that covers it? Yes, no or not sure is fine."
 TELEGRAM_PREFIX = "tg:"                            # chat and sender ids that came from the Telegram bridge
 ADDRESSED = re.compile(r"^\s*@?ashline\b[,:]?\s*", re.I)
 MEMORY_QUESTIONS = 6                    # a text "call" asks at most this many questions
+MEMORY_COMMANDS = ("help", "menu", "commands", "list", "export", "review", "undo", "map", "receipt", "call me",
+                   "how much", "how much so far", "total", "check my bank", "show me the list", "what can you do?")
 REVIEW_AT_ONCE = 30                     # more than this waiting: the review goes one room at a time
 DIRECTED_ASK_BELOW = 5                  # a room with fewer items than this is worth asking about
 DEADLINE_DAYS = (60, 30, 10)            # proof-of-loss reminders, and nothing else
@@ -1471,6 +1473,10 @@ class Engine:
             for item_id in payload["moved"]:
                 self.store.update_item(case_id, item_id, cluster_id=payload["into"])
             text = "Undone: those are one item again."
+        elif action == "memory_add":                        # things someone remembered in a memory chat
+            for item_id in payload["items"]:
+                self.store.set_item_status(case_id, item_id, "rejected")
+            text = f"Undone: I've taken {'those' if len(payload['items']) != 1 else 'that'} off the list."
         elif action == "receipt_add":                       # things added from a receipt
             for item_id in payload["items"]:
                 self.store.set_item_status(case_id, item_id, "rejected")
@@ -1564,21 +1570,27 @@ class Engine:
             return None
         case_id, low = case["case_id"], text.lower().strip(" .!")
         ended = low in ("stop", "that's enough", "thats enough", "enough", "done", "i don't want to talk about that",
-                        "not today", "no more")
-        if not ended and low not in ("skip", "nothing", "no", "i don't remember", "not sure"):
-            for label, qty in extract_things(text):
-                item_id = self.store.add_item(case_id, {"label": label, "category": "other", "qty": qty,
-                                                        "detail": "From memory"}, source="voice",
-                                              added_by=member.get("name"))
-                self.store.set_cluster(case_id, item_id, [item_id], qty)
-                memory["added"].append(item_id)
+                        "not today", "no more", "pause", "quit", "exit", "end")
+        import difflib
+        if not ended and (low in MEMORY_COMMANDS or difflib.get_close_matches(low, MEMORY_COMMANDS, n=1, cutoff=0.75)):
+            self.store.set_member(member["member_id"], state={"memory": memory})
+            return [Outbound(inbound.chat_id, "We're still in our memory chat. Say stop to end it, then I can help "
+                                              "with that. Or tell me about the question: " + memory["queue"][memory["at"]])]
+        if not ended and low not in ("skip", "nothing", "no", "i don't remember", "not sure", "yes", "ok", "okay", "k",
+                                     "yeah", "yep", "nope", "idk", "don't know", "dont know", "thanks", "thank you"):
+            added = self._add_remembered(case_id, member, text)
+            memory["added"] += added
+            if added:
+                self.store.log_event(case_id, "memory_add", {"items": added}, member["member_id"])
         memory["at"] += 1
         if ended or memory["at"] >= len(memory["queue"]):
             self.store.set_member(member["member_id"], state={})
             if not memory["added"]:
                 return [Outbound(inbound.chat_id, "That's fine. Thank you for trying. We can pick it up another day.")]
             price_items(case_id, self.store, self.pricer)
-            items = [self.store.get_item(case_id, i) for i in memory["added"]]
+            items = [i for i in (self.store.get_item(case_id, n) for n in memory["added"]) if i and i["status"] != "rejected"]
+            if not items:
+                return [Outbound(inbound.chat_id, "That's fine. Thank you for trying. We can pick it up another day.")]
             total = sum((i.get("price_mid") or 0) * (i.get("qty") or 1) for i in items)
             context = self._context(inbound.chat_id)
             context["review"] = [i["item_id"] for i in items]
@@ -1591,6 +1603,28 @@ class Engine:
                              f"they'd make these stronger. {names}. Reply OK to add them, or tell me what's wrong.")]
         self.store.set_member(member["member_id"], state={"memory": memory})
         return [Outbound(inbound.chat_id, memory["queue"][memory["at"]])]
+
+    def _add_remembered(self, case_id: str, member: dict, text: str) -> list[int]:
+        """Add what someone remembers as suggestions marked "from memory". "a piano worth 3000" keeps the price they gave."""
+        added = []
+        for label, qty in extract_things(text):
+            price = None
+            match = re.fullmatch(r"(.+?),?\s+(?:that was |that's |which was )?(?:worth|cost|costs|costing|valued at|about|"
+                                 r"around|for|at)\s+(?:about |around )?(\$?\s*[\d][\d,.]*\s*k?(?:\s*dollars)?)", label)
+            if match and parse_money(match.group(2)):
+                label, price = match.group(1).strip(), parse_money(match.group(2))
+            if not label:
+                continue
+            item_id = self.store.add_item(case_id, {"label": label, "category": "other", "qty": qty,
+                                                    "detail": "From memory"}, source="voice",
+                                          added_by=member.get("name"))
+            self.store.set_cluster(case_id, item_id, [item_id], qty)
+            if price:
+                each = round(price / qty, 2)
+                self.store.update_item(case_id, item_id, price_low=each, price_mid=each, price_high=each,
+                                       price_source="set by family")
+            added.append(item_id)
+        return added
 
     # ------------------------------------------------------------ listening
     def _listen(self, chat_id: str, text: str) -> None:

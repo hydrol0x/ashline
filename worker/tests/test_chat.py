@@ -305,6 +305,24 @@ def test_memory_by_text_then_ok(fam):
     assert texts(fam.say(MOM, "stop")) == ["That's fine. Thank you for trying. We can pick it up another day."]
 
 
+def test_a_memory_chat_skips_command_words_keeps_prices_and_can_be_undone(fam):
+    voice = lambda: [i for i in fam.store.get_items(fam.case_id) if i["source"] == "voice" and i["status"] != "rejected"]
+    fam.say(MOM, "call me")
+    for words in ("exprot", "menu", "ok"):
+        assert "?" in fam.say(MOM, words)[-1].text
+    assert voice() == []
+    fam.say(MOM, "a piano worth 3000 and 2 bikes")
+    fam.say(MOM, "an old quilt")
+    assert texts(fam.say(MOM, "undo")) == ["Undone: I've taken that off the list."]
+    piano = next(i for i in voice() if "piano" in i["label"])
+    assert (piano["label"], piano["price_mid"], piano["price_source"]) == ("piano", 3000, "set by family")
+    out = fam.say(MOM, "stop")
+    assert out[0].text.startswith("That was really helpful. From our chat: 2 items, about $3,")
+    assert "quilt" not in out[0].text
+    fam.say(MOM, "OK")
+    assert fam.store.get_item(fam.case_id, piano["item_id"])["price_mid"] == 3000
+
+
 def test_delete_my_case(fam):
     fam.say(MAYA, "", [photo(640)])
     fam.wait()

@@ -26,6 +26,8 @@ from . import config
 from .chat import Engine, Inbound, Outbound
 
 POLL_SECONDS = 2.0
+DOWNLOAD_TRIES = 5              # a photo's file can lag its message by a few seconds
+DOWNLOAD_WAIT = 1.0             # seconds; grows with each try (1, 2, 3, 4)
 IMAGE_TYPES = ("image/",)
 
 
@@ -121,7 +123,7 @@ class PhotonBridge:
             return None                                  # the agent's own messages and system events
         if agent is not None and getattr(agent, "id", None):
             self.state["senders"][space.id] = agent.id
-        text, files = [], []
+        text, files, missing = [], [], 0
         for part in parts_of(message.content):
             kind = getattr(part, "type", None)
             if kind == "text":
@@ -130,19 +132,29 @@ class PhotonBridge:
                 data = self.download(part.attachmentId)
                 if data:
                     files.append((part.attachmentId, data))
-        if not text and not files:
+                else:
+                    missing += 1
+        if not text and not files and not missing:
             return None                                  # read receipts, typing updates
         return Inbound(chat_id=space.id, sender=sender.handle, text="\n".join(text).strip(), attachments=files,
-                       is_group=getattr(space, "kind", "direct") != "direct")
+                       is_group=getattr(space, "kind", "direct") != "direct", missing=missing)
 
-    def download(self, attachment_id: str) -> bytes | None:
+    def download(self, attachment_id: str, tries: int = DOWNLOAD_TRIES) -> bytes | None:
+        """An attachment's bytes. A photo can arrive a moment before its file is ready, so retry."""
         from photon_api.rpc_generated import DownloadAttachmentInput
-        try:
-            return self.photon.projects.download_attachment(DownloadAttachmentInput.model_validate(
-                {"path": {"id": self.project, "attachment_id": attachment_id}}))
-        except Exception as exc:                         # not ready yet, or not an image: skip it
-            print(f"photon: could not download attachment {attachment_id}: {exc}")
-            return None
+        for attempt in range(1, tries + 1):
+            try:
+                data = self.photon.projects.download_attachment(DownloadAttachmentInput.model_validate(
+                    {"path": {"id": self.project, "attachment_id": attachment_id}}))
+                if data:
+                    return data
+                problem = "empty file"
+            except Exception as exc:                     # not ready yet, a network blip, or not a file
+                problem = exc
+            if attempt < tries:
+                time.sleep(DOWNLOAD_WAIT * attempt)
+        print(f"photon: could not download attachment {attachment_id} after {tries} tries: {problem}")
+        return None
 
     # ---------------------------------------------------------------- send
     def send(self, messages: list[Outbound]) -> None:

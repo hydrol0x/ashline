@@ -550,3 +550,18 @@ def test_room_captions_are_tidied_and_reused(fam):
     fam.wait()
     rooms = {fam.store.get_photo(fam.case_id, number=n)["room_label"] for n in (1, 2, 3)}
     assert rooms == {"Basement"}
+
+
+
+def test_photos_that_could_not_be_fetched_or_opened_are_mentioned(fam):
+    from ashline.chat import Inbound
+    fam.now += timedelta(seconds=5)
+    out = fam.engine.handle(Inbound(MAYA, MAYA, "", [photo(640)], missing=2, now=fam.now))
+    assert texts(out) == ["Got it, looking at it.", "I couldn't open 2 of the photos. Could you send them again?"]
+    assert texts(fam.say(MAYA, "", [("IMG_9.jpg", b"\xff\xd8 broken jpeg")])) == [
+        "I couldn't open one of the photos. Could you send it again?"]
+
+
+def test_rooms_answer_in_a_sentence():
+    assert split_rooms("it only has basement") == ["Basement"]
+    assert split_rooms("we had a kitchen, 2 bedrooms and our garage") == ["Kitchen", "Bedroom", "Bedroom 2", "Garage"]

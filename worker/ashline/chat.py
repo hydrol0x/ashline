@@ -72,6 +72,7 @@ class Inbound:
     is_group: bool = False
     sender_name: str | None = None
     now: datetime | None = None
+    missing: int = 0                              # attachments the bridge could not download
 
 
 @dataclass
@@ -134,7 +135,11 @@ def split_rooms(text: str) -> list[str]:
     """'living room, kitchen, 3 bedrooms and a garage' -> Living room, Kitchen, Bedroom, Bedroom 2, Bedroom 3, Garage."""
     rooms = []
     for part in re.split(r",|;|\band\b|\n", text.lower()):
-        part = re.sub(r"\b(a|an|the|one|plus)\b", " ", part).strip(" .")
+        part = re.sub(r"^(?:it|we|there|they)?\s*(?:only|just)?\s*(?:has|had|have|was|were|is|are|got)\s+", "",
+                      part.strip())                                 # "it only has basement" -> "basement"
+        part = re.sub(r"^(?:only|just)\s+", "", part)
+        part = re.sub(r"\b(a|an|the|one|plus|our|my)\b", " ", part).strip(" .")
+        part = re.sub(r"\s+", " ", part)
         if not part:
             continue
         match = re.match(r"(\d+|two|three|four|five|six)\s+(.+)", part)
@@ -220,7 +225,7 @@ class Engine:
         if step in ("home_name", "address", "use_scan", "loss_date", "rooms") and not inbound.is_group:
             return self._continue_onboarding(inbound, member, case, text)
 
-        if inbound.attachments:
+        if inbound.attachments or inbound.missing:
             return self._intake(inbound, member, case, now)
 
         if inbound.is_group:
@@ -424,12 +429,13 @@ class Engine:
         folder.mkdir(parents=True, exist_ok=True)
         saved = 0
         caption_room = self._caption_room(case_id, inbound.text)
-        repeats = []
+        repeats, bad = [], 0
         known = self._fingerprints(case_id)
         for name, data in inbound.attachments:
             photo = normalize_photo(data)
             if photo is None:
-                continue                                    # not an image we can read: ignored quietly
+                bad += looks_like_image(data)               # a broken photo is mentioned; a PDF or note is not
+                continue
             print_ = (photo_fingerprint(photo["image"]), photo["image"].size)
             twin = next((n for n, (f, size) in known if size == print_[1] and bin(f ^ print_[0]).count("1") <= 3), None)
             if twin is not None:                            # the same photo again: nothing new in it
@@ -448,7 +454,14 @@ class Engine:
             known.append((number, print_))
             self._prints[str(path)] = print_
             saved += 1
+        unreadable = inbound.missing + bad
+        if unreadable:
+            note = Outbound(inbound.chat_id, "I couldn't open one of the photos. Could you send it again?"
+                            if unreadable == 1 else
+                            f"I couldn't open {unreadable} of the photos. Could you send them again?")
         if not saved:
+            if unreadable:
+                return [note]
             if repeats:
                 which = ", ".join(f"photo {n}" for n in sorted(set(repeats)) if n)
                 return [Outbound(inbound.chat_id, f"I already have that one ({which}), so nothing new was added."
@@ -465,7 +478,7 @@ class Engine:
                                 "20 minutes.")
         context["burst"] = burst
         self._save(inbound.chat_id, context)
-        return out
+        return out + ([note] if unreadable else [])
 
     def tick(self, now: datetime | None = None) -> list[Outbound]:
         """Things that happen later. Call every few seconds."""
@@ -1068,6 +1081,13 @@ def yes_or_no(low: str) -> tuple[bool, bool]:
     yes = all(t in YES_WORDS | FILLER_WORDS for t in tokens) and any(t in YES_WORDS for t in tokens)
     no = all(t in NO_WORDS | FILLER_WORDS for t in tokens) and any(t in NO_WORDS for t in tokens)
     return yes, no
+
+
+def looks_like_image(data: bytes) -> bool:
+    """JPEG, PNG, GIF, WebP or HEIC by its first bytes."""
+    head = data[:16] if data else b""
+    return (head.startswith((b"\xff\xd8", b"\x89PNG", b"GIF8")) or head[8:12] == b"WEBP"
+            or head[4:8] == b"ftyp")
 
 
 def photo_fingerprint(image) -> int:

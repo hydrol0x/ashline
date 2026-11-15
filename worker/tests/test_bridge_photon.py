@@ -109,3 +109,21 @@ def test_group_chat_agent_events_and_unknown_spaces(bridge):
     b.send([Outbound("space-never-seen", "hello")])                             # nothing to address it with
     assert projects.sent == []
     assert parts_of(NS(type="text", text="x"))[0].text == "x"
+
+
+def test_download_retries_until_the_file_is_ready(bridge, monkeypatch):
+    import ashline.bridge_photon as bp
+    monkeypatch.setattr(bp, "DOWNLOAD_WAIT", 0)
+    b, projects = bridge
+    calls = []
+
+    def flaky(request):
+        calls.append(1)
+        if len(calls) < 3:
+            raise RuntimeError("attachment not ready")
+        return jpeg()
+
+    projects.download_attachment = flaky
+    assert b.download("att-1") and len(calls) == 3
+    projects.download_attachment = lambda request: (_ for _ in ()).throw(RuntimeError("gone"))
+    assert b.download("att-2") is None

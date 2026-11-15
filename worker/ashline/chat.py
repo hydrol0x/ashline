@@ -384,7 +384,10 @@ class Engine:
         if member["state"]["step"] == "use_scan":
             scan = member["state"].get("scan") or {}
             later = member["state"].get("later")
-            if text.lower().strip(" .!") in ("yes", "y", "ok", "okay", "sure", "yes please", "use it"):
+            answer = scan_answer(text)
+            if answer is None:                              # not clearly yes or no: ask again, don't guess
+                return [Outbound(inbound.chat_id, "Should I use the scan as a starting point? Yes or no is fine.")]
+            if answer:
                 # The aerial photo has to be from before the fire, so this one date is asked now.
                 self.store.set_member(member["member_id"], state={"step": "loss_date", "scan": scan, "later": later})
                 return [Outbound(inbound.chat_id, "When did it happen? A month and year is enough. It lets me use an "
@@ -480,8 +483,11 @@ class Engine:
         except Exception:                                   # the scan index is a bonus: never fail on it
             found = {"found": False}
         if found.get("found"):
-            self.store.set_member(member["member_id"], state={"step": "use_scan", "later": True, "scan": {
-                k: found.get(k) for k in ("sid", "lat", "lon", "homes_listing_id", "original_created")}})
+            scan = {k: found.get(k) for k in ("sid", "lat", "lon", "homes_listing_id", "original_created")}
+            self.store.set_member(member["member_id"], state={"step": "use_scan", "later": True, "scan": scan})
+            context = self._context(chat_id)
+            context["offered_scan"] = scan                  # "use the scan" still works after a no
+            self._save(chat_id, context)
             when = _month_year(found.get("original_created"))
             size = f" with {found['room_count']} rooms" if found.get("room_count") else ""
             return [Outbound(chat_id, f"Saved the address. I found a 3D scan of it{' from ' + when if when else ''}{size}. "
@@ -1314,6 +1320,12 @@ class Engine:
         cause = self._set_cause(case, chat_id, text)
         if cause is not None:
             return cause
+        offered = self._context(chat_id).get("offered_scan")
+        if offered and owner and re.search(r"\b(use (it|the scan|that scan|the 3d scan)|starting point|start from the scan)\b", low) \
+                and not re.search(r"\b(don'?t|do not|no)\b", low):
+            self.store.set_member(member["member_id"], state={"step": "loss_date", "scan": offered, "later": True})
+            return [Outbound(chat_id, "When did it happen? A month and year is enough. It lets me use an aerial photo "
+                                      "of the home from before it. You can say skip.")]
         said = ADDRESS_CMD.fullmatch(text.strip())
         address = said.group("addr") if said else (text.strip() if ADDRESS.fullmatch(text.strip()) else None)
         if address and owner:
@@ -1720,6 +1732,17 @@ FILLER_WORDS = {"it's", "its", "it", "the", "is", "a", "they're", "theyre", "are
 
 def _cap(text: str) -> str:
     return text[:1].upper() + text[1:]
+
+
+def scan_answer(text: str) -> bool | None:
+    """Yes / no to 'use the scan as a starting point?', in the family's own words. None when unclear."""
+    low = text.lower().strip()
+    if re.search(r"\b(no|nope|nah|skip|don'?t|do not|not now|later|leave it)\b", low):
+        return False
+    if re.match(r"(yes|yeah|yep|yup|sure|ok|okay|y|please|go ahead|do it|sounds good|absolutely|of course)\b", low) \
+            or re.search(r"\b(use it|use the scan|starting point|start from it)\b", low):
+        return True
+    return None
 
 
 def yes_or_no(low: str) -> tuple[bool, bool]:

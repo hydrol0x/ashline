@@ -826,3 +826,20 @@ def test_an_address_with_a_scan_offers_it_without_repeating_setup(fam):
     maya = fam.say(MAYA, "1 Elm St, Austin, TX")                                     # only the owner can set it
     assert not any(o.text.startswith("Saved the address") for o in maya)
     assert fam.store.get_case(fam.case_id)["address"].startswith("632 N Detroit")
+
+
+@pytest.mark.parametrize("reply,used", [("yes! use it as a starting point'", True), ("yes, use it as a starting point", True),
+                                        ("sure", True), ("no thanks", False), ("skip", False)])
+def test_scan_offer_understands_natural_answers(fam, reply, used):
+    fam.engine.lookup = lambda address: {"found": True, "sid": "abc", "room_count": 9, "original_created": "2026-10-01"}
+    fam.say(MOM, "632 N Detroit St, Los Angeles, CA 90036")
+    out = fam.say(MOM, reply)
+    assert out[0].text.startswith("When did it happen?") == used
+
+
+def test_unclear_scan_answer_is_asked_again_and_use_the_scan_works_later(fam):
+    fam.engine.lookup = lambda address: {"found": True, "sid": "abc", "room_count": 9, "original_created": "2026-10-01"}
+    fam.say(MOM, "632 N Detroit St, Los Angeles, CA 90036")
+    assert "Yes or no is fine" in fam.say(MOM, "hmm what does that mean")[0].text
+    fam.say(MOM, "no")
+    assert fam.say(MOM, "actually, use the scan")[0].text.startswith("When did it happen?")

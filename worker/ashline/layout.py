@@ -31,7 +31,10 @@ from pathlib import Path
 from shapely.geometry import LineString, Point, Polygon
 
 from . import config
+from .pricing import in_use
 from .rooms import tidy_room
+
+BASIS_WORDS = {"family": "yours", "paid": "paid", "online": "online", "estimate": "estimate"}   # which price a pin shows
 
 CAMERA_HEIGHT = 1.43            # metres above the floor: what scan tripods measured at (1.41-1.45) when no floor height is known
 DOOR_REACH = 0.2                # metres: a line of sight this close to a doorway counts as passing through it
@@ -484,7 +487,8 @@ def build(case_id: str, store, drawn: dict | None = None) -> dict:
         pin = {"id": item["item_id"], "label": item["label"], "category": item.get("category") or "other",
                "status": item["status"], "qty": item.get("qty") or 1,
                "value": round(float(item.get("price_mid") or 0) * (item.get("qty") or 1)),
-               "room": tidy_room(item.get("room_label")) or "", "photo": bool(item.get("photo_id") and bbox)}
+               "room": tidy_room(item.get("room_label")) or "", "photo": bool(item.get("photo_id") and bbox),
+               "basis": BASIS_WORDS.get(in_use(item), "")}
         if camera and bbox and len(bbox) == 4:
             room_id = camera.get("room") or item.get("room_id")
             same_floor = [o for rid, o in outlines.items() if floor_of.get(rid) == camera.get("floor")]

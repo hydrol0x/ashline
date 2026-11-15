@@ -120,8 +120,9 @@ line as the one photographed in the dining room.
 
 ## Plan of the home
 
-`/p/<token>/plan` (linked from the inventory page, or `map` in the chat) shows the home from above
-with a dot where each item was recorded. Tap a room to list what was in it, tap a dot for the item.
+`/p/<token>/plan` (linked from the inventory page, or `map` in the chat) shows the home from above.
+Each room carries a count and the page lists the rooms with what they held; tap a room and its
+things appear as dots where they were recorded, tap a dot for the item.
 
 - With a 3D scan, the rooms are the scan's own outlines, with its doorways, and each item is placed
   where it stood on the floor, worked out from the panorama it was seen in (`layout.py`). An item is
@@ -145,6 +146,11 @@ case store on every request, so it is always current. It shows the meter (how mu
 still requires is documented, split into evidence-backed, from memory and waiting for an OK), room
 filters, an item grid with the crop from the original photo, and a detail sheet with every sighting
 of the item. The owner can download the spreadsheet (XLSX or CSV) and the PDF for the insurer.
+
+An item can have up to three prices at once: what the family paid (a matched card purchase), what
+it sells for online today, and the rough estimate. The strongest is the item's price; the item
+sheet shows all of them and which is in use, and the exports carry it as the basis of cost. A
+price the family types in beats all three.
 
 Prices are replacement-cost estimates with a range (`pricing.py`). The range comes from
 `eval/calibration.json` once that has been measured; until then it is labelled a rough allowance

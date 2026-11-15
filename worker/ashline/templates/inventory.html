@@ -296,6 +296,7 @@
   .editor-field { display: flex; align-items: center; margin-top: 12px; background: #fff; border: 1.5px solid var(--rule); border-radius: 12px; padding: 0 12px; }
   .editor-field:focus-within { border-color: var(--ink); }
   .editor-field .prefix { color: var(--muted); margin-right: 4px; font-size: 17px; font-weight: 600; }
+  .editor-field select { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; padding: 13px 0; font: inherit; font-size: 17px; font-weight: 600; }
   .editor-field input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; padding: 13px 0; font-size: 17px; font-weight: 600; }
   .editor-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
   .editor-buttons .btn { min-width: 96px; }
@@ -964,6 +965,32 @@
       act(row, 'Fix name', 'quiet', function () { edit('What is it?', 'Be as specific as you can, e.g. "Pottery Barn arc floor lamp".', d.label, 'text', 'rename'); });
       act(row, 'Quantity', 'quiet', function () { edit('How many were there?', null, d.qty, 'qty', 'qty'); });
       act(row, 'Set price', 'quiet', function () { edit('What does one cost to buy new?', 'Your number replaces the estimate and is marked as set by the family.', d.price_mid ? Math.round(d.price_mid) : '', 'money', 'price'); });
+      var others = chips.map(function (c) { return c.dataset.room; }).filter(function (r) { return r && r !== '__removed' && r !== d.room; });
+      if (others.length) act(row, 'Move to another room', 'quiet', function () {   // a select of the home's rooms
+        editor.innerHTML = '';
+        var label = el('label', 'Which room was it in?', 'editor-label'), pickBox = el('select'), msg = el('p', '', 'error');
+        label.htmlFor = pickBox.id = 'move-room'; msg.hidden = true;
+        others.forEach(function (r) { var o = el('option', r); o.value = r; pickBox.appendChild(o); });
+        var wrap = el('div', null, 'editor-field'); wrap.appendChild(pickBox);
+        var buttons = el('div', null, 'editor-buttons'), save = el('button', 'Move', 'btn'), cancel = el('button', 'Cancel', 'btn quiet');
+        save.type = 'submit'; cancel.type = 'button';
+        function closeEditor() { editor.hidden = true; main.hidden = false; row.hidden = false; }
+        cancel.addEventListener('click', closeEditor); editor.closeEditor = closeEditor;
+        buttons.appendChild(cancel); buttons.appendChild(save);
+        editor.appendChild(label); editor.appendChild(wrap); editor.appendChild(msg); editor.appendChild(buttons);
+        editor.onsubmit = function (e) {
+          e.preventDefault(); save.disabled = true; save.textContent = 'Moving…';
+          post('/item/' + id, { action: 'room', value: pickBox.value }).then(function () {
+            dirty++; delete cache[id];
+            var c = card(id); if (c) c.dataset.room = pickBox.value;
+            flash = '✓ Moved to ' + pickBox.value; open(id);
+          }).catch(function (e) {
+            save.disabled = false; save.textContent = 'Move';
+            msg.textContent = (e.status === 400 && e.detail) || 'That didn’t save. Check your connection and try again.'; msg.hidden = false;
+          });
+        };
+        main.hidden = true; row.hidden = true; editor.hidden = false; pickBox.focus();
+      });
       sheet.appendChild(main); sheet.appendChild(row);
       if (DISASTER === 'storm' && d.cause) {             // move an item between the flood and the wind claim
         var pick = el('div', null, 'claim-pick');

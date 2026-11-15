@@ -474,7 +474,7 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
         body = await json_body(request)
         action, case_id = body.get("action"), case["case_id"]
         before = {k: item.get(k) for k in ("status", "label", "qty", "price_low", "price_mid", "price_high",
-                                           "price_source", "price_ref", "cause")}
+                                           "price_source", "price_ref", "cause", "room_label")}
         if action in ("confirm", "remove", "restore"):
             status = {"confirm": "confirmed", "remove": "rejected", "restore": "suggested"}[action]
             store.set_item_status(case_id, item_id, status)
@@ -482,6 +482,11 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
             store.update_item(case_id, item_id, cause=body["value"])
         elif action == "rename" and str(body.get("value") or "").strip():
             store.update_item(case_id, item_id, label=str(body["value"]).strip()[:120])
+        elif action == "room":
+            rooms = {tidy_room(i.get("room_label")) for i in store.get_items(case_id)} - {None, ""}
+            if str(body.get("value") or "") not in rooms:
+                raise HTTPException(status_code=400, detail="Pick one of the rooms on this list.")
+            store.update_item(case_id, item_id, room_label=str(body["value"]))
         elif action == "qty":
             typed = str(body.get("value") if body.get("value") is not None else "").strip()
             if not re.fullmatch(r"\d{1,3}", typed) or not 1 <= int(typed) <= 999:

@@ -13,6 +13,7 @@ models_index.csv
 *costar*kit*.zip
 mp_out/
 output/
+ashline-sample-data/
 
 # Python
 __pycache__/

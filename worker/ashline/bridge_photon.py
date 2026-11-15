@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import time
+import uuid
 from datetime import datetime, timedelta, timezone
 
 from . import config
@@ -52,6 +53,19 @@ def parts_of(content) -> list:
     if getattr(content, "type", None) == "group":
         return [unwrap(p) for p in content.parts]
     return [content]
+
+
+def multipart_related(data: bytes, content_type: str, filename: str) -> tuple[bytes, str]:
+    """Body for Photon's uploadAttachment: exactly two parts, JSON metadata then the file bytes.
+
+    Per the OpenAPI spec, the JSON holds contentType, sizeBytes (must equal the file length) and an
+    optional filename. Returns (body, the Content-Type header value with its boundary).
+    """
+    boundary = f"ashline-{uuid.uuid4().hex}"
+    meta = json.dumps({"filename": filename, "contentType": content_type, "sizeBytes": len(data)})
+    body = (f"--{boundary}\r\nContent-Type: application/json\r\n\r\n{meta}\r\n"
+            f"--{boundary}\r\nContent-Type: {content_type}\r\n\r\n").encode() + data + f"\r\n--{boundary}--\r\n".encode()
+    return body, f"multipart/related; boundary={boundary}"
 
 
 class PhotonBridge:
@@ -160,11 +174,12 @@ class PhotonBridge:
         kind = {"jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png", "pdf": "application/pdf",
                 "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 "csv": "text/csv"}.get(Path(path).suffix.lstrip(".").lower(), "application/octet-stream")
+        body, content_type = multipart_related(data, kind, Path(path).name)
         attachment = self.photon.projects.upload_attachment(UploadAttachmentInput.model_validate({
-            "path": {"id": self.project}, "body": data,
-            "headers": {"content-type": kind, "content-length": str(len(data)),
+            "path": {"id": self.project}, "body": body,
+            "headers": {"content-type": content_type, "content-length": str(len(body)),
                         "idempotency-key": f"ashline-upload:{Path(path).name}:{time.time_ns()}"}}))
-        return attachment.id
+        return unwrap(attachment).id
 
     # ---------------------------------------------------------------- loop
     def run(self, poll_seconds: float = POLL_SECONDS) -> None:

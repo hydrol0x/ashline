@@ -315,9 +315,9 @@ class Engine:
                    f"{self.number}, then send any photos from inside the house, from any year.")
         return [
             Outbound(inbound.chat_id,
-                     f"Your code is {case['invite_code']}. Make a group chat called \"{short}\", add family "
-                     f"who have photos, and have each of them text {case['invite_code']} to this number once. "
-                     "Or forward them the next message. You can also send me photos yourself, any time."),
+                     f"Your code is {case['invite_code']}. Anyone in the family who has photos can text "
+                     f"{case['invite_code']} to this number to join; just forward them the next message. "
+                     "Everything they send goes into the same list. You can also send me photos yourself, any time."),
             Outbound(inbound.chat_id, forward),
         ]
 

@@ -91,7 +91,7 @@ def test_owner_onboarding_takes_three_messages():
     assert texts(f.say(MOM, "skip")) == ["Which rooms did it have? A rough list is fine."]
     out = f.say(MOM, "living room, kitchen, 3 bedrooms and a garage")
     code = re.search(r"HOME-\d{4}", out[0].text).group(0)
-    assert out[0].text.startswith("Thank you. Your code is ") and f'Make a group chat called "Rivera home"' in out[0].text
+    assert out[0].text.startswith("Thank you. Your code is ") and f"text {code} to this number to join" in out[0].text
     assert out[1].text == (f"We're using Ashline to rebuild the Rivera home inventory. Text {code} to +1 555 010 0000, "
                            "then send any photos from inside the house, from any year.")
     case = f.store.get_case(f.store.get_member(MOM)["case_id"])

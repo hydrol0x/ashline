@@ -631,7 +631,9 @@ def item_picture(store: Store, case_id: str, item: dict):
 
 
 def auto_enabled() -> bool:
-    return (config.env("ASHLINE_AUTO_PRICE") or "on").lower() not in ("off", "0", "no", "false")
+    """Off unless asked for: the lookups compete with photo reading for the same model limits,
+    so they run when someone asks (`ashline price-check`, or "look up the price" in chat)."""
+    return (config.env("ASHLINE_AUTO_PRICE") or "off").lower() in ("on", "1", "yes", "true")
 
 
 def auto_price(case_id: str, store: Store, item_ids: list[int] | None = None, searcher=None,

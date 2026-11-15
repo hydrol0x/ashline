@@ -27,6 +27,7 @@ def family(searcher, minimum="50"):
 
 
 def test_new_items_are_looked_up_after_a_burst_and_mentioned_once(monkeypatch):
+    monkeypatch.setenv("ASHLINE_AUTO_PRICE", "on")
     monkeypatch.setenv("ASHLINE_AUTO_PRICE_MIN", "50")
     searcher = Searcher()
     f = family(searcher)
@@ -49,6 +50,7 @@ def test_new_items_are_looked_up_after_a_burst_and_mentioned_once(monkeypatch):
 
 
 def test_small_items_and_prices_the_family_trusts_are_left_alone(monkeypatch):
+    monkeypatch.setenv("ASHLINE_AUTO_PRICE", "on")
     monkeypatch.setenv("ASHLINE_AUTO_PRICE_MIN", "300")
     searcher = Searcher()
     f = family(searcher)
@@ -88,12 +90,14 @@ def test_a_found_price_far_from_the_estimate_is_not_used_unasked():
 
 def test_it_can_be_turned_off_and_does_nothing_without_a_key(monkeypatch):
     searcher = Searcher()
+    monkeypatch.delenv("ASHLINE_AUTO_PRICE", raising=False)
+    assert not price_search.auto_enabled()                            # it runs only when switched on
     monkeypatch.setenv("ASHLINE_AUTO_PRICE", "off")
     f = family(searcher)
     f.say(MAYA, photos=[photo(640)])
     f.wait()
     assert searcher.asked == []
-    monkeypatch.delenv("ASHLINE_AUTO_PRICE")
+    monkeypatch.setenv("ASHLINE_AUTO_PRICE", "on")
     f.engine.searcher = None                                           # no searcher given and no key in the test environment
     f.say(MAYA, photos=[photo(656)])
     f.wait()

@@ -119,14 +119,14 @@ line as the one photographed in the dining room.
   set by its count. The price is the middle of the kept listings (the lower middle one for two),
   with the lowest and highest as the range. Fewer than two kept listings is not enough evidence and
   nothing is recorded, unless the one listing is for a brand and model read in the photo. If a step
-  fails, the older single search is used. Nothing here was run against the live API yet: it is
-  tested with fake clients only.
+  fails, the older single search is used. It has run against the live API on a
+  handful of items.
 - Unasked, a found price is used when two kept listings agree within 2x, whatever the estimate. A
   lone listing far from the estimate (over 3x either way) is not used, unless the estimate is the
-  fixed category figure. The 12 dearest items from $60 are looked up after each batch
+  fixed category figure. When switched on, the 6 dearest items from $60 are looked up after each batch
   (`ASHLINE_AUTO_PRICE_TOP`, `ASHLINE_AUTO_PRICE_MIN`), three at a time; furniture, electronics and
   appliances at the fixed category figure are always looked up. The chat mentions once what was
-  found. Turn it off with `ASHLINE_AUTO_PRICE=off`. `ashline price-check --case demo --top 20` does
+  found. It is off unless `ASHLINE_AUTO_PRICE=on` is set, because the lookups compete with photo reading for the same model limits. `ashline price-check --case demo --top 20` does
   the same on request. The item sheet's Amazon and Google Shopping links search the saved shopper's
   query when there is one.
 - A receipt, invoice or order page sent in the chat with the word "receipt" (a photo, a screenshot

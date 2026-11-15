@@ -174,6 +174,7 @@ class Engine:
         self.telegram_handle = f"@{handle}" if handle else "the Ashline bot"        # the Telegram bridge fills this in
         self.batch_seconds = batch_seconds if batch_seconds is not None else int(
             config.env("ASHLINE_BATCH_SECONDS") or BATCH_SECONDS)
+        self.video_frames = int(config.env("ASHLINE_VIDEO_FRAMES") or 14)     # stills kept from one video
 
     # ------------------------------------------------------------ helpers
     def link(self, case: dict, member: dict) -> str:
@@ -447,7 +448,8 @@ class Engine:
         caption_room = self._caption_room(case_id, inbound.text)
         repeats, bad = [], 0
         known = self._fingerprints(case_id)
-        for name, data in inbound.attachments:
+        attachments, clips, video_note = self._expand_videos(case_id, inbound.attachments)
+        for name, data in attachments:
             photo = normalize_photo(data)
             if photo is None:
                 bad += looks_like_image(data)               # a broken photo is mentioned; a PDF or note is not
@@ -464,7 +466,7 @@ class Engine:
             self.store.add_photos(case_id, [{
                 "photo_id": photo_id, "path": str(path), "source": "photo", "number": number,
                 "taken": photo["taken"], "captured": photo["taken"], "status": "queued", "chat_id": inbound.chat_id,
-                "room_label": caption_room,
+                "room_label": caption_room, "batch_id": clips.get(name),
                 "added_by": member.get("name") or inbound.sender_name or "family"}])
             burst["photos"].append(photo_id)
             known.append((number, print_))
@@ -476,6 +478,8 @@ class Engine:
                             if unreadable == 1 else
                             f"I couldn't open {unreadable} of the photos. Could you send them again?")
         if not saved:
+            if video_note:
+                return [Outbound(inbound.chat_id, video_note)]
             if unreadable:
                 return [note]
             if repeats:
@@ -487,14 +491,39 @@ class Engine:
         out = []
         if not burst["acked"]:                              # once per burst
             burst["acked"] = True
-            out.append(Outbound(inbound.chat_id, "Got it, looking through them." if len(burst["photos"]) > 1 or saved > 1
+            out.append(Outbound(inbound.chat_id, "Got the video, looking through it." if clips else
+                                "Got it, looking through them." if len(burst["photos"]) > 1 or saved > 1
                                 else "Got it, looking at it."))
             if len(burst["photos"]) >= 500:
                 out[-1].text = ("That's a lot, thank you. I'll work through them and send a summary in about "
                                 "20 minutes.")
         context["burst"] = burst
         self._save(inbound.chat_id, context)
-        return out + ([note] if unreadable else [])
+        return out + ([note] if unreadable else []) + ([Outbound(inbound.chat_id, video_note)] if video_note else [])
+
+    def _expand_videos(self, case_id: str, attachments: list) -> tuple[list, dict, str | None]:
+        """Videos become stills that go through the photo pipeline.
+
+        Returns (attachments with each video replaced by its stills, {still name: clip id}, a note
+        to send when a video could not be read).
+        """
+        from . import video
+        out, clips, note = [], {}, None
+        for name, data in attachments:
+            if not video.is_video(name, data):
+                out.append((name, data))
+                continue
+            try:
+                frames = video.frames_as_attachments(name, data, self.video_frames)
+            except video.VideoError as exc:
+                note = f"I couldn't open the video. {exc}" if "ffmpeg" in str(exc) else \
+                    "I couldn't open the video. Could you send it again, or send a few photos instead?"
+                continue
+            clip = f"clip-{self.store.next_photo_number(case_id)}"       # unique: numbers only go up
+            for frame_name, frame in frames:
+                clips[frame_name] = clip
+                out.append((frame_name, frame))
+        return out, clips, note
 
     def tick(self, now: datetime | None = None, owns=None) -> list[Outbound]:
         """Things that happen later. Call every few seconds.

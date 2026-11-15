@@ -169,6 +169,7 @@ def _run(args, parser) -> None:
 
 SIM_HELP = """Type a message and press enter. Lines starting with / are simulator commands:
   /photo a.jpg b.jpg     send photos
+  /video walk.mp4        send a video (needs ffmpeg)
   /wait [seconds]        let time pass (default: just past the photo quiet window) and run what is due
   /as +15550002 Maya     become another family member
   /group rivera          talk in a group chat called "rivera"   (/group off: back to 1:1)
@@ -215,7 +216,7 @@ def simulate(phone: str, name: str | None, url: str | None, lines=None, out=prin
             parts = line.split()
             offset += timedelta(seconds=float(parts[1]) if len(parts) > 1 else engine.batch_seconds + 1)
             show(engine.tick(now()))
-        elif line.startswith("/photo"):
+        elif line.startswith(("/photo", "/video")):
             files = []
             for path in line.split()[1:]:
                 try:

@@ -185,6 +185,7 @@ class Engine:
         self.receipt_reader = None                          # reads receipts and order pages; built from the key when first needed
         self.searcher = None                                # looks prices up online; built from the key when first needed
         self.background = True                              # False runs the after-work (price lookups) inline, for tests
+        self._running: set = set()                          # (job, case) pairs with a background thread at work
 
     # ------------------------------------------------------------ helpers
     def link(self, case: dict, member: dict) -> str:
@@ -763,8 +764,24 @@ class Engine:
                 print(f"ashline: automatic price lookup failed ({exc})")
         if not self.background:
             return work(self.store)
+        self._in_background(("prices", case_id), work)
+
+    def _in_background(self, job: tuple, work) -> None:
+        """Run `work(store)` on a thread with its own database connection. One job of a kind per
+        case at a time: a second burst of photos does not start a second, overlapping run."""
+        if job in self._running:
+            return
+        self._running.add(job)
         import threading
-        threading.Thread(target=lambda: work(type(self.store)(self.store.path)), daemon=True).start()
+
+        def run():
+            store = type(self.store)(self.store.path)
+            try:
+                work(store)
+            finally:
+                store.db.close()
+                self._running.discard(job)
+        threading.Thread(target=run, daemon=True).start()
 
     def _price_news(self, case: dict, owns=None) -> list[Outbound]:
         """Tell the family, once, which prices the agent firmed up online."""
@@ -776,7 +793,7 @@ class Engine:
         by_chat: dict[str, list[dict]] = {}
         later = []
         for row in news:
-            chat = row.get("chat_id") or (owner or {}).get("dm_chat")
+            chat = row.get("chat_id") or (owner or {}).get("dm_chat") or (owner or {}).get("phone")
             if chat and owns and not owns(chat):
                 later.append(row)                           # another bridge's chat: left for that bridge to say
             elif chat:
@@ -800,14 +817,12 @@ class Engine:
         from . import layout, sketch_claude
         if not sketch_claude.available() or (layout.load_plan(case_id) or {}).get("rooms"):
             return
-        import threading
-
-        def work():
+        def work(store):
             try:
-                sketch_claude.refresh(case_id, type(self.store)(self.store.path))
+                sketch_claude.refresh(case_id, store)
             except Exception as exc:                        # the plan falls back to the simple sketch
                 print(f"ashline: plan sketch not drawn ({exc})")
-        threading.Thread(target=work, daemon=True).start()
+        self._in_background(("sketch", case_id), work)
 
     def _expand_videos(self, case_id: str, attachments: list) -> tuple[list, dict, str | None]:
         """Videos become stills that go through the photo pipeline.
@@ -952,8 +967,9 @@ class Engine:
                                           "try again when you send the next one.")]
             # A room the family named with the photo wins over the detector's guess, so a chair in the
             # bedroom is never merged with the one in the kitchen.
+            separate = any("photo_room" in i for i in items)        # the detector says where the photo was taken
             room = photo.get("room_label") or next(
-                (i.get("photo_room") or i.get("room") for i in items if i.get("photo_room") or i.get("room")), None)
+                (i[key] for key in (("photo_room",) if separate else ("room",)) for i in items if i.get(key)), None)
             self.store.set_photo(case_id, photo["photo_id"], status="done", room_label=room)
             photo = {**photo, "room_label": room}
             for item in items:
@@ -1115,8 +1131,33 @@ class Engine:
         return [Outbound(chat_id, f"Same {noun}? 1 = same, 2 = different.{more}", image=str(image))]
 
     # ------------------------------------------------------- pending answers
+    def _answer_paid(self, chat_id: str, member: dict, case: dict, low: str):
+        """A reply to "use what you paid as the price?" or "add the other things on the receipt?".
+
+        Asked most recently, so it is answered first: otherwise a "yes" meant for the prices
+        would be taken by an older open question, such as "same item?".
+        """
+        if member["role"] != "owner":
+            return None
+        context = self._context(chat_id)
+        adds, pending = context.get("receipt_adds"), context.get("bank")
+        if adds and low in ("add", "add them", "add it", "yes add", "add those", "add all"):
+            return self._receipt_add(case, chat_id, member, adds)
+        if pending:
+            yes, no = yes_or_no(low)
+            if yes or low in ("use them", "use those", "use bank prices", "ok", "okay"):
+                return self._bank_apply(case, chat_id, member, pending)
+            context.pop("bank", None)                       # anything else: the offer lapses
+            self._save(chat_id, context)
+            if no or low in ("skip", "leave them", "not now"):
+                return [Outbound(chat_id, "Okay, the prices stay as they are.")]
+        return None
+
     def _answer_pending(self, inbound: Inbound, member: dict, case: dict, text: str):
         case_id, low = case["case_id"], text.lower().strip(" .!")
+        paid = self._answer_paid(inbound.chat_id, member, case, low)
+        if paid is not None:
+            return paid
         state = member["state"]
         if state.get("step") == "coverage" and member["role"] == "owner" and not inbound.is_group:
             self.store.set_member(member["member_id"], state={k: v for k, v in state.items() if k != "step"})
@@ -1185,19 +1226,6 @@ class Engine:
             return [Outbound(chat_id, "Okay. I'll stay quiet until you write again.")]
         if low in ("list", "show me everything", "show everything", "the list", "link"):
             return [Outbound(chat_id, f"Here is everything so far: {self.link(case, member)}")]
-        adds = self._context(chat_id).get("receipt_adds") if owner else None
-        if adds and low in ("add", "add them", "add it", "yes add", "add those", "add all"):
-            return self._receipt_add(case, chat_id, member, adds)
-        pending = self._context(chat_id).get("bank") if owner else None
-        if pending:                                         # purchases were proposed as prices: use them?
-            yes, no = yes_or_no(low)
-            if yes or low in ("use them", "use those", "use bank prices", "ok", "okay"):
-                return self._bank_apply(case, chat_id, member, pending)
-            context = self._context(chat_id)
-            context.pop("bank", None)
-            self._save(chat_id, context)
-            if no or low in ("skip", "leave them", "not now"):
-                return [Outbound(chat_id, "Okay, the prices stay as they are.")]
         if re.fullmatch(r"(check |look (at|in|through) |search )?(my |the |our )?(bank|card|credit card|purchases?|statements?)"
                         r"( records?| statements?| purchases?)?", low):
             return self._bank(case, chat_id, member)
@@ -1365,8 +1393,9 @@ class Engine:
             text = "Undone: those prices are back to the estimates."
         elif action.startswith("item."):                  # a change made on the inventory page
             before = payload["before"]
+            prices = ("price_low", "price_mid", "price_high", "price_source", "price_ref") if action == "item.price" else ()
             self.store.update_item(case_id, payload["item_id"], **{k: before[k] for k in (
-                "label", "qty", "price_low", "price_mid", "price_high", "price_source", "price_ref", "cause") if k in before})
+                "label", "qty", "cause") + prices if k in before})
             self.store.set_item_status(case_id, payload["item_id"], before["status"])
             text = "Undone: that item is back to how it was."
         else:

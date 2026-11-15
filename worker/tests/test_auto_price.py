@@ -44,6 +44,7 @@ def test_new_items_are_looked_up_after_a_burst_and_mentioned_once(monkeypatch):
     assert out.index(news[0]) > 0                                     # after the digest, not instead of it
     assert texts(f.wait(5)) == []                                     # said once
     # A lookup nobody asked for is not what "undo" reverses.
+    assert f.store.get_item(f.case_id, sofa["item_id"])["price_source"] == "web: Acme Home"      # the lookup did happen
     assert (f.store.last_event(f.case_id) or {}).get("action") != "item.price"
 
 
@@ -112,3 +113,12 @@ def test_the_photo_goes_to_the_search_model():
     assert "The photo above shows the item" in text["text"] and "blue velvet sofa" in text["text"]
     searcher.search("blue velvet sofa")                               # without a photo: plain text, as before
     assert isinstance(calls[1]["messages"][0]["content"], str)
+
+
+def test_news_is_handed_out_once_even_to_two_readers(tmp_path, monkeypatch):
+    monkeypatch.setattr(price_search.config, "case_dir", lambda case_id: tmp_path / case_id)
+    price_search.add_news("c1", [{"item_id": 1, "label": "sofa", "price": 1200, "retailer": "Acme", "chat_id": "a"}])
+    price_search.add_news("c1", [{"item_id": 2, "label": "lamp", "price": 190, "retailer": "LampCo", "chat_id": "a"}])
+    assert not list((tmp_path / "c1" / "price_news").glob("*.part"))          # nothing half-written is left visible
+    first, second = price_search.take_news("c1"), price_search.take_news("c1")
+    assert [row["item_id"] for row in first] == [1, 2] and second == []

@@ -267,7 +267,7 @@ def apply_matches(store, case_id: str, matches: list[dict], member_id: int | Non
         if not item or item.get("price_source") == "set by family":
             continue
         qty = int(item.get("qty") or 1)
-        each = nice(purchase["amount"] / qty) if qty > 1 else round(purchase["amount"], 2)
+        each = round(purchase["amount"] / qty, 2)           # exact: it is what was paid, not an estimate
         before.append({"item_id": item["item_id"], **{k: item.get(k) for k in (
             "price_low", "price_mid", "price_high", "price_source", "price_ref")}})
         record_price(store, case_id, item["item_id"], "paid", {

@@ -364,3 +364,53 @@ def test_the_item_sheet_shows_every_price_and_which_is_in_use(client):
     f.store.set_item_status(f.case_id, sofa["item_id"], "confirmed")
     row = next(r for r in export_rows(f.case_id, f.store) if "sofa" in r["item"])
     assert row["basis"] == "Online: current listings"
+
+
+def test_yes_to_the_prices_is_not_taken_by_an_older_same_item_question(client):
+    """Right after photos there is often an open "same item?" question; the yes is for the newest ask."""
+    f = Family().setup()
+    f.engine.bank = client
+    f.say(MAYA, photos=[photo(640)])
+    f.wait()
+    f.say(MAYA, photos=[photo(664)])                              # a second "sofa": Ashline asks whether it is the same
+    asked = texts(f.wait())
+    assert any("same" in t.lower() for t in asked)
+    assert f.store.get_questions(f.case_id)                       # that question is open
+    f.say(MOM, "check my bank")
+    out = texts(f.say(MOM, "yes"))
+    assert out[0].startswith("Done. ") and "the price you paid" in out[0]
+    sofa = next(i for i in f.store.get_items(f.case_id) if i["label"] == "blue velvet sofa")
+    assert sofa["price_source"] == "bank record: IKEA"
+    assert f.store.get_questions(f.case_id)                       # and the older question is still there to answer
+
+
+def test_what_was_paid_for_several_is_split_exactly_not_rounded():
+    f = Family().setup()
+    item = f.store.add_item(f.case_id, {"label": "oak bar stool", "category": "furniture", "qty": 3, "room_label": "Kitchen"},
+                            source="voice")
+    f.store.update_item(f.case_id, item, price_mid=250, price_low=200, price_high=300, price_source="claude estimate")
+    purchase = {"id": "p9", "date": "2024-05-01", "amount": 828.0, "description": "3 x oak bar stool", "merchant": "IKEA"}
+    assert bank.apply_matches(f.store, f.case_id, [{"item": f.store.get_item(f.case_id, item), "purchase": purchase}]) == 1
+    after = f.store.get_item(f.case_id, item)
+    assert after["price_mid"] == 276.0 and after["price_mid"] * after["qty"] == 828.0
+
+
+def test_undoing_a_rename_keeps_a_price_recorded_since(client):
+    from fastapi.testclient import TestClient
+
+    from ashline.web import create_app
+    f = Family().setup()
+    f.engine.bank = client
+    f.say(MOM, photos=[photo(640)])
+    f.wait()
+    sofa = next(i for i in f.store.get_items(f.case_id) if "sofa" in i["label"])
+    token = f.store.get_case(f.case_id)["owner_token"]
+    TestClient(create_app(lambda: f.store)).post(f"/p/{token}/item/{sofa['item_id']}", json={"action": "rename", "value": "navy sofa"})
+    renamed = f.store.last_event(f.case_id)
+    bank.apply_matches(f.store, f.case_id, [{"item": f.store.get_item(f.case_id, sofa["item_id"]), "purchase": {
+        "id": "p1", "date": "2024-03-12", "amount": 1149.0, "description": "sofa", "merchant": "IKEA"}}])
+    f.store.mark_undone(f.store.last_event(f.case_id)["event_id"])         # step over the bank event itself
+    assert renamed["action"].startswith("item.") and renamed["action"] != "item.price"
+    f.say(MOM, "undo")                                                      # undoes the rename
+    after = f.store.get_item(f.case_id, sofa["item_id"])
+    assert after["label"] == "blue velvet sofa" and after["price_source"] == "bank record: IKEA" and after["price_mid"] == 1149.0

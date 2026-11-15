@@ -448,7 +448,7 @@ def build(case_id: str, store, drawn: dict | None = None) -> dict:
             x, y, exact = floor_spot(camera, photo.get("face") or 1, bbox, _image_size(photo.get("path"), sizes),
                                      outlines.get(room_id), others=same_floor, doors=doors_of.get(room_id))
             px, py = to_page(x, y, camera.get("floor") or floor_of.get(room_id))
-            pins.append({**pin, "x": px, "y": py, "exact": exact, "room_id": room_id})
+            pins.append({**pin, "x": px, "y": py, "exact": exact, "room_id": room_id if room_id in outlines else None})
             continue
         room = (next((r for r in rooms if r["id"] == item.get("room_id")), None)
                 or by_name.get(pin["room"].lower()))

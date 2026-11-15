@@ -19,6 +19,7 @@ from PIL import Image, ImageChops, ImageFilter, ImageStat
 VIDEO_SUFFIXES = (".mp4", ".mov", ".m4v", ".webm", ".avi", ".mkv", ".3gp")
 SAMPLE_FPS = 2                  # candidate frames per second of video
 MAX_FRAMES = 14                 # stills kept from a clip of up to a minute; longer clips get as many per minute
+FFMPEG_SECONDS = 180            # a video that takes longer than this to read is given up on
 MAX_FRAMES_LONG = 40            # and never more than this, however long the walk-through
 MIN_DIFFERENCE = 9.0            # mean grey-level change needed to count as a new view (0-255)
 EMPTY_FRACTION = 0.35           # a frame with under this share of the clip's typical detail shows nothing
@@ -75,9 +76,12 @@ def extract_frames(video: str | Path, out_dir: str | Path, max_frames: int = MAX
     out_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp:
         # -noautorotate is NOT used: ffmpeg applies the phone's rotation so frames come out upright.
-        done = subprocess.run(
-            ["ffmpeg", "-v", "error", "-y", "-i", str(video), "-vf", f"fps={sample_fps}", "-q:v", "2",
-             str(Path(tmp) / "c-%05d.jpg")], capture_output=True, text=True)
+        try:
+            done = subprocess.run(
+                ["ffmpeg", "-v", "error", "-y", "-i", str(video), "-vf", f"fps={sample_fps}", "-q:v", "2",
+                 str(Path(tmp) / "c-%05d.jpg")], capture_output=True, text=True, timeout=FFMPEG_SECONDS)
+        except subprocess.TimeoutExpired:
+            raise VideoError("The video took too long to read. A shorter clip, or a few photos, will work.") from None
         candidates = sorted(Path(tmp).glob("c-*.jpg"))
         if done.returncode != 0 or not candidates:
             raise VideoError(f"Could not read the video: {(done.stderr or 'no frames found').strip()[:200]}")

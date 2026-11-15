@@ -43,6 +43,7 @@ def test_a_message_says_when_its_attachment_is_a_receipt():
     assert receipts.wanted("here's the receipt for the couch", files)
     assert receipts.wanted("Amazon order confirmation", files) and receipts.wanted("invoice", files)
     assert not receipts.wanted("thanksgiving 2019", files) and not receipts.wanted("receipt", [])
+    assert not receipts.wanted("these are in no particular order", files) and receipts.wanted("my amazon orders", files)
     assert receipts.wanted("", [("scan.pdf", b"%PDF-1.7 ...")])                 # a PDF is never a photo of the home
 
 

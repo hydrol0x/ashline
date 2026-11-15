@@ -12,8 +12,10 @@ closest match is used, and used or refurbished listings are excluded by the prom
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
+import time
 
 from . import config
 from .pricing import in_use, kept_price, money, nice, record_price
@@ -202,7 +204,6 @@ def price_check(case_id: str, store: Store | None = None, top: int = 20, searche
 AUTO_TOP = 6                    # items looked up after each batch of new items, most valuable first
 AUTO_MIN = 150.0                # only items estimated at this much or more (for the whole quantity)
 AUTO_TRUST = 3.0                # an unasked lookup is used only within this factor of the estimate, either way
-_news_lock = threading.Lock()
 
 
 def item_picture(store: Store, case_id: str, item: dict):
@@ -276,22 +277,30 @@ def _news_path(case_id: str):
 
 
 def add_news(case_id: str, results: list[dict]) -> None:
-    with _news_lock:
-        path = _news_path(case_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        waiting = json.loads(path.read_text()) if path.exists() else []
-        path.write_text(json.dumps(waiting + results))
+    """Keep results for the chat to mention. Each batch is its own file, written whole and then
+    renamed into place, so a reader in another process never sees half of one."""
+    folder = _news_path(case_id).parent / "price_news"
+    folder.mkdir(parents=True, exist_ok=True)
+    name = f"{time.time_ns()}-{os.getpid()}-{threading.get_ident()}"
+    part = folder / f"{name}.part"
+    part.write_text(json.dumps(results))
+    os.replace(part, folder / f"{name}.json")
 
 
 def take_news(case_id: str) -> list[dict]:
-    """Looked-up prices not yet mentioned in the chat. Each is returned once."""
-    with _news_lock:
-        path = _news_path(case_id)
-        if not path.exists():
-            return []
+    """Looked-up prices not yet mentioned in the chat. Each is returned once: a batch is claimed
+    by renaming it, which only one process can do."""
+    folder = _news_path(case_id).parent / "price_news"
+    waiting = []
+    for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
+        mine = path.with_suffix(f".taken-{os.getpid()}")
         try:
-            waiting = json.loads(path.read_text())
+            os.replace(path, mine)
+        except OSError:
+            continue                                        # another process took it first
+        try:
+            waiting += json.loads(mine.read_text())
         except ValueError:
-            waiting = []
-        path.unlink()
-        return waiting
+            pass
+        mine.unlink(missing_ok=True)
+    return waiting

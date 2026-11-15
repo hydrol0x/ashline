@@ -20,7 +20,9 @@ import re
 
 from . import config
 
-CAPTION = re.compile(r"\b(receipts?|invoices?|order (confirmation|page|history|summary)|orders?|proof of purchase|bill of sale)\b", re.I)
+# "order" alone is not enough: "in no particular order" is a caption too.
+CAPTION = re.compile(r"\b(receipts?|invoices?|order (confirmation|page|history|summary|details|receipt)|"
+                     r"(amazon|my|our|the) orders?|proof of purchase|bill of sale)\b", re.I)
 
 RECEIPT_SCHEMA = {
     "type": "object",

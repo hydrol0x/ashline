@@ -158,6 +158,16 @@ def test_build_draws_the_scan_with_a_pin_per_line(scanned):
     assert sofa not in {p["id"] for p in layout.build("c1", store)["pins"]}
 
 
+def test_a_thing_seen_from_a_room_the_scan_gives_no_outline_for_is_not_lost(scanned):
+    store, sofa, mixer, lost = scanned
+    plan = layout.scan_plan(MODEL)
+    plan["cameras"]["p1"]["room"] = "void"                       # the camera's room has no walls in the scan
+    layout.plan_path("c1").write_text(json.dumps(plan))
+    drawn = layout.build("c1", store)
+    pin = next(p for p in drawn["pins"] if p["id"] == sofa)
+    assert pin["x"] is not None and pin["room_id"] is None        # drawn, and counted as outside the rooms
+
+
 def test_the_drawing_is_not_mirrored(scanned):
     """The scan's y axis points up, a page's points down: a room at the top of the scan is drawn at the top."""
     store = scanned[0]

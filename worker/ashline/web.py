@@ -24,7 +24,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Response
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
-from . import config
+from . import config, disaster
 from .annotate import annotate, crop_item
 from .meter import DISCLAIMER, meter
 from .pricing import load_calibration, money, money_range
@@ -70,7 +70,7 @@ def _title(label: str) -> str:
     return label[:1].upper() + label[1:] if label else ""
 
 
-def item_view(item: dict, sightings: list[dict]) -> dict:
+def item_view(item: dict, sightings: list[dict], case: dict | None = None) -> dict:
     """What a card shows for one inventory line."""
     sources = [s["source"] for s in sightings]
     photo_like = sum(1 for s in sources if s in ("photo", "scan", "aerial"))
@@ -96,7 +96,29 @@ def item_view(item: dict, sightings: list[dict]) -> dict:
         "contributors": contributors,
         "created": item.get("created_at") or "",
         "needs_proof": photo_like == 0 and sources.count("receipt") == 0,
+        **claim_view(item, case or {}, qty),
     }
+
+
+def claim_view(item: dict, case: dict, qty: int) -> dict:
+    """Which claim an item belongs to, and its depreciated value where that claim pays it."""
+    cause = disaster.item_cause(case, item)
+    key = disaster.claim_key(case, item)
+    basis = next((b for k, _, b in disaster.claims(case) if k == key), "rcv")
+    each = disaster.acv(item.get("price_mid"), item.get("category")) if basis == "acv" else None
+    return {"cause": cause, "claim": key, "basis": basis,
+            "acv": (each * qty) if each else None, "acv_text": money(each * qty) if each else "",
+            "essential": disaster.is_essential(item)}
+
+
+def claim_totals(case: dict, items: list[dict]) -> list[dict]:
+    """One row per claim this disaster means, from the confirmed items."""
+    rows = []
+    for key, title, basis in disaster.claims(case):
+        mine = [i for i in items if i["claim"] == key and i["status"] == "confirmed"]
+        rows.append({"key": key, "title": title, "basis": basis, "items": len(mine),
+                     "new": sum(i["value"] for i in mine), "acv": sum(i["acv"] or 0 for i in mine)})
+    return rows
 
 
 def page_data(case_id: str, store: Store, role: str) -> dict:
@@ -109,7 +131,7 @@ def page_data(case_id: str, store: Store, role: str) -> dict:
     for row in everything:
         if (row["cluster_id"] or row["item_id"]) != row["item_id"]:
             continue
-        (removed if row["status"] == "rejected" else items).append(item_view(row, by_canonical[row["item_id"]]))
+        (removed if row["status"] == "rejected" else items).append(item_view(row, by_canonical[row["item_id"]], case))
     items.sort(key=lambda i: -i["value"])
 
     rooms: dict[str, int] = {}
@@ -125,6 +147,10 @@ def page_data(case_id: str, store: Store, role: str) -> dict:
         "role": role,
         "items": items,
         "removed": removed if role == "owner" else [],
+        "disaster": case.get("disaster") or disaster.FIRE,
+        "claims": claim_totals(case, items),
+        "show_essentials": case.get("insured") == "no",
+        "essentials": sum(1 for i in items if i["essential"]),
         "confirmed": sum(1 for i in items if i["status"] == "confirmed"),
         "rooms": sorted(rooms.items(), key=lambda kv: -kv[1]),
         "meter": m,
@@ -208,7 +234,7 @@ def create_app(store_factory=Store) -> FastAPI:
         store, case, role = resolve(token)
         item = owned_item(store, case, item_id)
         sightings = store.get_sightings(case["case_id"], item_id)
-        view = item_view(item, sightings)
+        view = item_view(item, sightings, case)
         calibrated = load_calibration()["calibrated"]
         basis = {"set by family": "Price set by the family.",
                  "category default": "A rough figure for this kind of item. Set the price if you know it."}.get(
@@ -235,10 +261,12 @@ def create_app(store_factory=Store) -> FastAPI:
         item = owned_item(store, case, item_id)
         body = await request.json()
         action, case_id = body.get("action"), case["case_id"]
-        before = {k: item.get(k) for k in ("status", "label", "qty", "price_low", "price_mid", "price_high", "price_source")}
+        before = {k: item.get(k) for k in ("status", "label", "qty", "price_low", "price_mid", "price_high", "price_source", "cause")}
         if action in ("confirm", "remove", "restore"):
             status = {"confirm": "confirmed", "remove": "rejected", "restore": "suggested"}[action]
             store.set_item_status(case_id, item_id, status)
+        elif action == "cause" and body.get("value") in ("flood", "wind"):
+            store.update_item(case_id, item_id, cause=body["value"])
         elif action == "rename" and str(body.get("value") or "").strip():
             store.update_item(case_id, item_id, label=str(body["value"]).strip()[:120])
         elif action == "qty":
@@ -282,7 +310,9 @@ def create_app(store_factory=Store) -> FastAPI:
                  "low": sum(float(r["rcv_low"] or 0) * int(r["qty"] or 1) for r in rows),
                  "mid": sum(float(r["rcv_mid"] or 0) * int(r["qty"] or 1) for r in rows),
                  "high": sum(float(r["rcv_high"] or 0) * int(r["qty"] or 1) for r in rows)}
+        groups = exporter.claim_groups(case, rows)
         return {"token": token, "name": case.get("name") or "Your home", "rows": rows,
+                "claim_groups": groups if (len(groups) > 1 or groups[0]["basis"] == "acv") else [],
                 "groups": exporter.category_totals(rows), "total": total, "pending": m.get("pending_items") or 0,
                 "money": money, "money_range": money_range, "disclaimer": DISCLAIMER}
 

@@ -14,6 +14,7 @@ Principles the code follows:
 from __future__ import annotations
 
 import io
+import json
 import re
 import secrets
 from dataclasses import dataclass, field
@@ -22,7 +23,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
-from . import config, detect as detect_mod
+from . import config, detect as detect_mod, disaster
 from .annotate import annotate, legend, side_by_side
 from .costar.matterport import _month_year
 from .dedupe import item_key, merge_into_inventory
@@ -40,6 +41,8 @@ CODE = re.compile(r"\b(HOME-\d{4})\b", re.I)
 NEW_ITEMS = (r"(?:(?:no,?\s*)?(?:they|these|those|it|this|that)(?:'re| are| were| was|'s| is)?\s+)?(?:new|"
              r"not (?:previously |already )?(?:added|listed|on (?:the|my) list)|(?:were|was)n't (?:previously |already )?(?:added|listed)|"
              r"not the same(?: (?:ones?|things?|items?))?|different(?: (?:ones?|things?|items?))?)")
+WHAT_HAPPENED = "One more question: what happened to the home? A fire, a flood, a hurricane or storm, or something else?"
+INSURED_Q = "Do you have insurance that covers it? Yes, no or not sure is fine."
 TELEGRAM_PREFIX = "tg:"                            # chat and sender ids that came from the Telegram bridge
 ADDRESSED = re.compile(r"^\s*@?ashline\b[,:]?\s*", re.I)
 MEMORY_QUESTIONS = 6                    # a text "call" asks at most this many questions
@@ -47,7 +50,7 @@ REVIEW_AT_ONCE = 30                     # more than this waiting: the review goe
 DIRECTED_ASK_BELOW = 5                  # a room with fewer items than this is worth asking about
 DEADLINE_DAYS = (60, 30, 10)            # proof-of-loss reminders, and nothing else
 
-INTRO = ("I'm Ashline. I help families rebuild the list of belongings insurance asks for after a fire. "
+INTRO = ("I'm Ashline. I help families rebuild the list of belongings insurance asks for after a fire, flood or storm. "
          "It takes a few minutes at a time, and you can stop whenever. What should I call your home?")
 HELP = ("Send me photos from inside the home, from any year, and I'll list what's in them.\n\n"
         "You can also ask, in your own words:\n"
@@ -230,6 +233,12 @@ class Engine:
         step = member["state"].get("step")
         if step in ("home_name", "address", "use_scan", "loss_date", "rooms") and not inbound.is_group:
             return self._continue_onboarding(inbound, member, case, text)
+        if step in ("disaster", "flooded", "insured") and not inbound.is_group and not (inbound.attachments or inbound.missing):
+            answered = self._answer_setup(inbound, member, case, text)
+            if answered is not None:
+                return answered
+            self.store.set_member(member["member_id"], state={})          # not an answer: drop the question
+            member = self.store.get_member(inbound.sender)
 
         if inbound.attachments or inbound.missing:
             return self._intake(inbound, member, case, now)
@@ -334,7 +343,7 @@ class Engine:
             if text.lower().strip(" .!") in ("yes", "y", "ok", "okay", "sure", "yes please", "use it"):
                 # The aerial photo has to be from before the fire, so this one date is asked now.
                 self.store.set_member(member["member_id"], state={"step": "loss_date", "scan": scan})
-                return [Outbound(inbound.chat_id, "When was the fire? A month and year is enough. It lets me use an "
+                return [Outbound(inbound.chat_id, "When did it happen? A month and year is enough. It lets me use an "
                                                   "aerial photo of the home from before it. You can say skip.")]
             self.store.set_member(member["member_id"], state={"step": "rooms"})
             return [Outbound(inbound.chat_id, "That's fine, we'll leave it. Which rooms did it have? A rough list is fine.")]
@@ -350,18 +359,91 @@ class Engine:
             context = self._context(inbound.chat_id)
             context["seed"] = {"scan": scan, "member_id": member["member_id"]}
             self._save(inbound.chat_id, context)
+            self.store.set_member(member["member_id"], state={"step": "disaster"})
             return [Outbound(inbound.chat_id, "Thank you. I'll go through the scan now; it takes a few minutes and "
-                                              "I'll text you when it's done.")] + self._invite_messages(inbound, case)
+                                              "I'll text you when it's done.")] + self._invite_messages(inbound, case) \
+                + [Outbound(inbound.chat_id, WHAT_HAPPENED)]
 
         rooms = split_rooms(text)
         if rooms and not self.store.get_rooms(case["case_id"]):
             self.store.set_rooms(case["case_id"], [{"room_id": f"fam-{n}", "label": re.sub(r" \d+$", "", r), "name": r}
                                                    for n, r in enumerate(rooms, 1)], source="family")
         self.store.set_case(case["case_id"], rooms_note=text[:300])
-        self.store.set_member(member["member_id"], state={})
+        self.store.set_member(member["member_id"], state={"step": "disaster"})
         out = self._invite_messages(inbound, case)
         out[0].text = "Thank you. " + out[0].text
-        return out
+        return out + [Outbound(inbound.chat_id, WHAT_HAPPENED)]
+
+    # ------------------------------------------- what happened, and which claim(s) it means
+    def _answer_setup(self, inbound: Inbound, member: dict, case: dict, text: str) -> list[Outbound] | None:
+        """The optional questions at the end of setup. A message that isn't an answer returns None and
+        the question is dropped, so a family that just starts sending photos or asking things is never stuck."""
+        step, chat_id = member["state"].get("step"), inbound.chat_id
+        if step == "disaster":
+            kind = disaster.parse_disaster(text)
+            if not kind:
+                return None
+            self.store.set_case(case["case_id"], disaster=kind)
+            if kind == disaster.STORM:
+                self.store.set_member(member["member_id"], state={"step": "flooded"})
+                return [Outbound(chat_id, "I'm sorry. After a hurricane or storm there are usually two claims: flood "
+                                          "insurance for rising water, and homeowners insurance for wind and rain. "
+                                          "I'll keep them apart for you.\n\nDid any rooms flood? Name them, like "
+                                          "\"basement and kitchen\", or say none or all.")]
+            self.store.set_member(member["member_id"], state={"step": "insured"})
+            lead = {disaster.FLOOD: "I'm sorry. Flood insurance pays what things were worth, not the price new, so "
+                                    "I'll show both for every item.",
+                    disaster.FIRE: "I'm sorry."}.get(kind, "I'm sorry, that sounds awful.")
+            return [Outbound(chat_id, f"{lead}\n\n{INSURED_Q}")]
+        if step == "flooded":
+            rooms = [r.get("name") or r["label"] for r in self.store.get_rooms(case["case_id"])]
+            causes = disaster.parse_flooded(text, rooms)
+            if causes is None:
+                return None
+            self.store.set_case(case["case_id"], room_causes=json.dumps(causes))
+            self.store.set_member(member["member_id"], state={"step": "insured"})
+            return [Outbound(chat_id, causes_line(causes) + f"\n\n{INSURED_Q}")]
+        if step == "insured":
+            answer = disaster.parse_insured(text)
+            if not answer:
+                return None
+            self.store.set_case(case["case_id"], insured=answer)
+            self.store.set_member(member["member_id"], state={})
+            if answer == "no":
+                return [Outbound(chat_id, "Okay. Without insurance, FEMA can help replace essentials like appliances, "
+                                          "beds and other furniture, and a computer. I'll mark those on your list so "
+                                          "they're easy to show.\n\nSend photos from inside the home whenever you're ready.")]
+            if answer == "unsure":
+                return [Outbound(chat_id, "That's fine. The list works either way, and you can check the policy later."
+                                          "\n\nSend photos from inside the home whenever you're ready.")]
+            return [Outbound(chat_id, "Good. I'll keep the list in the form your adjuster expects.\n\n"
+                                      "Send photos from inside the home whenever you're ready.")]
+        return None
+
+    def _set_cause(self, case: dict, chat_id: str, text: str) -> list[Outbound] | None:
+        """'the kitchen flooded' / 'bedroom was wind damage' / 'it was a hurricane', any time later."""
+        low = text.lower().strip(" .!")
+        said = re.fullmatch(r"(?:it was|it's|this was|that was|we had|there was)\s+(?:a |an )?(.+)", low)
+        if said and disaster.parse_disaster(said.group(1)) and not re.search(r"\b(room|kitchen|bed|bath)", low):
+            kind = disaster.parse_disaster(said.group(1))
+            self.store.set_case(case["case_id"], disaster=kind)
+            note = (" I'll keep flood and wind damage apart. Tell me which rooms flooded, like \"the basement flooded\"."
+                    if kind == disaster.STORM else "")
+            return [Outbound(chat_id, f"Got it, a {disaster.NAMES[kind]}.{note}")]
+        if (case.get("disaster") or disaster.FIRE) != disaster.STORM:
+            return None
+        flooded = re.fullmatch(r"(?:the |our |my )?(.+?)\s+(?:flooded|was flooded|got flooded|had flooding|was underwater|"
+                               r"was water damage|is flood damage|was flood damage)", low)
+        windy = re.fullmatch(r"(?:the |our |my )?(.+?)\s+(?:was|is|had)\s+(?:wind|rain|wind and rain|roof|storm)(?: damage)?", low)
+        match, cause = (flooded, "flood") if flooded else (windy, "wind") if windy else (None, None)
+        if not match:
+            return None
+        room = tidy_room(match.group(1))
+        causes = disaster.room_causes(case)
+        causes[room.lower()] = cause
+        self.store.set_case(case["case_id"], room_causes=json.dumps(causes))
+        where = "the flood claim" if cause == "flood" else "the wind and rain claim"
+        return [Outbound(chat_id, f"Got it. Everything in the {room.lower()} goes on {where}.")]
 
     def _invite_messages(self, inbound: Inbound, case: dict) -> list[Outbound]:
         case = self.store.get_case(case["case_id"])
@@ -827,6 +909,9 @@ class Engine:
 
         if low in ("help", "?", "what can you do"):
             return [Outbound(chat_id, HELP)]
+        cause = self._set_cause(case, chat_id, text)
+        if cause is not None:
+            return cause
         if low in ("pause", "not today", "stop", "not now") and not member["state"].get("memory"):
             self.store.set_member(member["member_id"], paused=1)
             return [Outbound(chat_id, "Okay. I'll stay quiet until you write again.")]
@@ -986,7 +1071,7 @@ class Engine:
         elif action.startswith("item."):                  # a change made on the inventory page
             before = payload["before"]
             self.store.update_item(case_id, payload["item_id"], **{k: before[k] for k in (
-                "label", "qty", "price_low", "price_mid", "price_high", "price_source")})
+                "label", "qty", "price_low", "price_mid", "price_high", "price_source", "cause") if k in before})
             self.store.set_item_status(case_id, payload["item_id"], before["status"])
             text = "Undone: that item is back to how it was."
         else:
@@ -1142,6 +1227,16 @@ def yes_or_no(low: str) -> tuple[bool, bool]:
     yes = all(t in YES_WORDS | FILLER_WORDS for t in tokens) and any(t in YES_WORDS for t in tokens)
     no = all(t in NO_WORDS | FILLER_WORDS for t in tokens) and any(t in NO_WORDS for t in tokens)
     return yes, no
+
+
+def causes_line(causes: dict) -> str:
+    flooded = [r for r, c in causes.items() if c == "flood"]
+    if not flooded:
+        return "Got it, no flooding. Everything goes on the wind and rain claim."
+    if all(c == "flood" for c in causes.values()):
+        return "Got it, everything flooded. It all goes on the flood claim."
+    names = ", ".join(r.capitalize() for r in flooded)
+    return f"Got it: {names} flooded, so those go on the flood claim. The other rooms go on the wind and rain claim."
 
 
 def looks_like_image(data: bytes) -> bool:

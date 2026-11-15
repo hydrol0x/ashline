@@ -83,7 +83,7 @@ def texts(out):
 def test_owner_onboarding_takes_three_messages():
     f = Family()
     assert texts(f.say(MOM, "hi", name="Mom")) == [
-        "I'm Ashline. I help families rebuild the list of belongings insurance asks for after a fire. It takes a few "
+        "I'm Ashline. I help families rebuild the list of belongings insurance asks for after a fire, flood or storm. It takes a few "
         "minutes at a time, and you can stop whenever. What should I call your home?"]
     assert texts(f.say(MOM, "The Rivera home")) == [
         "What was the address? I'll check whether there's a 3D scan or a sale listing of the home to start from. "
@@ -369,7 +369,7 @@ def test_onboarding_from_the_scan_of_the_address(index, monkeypatch):
     assert out[0].text == ("I found a 3D scan of this address from March 2026 with 14 rooms. Use it as a starting "
                            "point? It may show staging or a previous owner's things, so nothing is added until you "
                            "confirm it.")
-    assert texts(f.say(MOM, "yes")) == ["When was the fire? A month and year is enough. It lets me use an aerial "
+    assert texts(f.say(MOM, "yes")) == ["When did it happen? A month and year is enough. It lets me use an aerial "
                                         "photo of the home from before it. You can say skip."]
     out = f.say(MOM, "January 2025")
     assert out[0].text.startswith("Thank you. I'll go through the scan now") and "Your code is HOME-" in out[1].text
@@ -596,3 +596,53 @@ def test_saying_these_are_new_unmatches_items_from_the_last_photo(fam):
 def test_ways_of_saying_new(words):
     from ashline.chat import NEW_ITEMS
     assert re.fullmatch(NEW_ITEMS, words) or re.fullmatch(r"#?(\d+)\s+(?:is|was|are)\s+(?:new|different)", words)
+
+
+def test_hurricane_family_gets_two_claims_and_essentials():
+    from ashline.export import claim_groups, export_pdf, export_rows, export_xlsx
+    from ashline.web import page_data
+    f = Family()
+    f.say(MOM, "hi", name="Mom")
+    f.say(MOM, "The Rivera home")
+    f.say(MOM, "skip")
+    out = f.say(MOM, "living room, kitchen, basement")
+    assert out[-1].text.startswith("One more question: what happened to the home?")
+    case_id = f.store.get_member(MOM)["case_id"]
+    assert "two claims" in f.say(MOM, "Hurricane Milton")[0].text
+    reply = f.say(MOM, "the basement and kitchen")[0].text
+    assert reply.startswith("Got it: ") and "Basement" in reply and "Kitchen" in reply and "Living room" not in reply
+    assert "Do you have insurance" in reply
+    assert "FEMA can help replace essentials" in f.say(MOM, "no")[0].text
+    case = f.store.get_case(case_id)
+    assert (case["disaster"], case["insured"]) == ("storm", "no")
+
+    f.say(MOM, "kitchen", [photo(656)])                           # red stand mixer, kitchen: flooded
+    f.wait()
+    f.say(MOM, "living room", [photo(640)])                       # sofa, lamp, table: wind and rain
+    f.wait()
+    for item in f.store.get_items(case_id, canonical_only=True):
+        f.store.set_item_status(case_id, item["item_id"], "confirmed")
+    rows = export_rows(case_id, f.store)
+    groups = {g["key"]: g for g in claim_groups(f.store.get_case(case_id), rows)}
+    assert [r["item"] for r in groups["flood"]["rows"]] == ["red stand mixer"]
+    assert groups["flood"]["acv"] and groups["flood"]["acv"] < groups["flood"]["new"]      # depreciated, lower
+    assert len(groups["wind"]["rows"]) == 3 and groups["wind"]["acv"] == 0
+    assert any(r["essential"] for r in rows)                                               # the sofa and table
+
+    data = page_data(case_id, f.store, "owner")
+    assert [c["key"] for c in data["claims"]] == ["flood", "wind"] and data["show_essentials"]
+    from openpyxl import load_workbook
+    book = load_workbook(export_xlsx(case_id, f.store))
+    assert {"By claim", "Flood claim", "Wind and rain claim", "Essentials (FEMA)"} <= set(book.sheetnames)
+    assert export_pdf(case_id, f.store).read_bytes().startswith(b"%PDF")
+
+    assert "goes on the flood claim" in f.say(MOM, "the living room flooded")[0].text      # change a room later
+    rows = export_rows(case_id, f.store)
+    assert all(r["_claim"] == "flood" for r in rows)
+
+
+def test_setup_question_never_blocks_a_family_that_moves_on(fam):
+    out = fam.say(MOM, "how much so far")                         # the "what happened?" question is still open
+    assert "$" in out[0].text or "items" in out[0].text            # answered as a normal command
+    assert fam.store.get_member(MOM)["state"].get("step") != "disaster"     # the question was dropped
+    assert fam.store.get_case(fam.case_id).get("disaster") is None # still the fire flow

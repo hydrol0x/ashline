@@ -16,6 +16,7 @@ from .store import Store
 ADVANCE_SHARE = 0.60
 ADVANCE_CAP = 350_000
 PROOF_OF_LOSS_DAYS = 100
+FLOOD_PROOF_OF_LOSS_DAYS = 60          # flood insurance (NFIP): sworn proof of loss within 60 days, unless FEMA extends it
 DISCLAIMER = "Estimates for planning; not legal or insurance advice. Confirm values with your adjuster."
 MEMORY_SOURCES = ("voice",)          # from memory only: adjusters are more likely to question these
 
@@ -53,13 +54,16 @@ def meter(case_id: str, store: Store | None = None, today: date | None = None) -
     }
     out["documented"] = out["backed"] + out["memory"]
     if case.get("coverage_limit"):
-        rule = sb495(float(case["coverage_limit"]))
+        from .disaster import uses_sb495
+        limit = float(case["coverage_limit"])
+        rule = sb495(limit) if uses_sb495(case) else {"advance": None, "remaining": limit}
         out.update(advance=rule["advance"], target=rule["remaining"])
         if rule["remaining"] > 0:
             out["percent"] = min(100, round(100 * out["documented"] / rule["remaining"]))
     if case.get("loss_date"):
         try:
-            due = date.fromisoformat(case["loss_date"][:10]) + timedelta(days=PROOF_OF_LOSS_DAYS)
+            days = FLOOD_PROOF_OF_LOSS_DAYS if case.get("disaster") in ("flood", "storm") else PROOF_OF_LOSS_DAYS
+            due = date.fromisoformat(case["loss_date"][:10]) + timedelta(days=days)
             left = (due - (today or date.today())).days
             if left >= 0:                                    # a past date is for the adjuster, not a countdown
                 out.update(due=due.isoformat(), days_left=left)

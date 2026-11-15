@@ -501,3 +501,30 @@ def test_one_object_listed_twice_in_a_photo_is_folded():
              {"label": "oak chair", "bbox": [610, 0, 710, 200], "confidence": 0.8}]          # a second chair
     kept = dedupe_in_photo(items)
     assert [i["label"] for i in kept] == ["gray sofa", "oak chair", "oak chair"]
+
+
+def test_free_text_is_mapped_to_a_real_command_or_a_reply():
+    from ashline.intent import valid_command
+    asked = []
+
+    def fake(message, context=""):
+        asked.append((message, context))
+        table = {"can u send me the lsit pls": {"command": "list", "reply": None},
+                 "how r u": {"command": None, "reply": "Doing fine, thanks for asking."},
+                 "delete everything now": {"command": None, "reply": 'Type "delete my case" if you mean it.'},
+                 "make me a sandwich": {"command": valid_command("make sandwich"), "reply": None}}
+        return table[message]
+
+    fam = Family().setup()
+    fam.engine._interpreter = fake
+    out = fam.say(MOM, "can u send me the lsit pls")
+    assert "/p/" in out[0].text                                         # the list link, as if "list" was typed
+    assert texts(fam.say(MOM, "how r u")) == ["Doing fine, thanks for asking."]
+    assert texts(fam.say(MOM, "delete everything now")) == ['Type "delete my case" if you mean it.']
+    assert fam.store.get_case(fam.case_id) is not None                  # nothing was deleted
+    assert "I'm not sure" in fam.say(MOM, "make me a sandwich")[0].text  # an invented command is refused
+    assert "owns the case" in asked[0][1]
+
+
+def test_without_a_key_only_exact_commands_work(fam):
+    assert "I'm not sure" in fam.say(MOM, "can u send me the lsit pls")[0].text

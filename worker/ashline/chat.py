@@ -144,10 +144,14 @@ def split_rooms(text: str) -> list[str]:
 
 class Engine:
     def __init__(self, store: Store | None = None, detector=None, pricer=None, grouper=None,
-                 public_url: str | None = None, number: str | None = None, batch_seconds: int | None = None):
+                 public_url: str | None = None, number: str | None = None, batch_seconds: int | None = None,
+                 interpreter=None):
         self.store = store or Store()
         self.detector, self.pricer, self.grouper = detector, pricer, grouper
-        self._prints: dict[str, tuple] = {}                  # photo path -> fingerprint, to spot repeats
+        self._prints: dict[str, tuple] = {}
+        # Turns a message that matches no exact command into one (ashline.intent). None: built on
+        # first use when an Anthropic key is set; False: exact commands only.
+        self._interpreter = interpreter                  # photo path -> fingerprint, to spot repeats
         self.public_url = (public_url or config.env("ASHLINE_PUBLIC_URL") or "").rstrip("/")
         self.number = number or config.env("ASHLINE_NUMBER") or "this number"
         self.batch_seconds = batch_seconds if batch_seconds is not None else int(
@@ -219,7 +223,7 @@ class Engine:
             if reply is not None:
                 return reply
             if addressed:
-                return [Outbound(inbound.chat_id, HELP)]
+                return self._interpret(inbound, member, case, text, now) or [Outbound(inbound.chat_id, HELP)]
             self._listen(inbound.chat_id, text)           # unsure = silent
             return []
 
@@ -231,7 +235,35 @@ class Engine:
         if re.fullmatch(r"(?:ok(?:ay)?|k|cool|nice|great|thanks?|thank you|ty|got it|perfect|awesome|sounds good|"
                         r"👍|❤️|🙏)[ .!]*", text.strip().lower()):
             return [Outbound(inbound.chat_id, "Anytime. Send more photos whenever you have them.")]
-        return [Outbound(inbound.chat_id, "I'm not sure what you'd like me to do with that. " + HELP)]
+        return (self._interpret(inbound, member, case, text, now)
+                or [Outbound(inbound.chat_id, "I'm not sure what you'd like me to do with that. " + HELP)])
+
+    def _interpret(self, inbound: Inbound, member: dict, case: dict, text: str, now: datetime):
+        """A message no exact command matched: let the model pick a real command or a short reply."""
+        if self._interpreter is None:
+            from .intent import get_interpreter
+            self._interpreter = get_interpreter() or False
+        if not self._interpreter or not text.strip():
+            return None
+        case_id = case["case_id"]
+        open_qs = self.store.get_questions(case_id, chat_id=inbound.chat_id)
+        numbered = self._context(inbound.chat_id).get("list") or {}
+        context = "; ".join(filter(None, [
+            f"Ashline's open question: {'same item?' if open_qs[0]['kind'] == 'same' else 'add an item mentioned?'}"
+            if open_qs else "no open question",
+            f"Ashline's last numbered list had items 1 to {len(numbered)}" if numbered else "",
+            "sender owns the case" if member["role"] == "owner" else "sender is a relative",
+        ]))
+        result = self._interpreter(text, context)
+        command = result.get("command")
+        if command:
+            reply = (self._answer_pending(inbound, member, case, command)
+                     or self._command(inbound, member, case, command, now))
+            if reply is not None:
+                return reply
+        if result.get("reply"):
+            return [Outbound(inbound.chat_id, result["reply"])]
+        return None
 
     # ----------------------------------------------------------- onboarding
     def _start_onboarding(self, inbound: Inbound) -> list[Outbound]:

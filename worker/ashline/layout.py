@@ -2,11 +2,14 @@
 
 Two sources, one output shape:
 
-- **Scan** (`kind: "scan"`): the Matterport scan gives each room's outline in metres and where every
-  panorama stood and which way it faced. An item seen in a panorama is placed where the bottom of
-  its box meets the floor, by projecting that pixel from the camera onto the floor, and never
-  beyond the room's wall. Verified on the Model API on 15 Nov 2026: cube face `f` (1-4) looks
-  along `yaw - (f - 1) * 90 degrees`, yaw being the panorama rotation about the vertical axis.
+- **Scan** (`kind: "scan"`): the Matterport scan gives each room's outline in metres, its doorways,
+  and where every panorama stood and which way it faced. An item seen in a panorama is placed
+  where the bottom of its box meets the floor, by projecting that pixel from the camera onto the
+  floor. It is never placed beyond the room's wall, except in the next room when the line of
+  sight passes through a doorway. Verified on the Model API on 15 Nov 2026: cube face `f` (1-4)
+  looks along `yaw - (f - 1) * 90 degrees`, yaw being the panorama rotation about the vertical
+  axis; a doorway's `relativeCenter` is measured from the wall segment's first vertex; and a
+  doorway's `lowerElevation` is the floor height, which puts the cameras 1.41-1.45 m above it.
 - **Sketch** (`kind: "sketch"`): no scan. Rooms become rectangles of a typical size for their type,
   laid out in the order the photos or the video walked through them; a model that has looked at
   the photos can supply better sizes, neighbours and item positions (`sketch_claude.py`). It is a
@@ -30,7 +33,8 @@ from shapely.geometry import LineString, Point, Polygon
 from . import config
 from .rooms import tidy_room
 
-CAMERA_HEIGHT = 1.45            # metres above the floor; a scan tripod
+CAMERA_HEIGHT = 1.43            # metres above the floor: what scan tripods measured at (1.41-1.45) when no floor height is known
+DOOR_REACH = 0.2                # metres: a line of sight this close to a doorway counts as passing through it
 WALL_MARGIN = 0.93              # an item is never placed past this share of the way to the wall
 THROUGH_DOOR = 6.0               # metres: how far an item seen in the next room is still placed by its floor point
 CAMERA_MARGIN = 1.2              # metres added round a room's camera spots when the scan has no walls for it
@@ -42,7 +46,8 @@ APPROX_NOTE = ("This scan has no measured walls, so rooms are drawn roughly from
 
 Q_PLAN = """query Plan($id: ID!) { model(id: $id) {
   floors { id label sequence }
-  rooms { id floor { id } boundary { edges { vertices { id position { x y } } } } }
+  rooms { id floor { id } boundary { edges { vertices { id position { x y } }
+          openings { type width relativeCenter lowerElevation } } } }
   panoLocations { id position { x y z } rotation { x y z w } anchor { room { id } floor { id } } }
 } }"""
 
@@ -107,16 +112,26 @@ def scan_plan(model: dict) -> dict:
     cameras = {}
     for pano in model.get("panoLocations") or []:
         anchor = pano.get("anchor") or {}
-        cameras[pano["id"]] = {"x": pano["position"]["x"], "y": pano["position"]["y"], "yaw": _yaw(pano.get("rotation")),
+        cameras[pano["id"]] = {"x": pano["position"]["x"], "y": pano["position"]["y"], "z": pano["position"].get("z"),
+                               "yaw": _yaw(pano.get("rotation")),
                                "room": (anchor.get("room") or {}).get("id"), "floor": (anchor.get("floor") or {}).get("id")}
-    rooms, missing = [], []
+    rooms, missing, floor_z = [], [], {}
     for room in model.get("rooms") or []:
-        points = ring(((room.get("boundary") or {}).get("edges")) or [])
+        edges = ((room.get("boundary") or {}).get("edges")) or []
+        points = ring(edges)
         floor = (room.get("floor") or {}).get("id")
         if len(points) >= 3:
-            rooms.append({"id": room["id"], "floor": floor, "points": [[round(x, 3), round(y, 3)] for x, y in points]})
+            found, heights = doorways(edges)
+            if heights:
+                floor_z[room["id"]] = sorted(heights)[len(heights) // 2]
+            rooms.append({"id": room["id"], "floor": floor, "points": [[round(x, 3), round(y, 3)] for x, y in points],
+                          "doors": found})
         else:
             missing.append({"id": room["id"], "floor": floor})
+    for camera in cameras.values():                         # how high the lens stood above that room's floor
+        z, floor_at = camera.pop("z", None), floor_z.get(camera["room"])
+        if z is not None and floor_at is not None and 1.0 <= z - floor_at <= 1.9:
+            camera["h"] = round(z - floor_at, 3)
     measured = [(r["floor"], Polygon(r["points"]).buffer(0)) for r in rooms]
     guessed = []
     for room in camera_rooms(missing, cameras):
@@ -126,6 +141,29 @@ def scan_plan(model: dict) -> dict:
             guessed.append(room)
     return {"kind": "scan", "approx": bool(guessed) and not rooms, "floors": [{"id": f["id"], "label": f.get("label") or ""} for f in floors],
             "rooms": rooms + guessed, "cameras": cameras}
+
+
+def doorways(edges: list[dict]) -> tuple[list, list[float]]:
+    """A room's doorways as wall segments [[x0, y0], [x1, y1]], and the floor heights they report."""
+    found, heights = [], []
+    for edge in edges or []:
+        ends = edge.get("vertices") or []
+        if len(ends) < 2:
+            continue
+        ax, ay = ends[0]["position"]["x"], ends[0]["position"]["y"]
+        bx, by = ends[1]["position"]["x"], ends[1]["position"]["y"]
+        length = math.hypot(bx - ax, by - ay)
+        for opening in edge.get("openings") or []:
+            if opening.get("type") != "doorway" or not length or opening.get("relativeCenter") is None:
+                continue
+            centre = float(opening["relativeCenter"])
+            half = min(float(opening.get("width") or 0.8) / 2 / length, 0.5)
+            t0, t1 = max(0.0, centre - half), min(1.0, centre + half)
+            found.append([[round(ax + t0 * (bx - ax), 3), round(ay + t0 * (by - ay), 3)],
+                          [round(ax + t1 * (bx - ax), 3), round(ay + t1 * (by - ay), 3)]])
+            if opening.get("lowerElevation") is not None:
+                heights.append(float(opening["lowerElevation"]))
+    return found, heights
 
 
 def camera_rooms(rooms: list[dict], cameras: dict, margin: float = CAMERA_MARGIN) -> list[dict]:
@@ -197,13 +235,18 @@ def ensure_scan_plan(case_id: str, store, client=None) -> None:
 
 
 def floor_spot(camera: dict, face: int, bbox: list, size: tuple[int, int], outline: Polygon | None,
-               height: float = CAMERA_HEIGHT, others: list[Polygon] | None = None) -> tuple[float, float, bool]:
+               height: float | None = None, others: list[Polygon] | None = None,
+               doors: list | None = None) -> tuple[float, float, bool]:
     """Where on the plan an object seen in one cube face stands: (x, y, exact).
 
     The bottom centre of the box is taken as the point where the object meets the floor. `exact`
-    is False when that cannot be used (the object hangs on a wall, or the floor point would fall
-    outside the room) and the wall in that direction is used instead.
+    is False when that cannot be used (the object hangs on a wall or stands on furniture, so the
+    floor point would fall outside the room) and the wall in that direction is used instead.
+    A floor point in another room (`others`) is kept only when the line of sight passes through
+    one of the camera's room's doorways (`doors`); a television on a console near a wall would
+    otherwise be "seen" in the room behind that wall.
     """
+    height = height or camera.get("h") or CAMERA_HEIGHT
     angle = camera["yaw"] - (int(face or 1) - 1) * math.pi / 2
     forward = (math.cos(angle), math.sin(angle))
     right = (math.sin(angle), -math.cos(angle))
@@ -215,13 +258,16 @@ def floor_spot(camera: dict, face: int, bbox: list, size: tuple[int, int], outli
     unit = (ray[0] / length, ray[1] / length)
     reach = height / b * length if b > 0.08 else None       # metres along the floor to the object's foot
     wall = _to_wall(camera, unit, outline)
-    exact = reach is not None and (wall is None or reach <= wall * WALL_MARGIN)
-    if not exact and reach is not None and reach <= THROUGH_DOOR and b >= 0.25:
+    exact = reach is not None and (wall is None or reach <= wall)
+    foot_beyond = False
+    if not exact and reach is not None and reach <= THROUGH_DOOR and b >= 0.25 and doors:
         # Seen through a doorway: the floor point lies in a neighbouring room.
         foot = Point(camera["x"] + unit[0] * reach, camera["y"] + unit[1] * reach)
-        exact = any(room.contains(foot) for room in others or [])
+        sight = LineString([(camera["x"], camera["y"]), (foot.x, foot.y)])
+        exact = foot_beyond = (any(sight.distance(LineString(door)) <= DOOR_REACH for door in doors)
+                               and any(room.contains(foot) for room in others or []))
     if exact:
-        distance = reach
+        distance = reach if wall is None or foot_beyond else min(reach, wall * WALL_MARGIN)
     elif wall is None or wall < 0.4:                         # outdoors, or the camera stood in a doorway
         distance = min(reach or 1.5, 1.5)
     else:
@@ -412,7 +458,7 @@ def build(case_id: str, store, drawn: dict | None = None) -> dict:
         dx, dy = shift.get(floor, (0.0, 0.0))
         return round(x + dx, 2), round(flip * y + dy, 2)
 
-    rooms, outlines = [], {}
+    rooms, outlines, doors_of = [], {}, {}
     for room in plan["rooms"]:
         outline = Polygon(room["points"])
         if not outline.is_valid:
@@ -420,8 +466,10 @@ def build(case_id: str, store, drawn: dict | None = None) -> dict:
         outlines[room["id"]] = outline
         name = room.get("name") or names.get(room["id"]) or ""
         centre = outline.representative_point()
+        doors_of[room["id"]] = room.get("doors") or []
         rooms.append({"id": room["id"], "name": name, "floor": room["floor"], "area": round(outline.area, 1),
                       "points": [list(to_page(x, y, room["floor"])) for x, y in room["points"]],
+                      "doors": [[list(to_page(x, y, room["floor"])) for x, y in door] for door in doors_of[room["id"]]],
                       "label_at": list(to_page(centre.x, centre.y, room["floor"]))})
     by_name = {(r["name"] or "").lower(): r for r in rooms if r["name"]}
     floor_of = {r["id"]: r["floor"] for r in rooms}
@@ -441,7 +489,7 @@ def build(case_id: str, store, drawn: dict | None = None) -> dict:
             room_id = camera.get("room") or item.get("room_id")
             same_floor = [o for rid, o in outlines.items() if floor_of.get(rid) == camera.get("floor")]
             x, y, exact = floor_spot(camera, photo.get("face") or 1, bbox, _image_size(photo.get("path"), sizes),
-                                     outlines.get(room_id), others=same_floor)
+                                     outlines.get(room_id), others=same_floor, doors=doors_of.get(room_id))
             px, py = to_page(x, y, camera.get("floor") or floor_of.get(room_id))
             pins.append({**pin, "x": px, "y": py, "exact": exact, "room_id": room_id})
             continue
@@ -525,6 +573,9 @@ def render_png(layout: dict, path: str | Path, width: int = 1400) -> Path:
 
     for room in layout["rooms"]:
         draw.polygon([at(*p) for p in room["points"]], fill="#f1ede4", outline="#3b3a36", width=3)
+    for room in layout["rooms"]:                            # doorways: a gap in the wall
+        for a, b in room.get("doors") or []:
+            draw.line([at(*a), at(*b)], fill="#fbfaf7", width=5)
     for pin in layout["pins"]:
         if pin["x"] is None:
             continue

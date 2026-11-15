@@ -94,10 +94,31 @@ def test_a_picture_on_the_wall_goes_to_the_wall_not_through_it():
     assert not exact and x == pytest.approx(3 + 3 * layout.WALL_MARGIN) and y == pytest.approx(2.0)
     x, y, exact = layout.floor_spot(camera, 1, [900, 900, 1148, 1100], (2048, 2048), room)    # "floor point" 20 m away
     assert not exact and x < 6
-    # Seen through a doorway into the kitchen next door: the floor point there is kept.
+    # Seen through a doorway into the kitchen next door: the floor point there is kept...
     kitchen = Polygon([(6, 0), (9, 0), (9, 4), (6, 4)])
-    x, y, exact = layout.floor_spot(camera, 1, [900, 900, 1148, 1400], (2048, 2048), room, others=[room, kitchen])
+    seen = dict(camera=camera, face=1, bbox=[900, 900, 1148, 1400], size=(2048, 2048), outline=room, others=[room, kitchen])
+    x, y, exact = layout.floor_spot(**seen, doors=[[[6, 1.6], [6, 2.4]]])
     assert exact and 6 < x < 9
+    # ...but not through a solid wall: a doorway elsewhere on that wall, or no doorway at all.
+    x, y, exact = layout.floor_spot(**seen, doors=[[[6, 3.2], [6, 3.9]]])
+    assert not exact and x < 6
+    assert layout.floor_spot(**seen, doors=[])[0] < 6 and layout.floor_spot(**seen)[0] < 6
+    # Standing right at the wall is still in the room, drawn just inside it.
+    x, y, exact = layout.floor_spot(camera, 1, [900, 800, 1148, 1380], (2048, 2048), room, height=1.0)     # 2.87 m ahead
+    assert exact and x == pytest.approx(3 + 3 * layout.WALL_MARGIN)
+
+
+def test_doorways_and_camera_height_come_from_the_scan():
+    wall = edge((6, 0), (6, 4))
+    wall["openings"] = [{"type": "doorway", "width": 0.8, "relativeCenter": 0.25, "lowerElevation": 0.5},
+                        {"type": "window", "width": 1.2, "relativeCenter": 0.8, "lowerElevation": 1.4}]
+    room = box_room("living", 0, 0, 6, 4)
+    room["boundary"]["edges"][3] = wall                               # the wall from (6, 0) to (6, 4)
+    model = {**MODEL, "rooms": [room], "panoLocations": [{**MODEL["panoLocations"][0], "position": {"x": 3, "y": 2, "z": 1.92}}]}
+    plan = layout.scan_plan(model)
+    assert plan["rooms"][0]["doors"] == [[[6, 0.6], [6, 1.4]]]         # measured from the wall's first vertex; no windows
+    assert plan["cameras"]["p1"]["h"] == pytest.approx(1.42)          # lens height above that room's floor
+    assert "h" not in layout.scan_plan(MODEL)["cameras"]["p1"]         # no doorway, no floor height: the default applies
 
 
 @pytest.fixture
@@ -113,7 +134,7 @@ def scanned(tmp_path):
     shot = {"photo_id": "scan-1-f1", "path": str(path), "source": "scan", "room_id": "living",
             "room_label": "Living room", "pano_id": "p1", "face": 1, "x": 3, "y": 2, "z": 1.5}
     store.add_photos("c1", [shot])
-    sofa = store.add_item("c1", {"label": "grey sofa", "category": "furniture", "bbox": [900, 800, 1148, 1536]},
+    sofa = store.add_item("c1", {"label": "grey sofa", "category": "furniture", "bbox": [900, 800, 1148, 1792]},
                           source="scan", photo=shot)
     store.update_item("c1", sofa, price_mid=900)
     mixer = store.add_item("c1", {"label": "stand mixer", "category": "kitchen", "room_label": "Kitchen"}, source="voice")
@@ -128,7 +149,7 @@ def test_build_draws_the_scan_with_a_pin_per_line(scanned):
     assert [(r["name"], r["area"]) for r in drawn["rooms"]] == [("Living room", 24.0), ("Kitchen", 12.0)]
     pins = {p["id"]: p for p in drawn["pins"]}
     assert pins[sofa]["exact"] and pins[sofa]["room_id"] == "living" and pins[sofa]["value"] == 900
-    assert pins[sofa]["x"] == pytest.approx(3 + layout.CAMERA_HEIGHT / 0.5) and pins[sofa]["y"] == pytest.approx(2.0)
+    assert pins[sofa]["x"] == pytest.approx(3 + layout.CAMERA_HEIGHT / 0.75, abs=0.01) and pins[sofa]["y"] == pytest.approx(2.0)
     # Known only by its room: somewhere inside that room. No room at all: listed, not drawn.
     assert not pins[mixer]["exact"] and 6 < pins[mixer]["x"] < 9 and 0 < pins[mixer]["y"] < 4
     assert pins[lost]["x"] is None and drawn["unplaced"] == 1

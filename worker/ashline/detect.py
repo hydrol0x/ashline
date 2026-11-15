@@ -32,6 +32,10 @@ toys, tools, sports gear, outdoor furniture and equipment.
 Skip: anything built into the house (cabinets, counters, sinks, range hoods, built-in ovens,
 doors, windows, ceiling lights, vents, flooring), people, pets, and things too small or blurry to name.
 Skip anything seen only through a doorway in another room."""
+# A scan photographs every room, so the room next door is left to its own panorama. A family
+# photo may be the only picture of what stands through the doorway: there it is listed, under its own room.
+SKIP_NEXT_ROOM = "\nSkip anything seen only through a doorway in another room."
+assert TASK.endswith(SKIP_NEXT_ROOM)
 
 PROMPT = TASK + """
 

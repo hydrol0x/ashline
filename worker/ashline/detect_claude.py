@@ -15,7 +15,7 @@ import anthropic
 from PIL import Image
 
 from . import config
-from .detect import CATEGORIES, TASK, DetectionError, parse_items
+from .detect import CATEGORIES, SKIP_NEXT_ROOM, TASK, DetectionError, parse_items
 
 DEFAULT_MODEL = "claude-opus-5-5"
 
@@ -70,12 +70,11 @@ ROOM_ITEMS_SCHEMA = {
 
 IN_ROOM = """
 
-Some photos look into another room: through a doorway, down a hallway, or across an open-plan space
-(a kitchen behind a living-room sofa). For each item give `in_room`: null when the item stands in the
-room the photo was taken in, or the name of the room it really stands in when that is a different one.
-Decide by where the item stands, not by where the camera is: a dining table seen through a closet
-doorway belongs to the dining area, and a refrigerator seen across the room from the sofa belongs to
-the kitchen. Use the room names of this home when they fit."""
+Some photos look into another room: through a doorway, down a hallway, or across an open-plan space.
+For each item give `in_room`: null when the item stands in the room the photo was taken in, or the
+name of the room it really stands in when that is a different one. Decide by where the item stands,
+not by where the camera is: a bed seen through an open door from the hallway belongs to the bedroom.
+Use the room names of this home when they fit."""
 
 INSTRUCTIONS = """
 
@@ -128,8 +127,9 @@ class ClaudeDetector:
         small.save(buf, format="JPEG", quality=85)
 
         room = f" (taken in: {room_hint})" if room_hint else ""
-        schema, ask_room = ITEMS_SCHEMA, ""
+        schema, ask_room, task = ITEMS_SCHEMA, "", TASK.format(room=room)
         if rooms is not None:                              # a family photo: rooms are named, not measured
+            task = task.replace(SKIP_NEXT_ROOM, "")        # what stands through the doorway is listed, under its room
             known = f" The rooms of this home are: {', '.join(rooms)}." if rooms else ""
             if room_hint:
                 schema, ask_room = HOME_ITEMS_SCHEMA, (f"\n\n{known.strip()}" if known else "") + IN_ROOM
@@ -145,7 +145,7 @@ class ClaudeDetector:
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
                                              "data": base64.standard_b64encode(buf.getvalue()).decode("utf-8")}},
-                {"type": "text", "text": TASK.format(room=room) + INSTRUCTIONS + ask_room},
+                {"type": "text", "text": task + INSTRUCTIONS + ask_room},
             ]}],
         )
         try:

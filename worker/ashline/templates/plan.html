@@ -35,6 +35,7 @@
   .zoom button:hover { border-color: var(--ink); }
   .room { fill: var(--room); stroke: var(--wall); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: pointer; }
   .room:hover { fill: #E7E9EC; }
+  .door { stroke: var(--paper); stroke-width: 4; vector-effect: non-scaling-stroke; pointer-events: none; }
   .room.on { fill: var(--room-on); }
   .name { font-size: calc(var(--u) * 1px); fill: var(--ink); text-anchor: middle; pointer-events: none; font-weight: 700; }
   .count { font-size: calc(var(--u) * 0.75px); fill: var(--muted); text-anchor: middle; pointer-events: none; }
@@ -116,13 +117,15 @@
   let room = null, pinOn = null;
   const off = new Set();
 
-  const gRooms = svg.appendChild(el("g")), gText = svg.appendChild(el("g")), gPins = svg.appendChild(el("g"));
+  const gRooms = svg.appendChild(el("g")), gDoors = svg.appendChild(el("g")), gText = svg.appendChild(el("g")),
+        gPins = svg.appendChild(el("g"));
   L.floors.forEach(f => gText.appendChild(el("text", {x: f.x, y: -0.25 * unit, class: "floor"}, f.label ? "Floor " + f.label : "")));
   const roomNodes = {}, pinNodes = {};
   L.rooms.forEach(r => {
     const node = el("polygon", {points: r.points.map(p => p.join(",")).join(" "), class: "room"});
     node.addEventListener("click", () => { if (!moved) select(room === r.id ? null : r.id); });
     gRooms.appendChild(node); roomNodes[r.id] = node;
+    (r.doors || []).forEach(d => gDoors.appendChild(el("line", {x1: d[0][0], y1: d[0][1], x2: d[1][0], y2: d[1][1], class: "door"})));
     if (r.name && r.area >= 2) {
       gText.appendChild(el("text", {x: r.label_at[0], y: r.label_at[1], class: "name"}, r.name));
       const n = (inRoom[r.id] || []).length;

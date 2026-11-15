@@ -95,9 +95,14 @@ It only reads and changes the inventory through those tools.
 
 ### Video
 
-A video sent in the chat (or `/video walk.mp4` in the simulator) is cut into up to 14 sharp stills
-with `ffmpeg` (`video.py`), which then go through the photo pipeline, so the same sofa seen in five
-frames is one line. `ffmpeg` has to be installed on the machine.
+A video sent in the chat (or `/video walk.mp4` in the simulator) is cut into sharp stills with
+`ffmpeg` (`video.py`): 14 for a clip of up to a minute, 14 a minute after that, at most 40. They go
+through the photo pipeline, so the same sofa seen in five frames is one line. `ffmpeg` has to be
+installed on the machine.
+
+A family photo or video still often looks into the next room. Each item is filed under the room it
+stands in, not the room the camera was in, so a dining table glimpsed from the kitchen is the same
+line as the one photographed in the dining room.
 
 ### Prices from what was paid or what it costs today
 
@@ -115,8 +120,9 @@ frames is one line. `ffmpeg` has to be installed on the machine.
 `/p/<token>/plan` (linked from the inventory page, or `map` in the chat) shows the home from above
 with a dot where each item was recorded. Tap a room to list what was in it, tap a dot for the item.
 
-- With a 3D scan, the rooms are the scan's own outlines and each item is placed where it stood on
-  the floor, worked out from the panorama it was seen in (`layout.py`).
+- With a 3D scan, the rooms are the scan's own outlines, with its doorways, and each item is placed
+  where it stood on the floor, worked out from the panorama it was seen in (`layout.py`). An item is
+  put in the next room only when it was seen through a doorway.
 - Without a scan, the rooms are sketched as rectangles in the order the photos or video walked
   through them. With `ANTHROPIC_API_KEY` set, Claude looks at the photos and refines room sizes,
   which rooms adjoin and where items stood (`sketch_claude.py`). The page says it is a sketch.

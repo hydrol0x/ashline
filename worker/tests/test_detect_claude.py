@@ -85,6 +85,7 @@ def test_a_family_photo_says_which_room_each_item_stands_in(photo):
     assert "in_room" in item_schema["required"] and item_schema["additionalProperties"] is False
     text = call["messages"][0]["content"][1]["text"]
     assert "the room this photo was taken in" in text and "`in_room`" in text and "Dining area, Laundry closet" in text
+    assert "Skip anything seen only through a doorway" not in text          # a family photo lists the next room's things
     # Rooms are spelled as the home spells them. Items in the photo's room carry it; the table is filed where it stands.
     assert items["white top-load washing machine"]["room"] == items["white top-load washing machine"]["photo_room"] == "Laundry closet"
     assert (items["rustic wood dining table"]["room"], items["rustic wood dining table"]["photo_room"]) == \
@@ -109,6 +110,7 @@ def test_a_scan_face_is_asked_nothing_about_rooms(photo):
     items = ClaudeDetector(client=client).detect(photo, "Living Room")
     assert beta.calls[0]["output_config"]["format"]["schema"] == ITEMS_SCHEMA
     assert "in_room" not in beta.calls[0]["messages"][0]["content"][1]["text"]
+    assert "Skip anything seen only through a doorway" in beta.calls[0]["messages"][0]["content"][1]["text"]
     assert all("room" not in i and "photo_room" not in i for i in items)
 
 

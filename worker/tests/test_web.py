@@ -48,7 +48,7 @@ def case(tmp_path):
 def test_owner_page_shows_meter_items_and_export(case):
     client, _, ids = case
     html = client.get("/p/owner-token").text
-    assert "The Example home · 3 items" in html and "2 family members contributing" in html
+    assert "The Example home <span class=\"count\">3 items</span>" in html and "2 family members contributing" in html
     assert "$1,800" in html and "documented · 2 items" in html                 # no coverage limit yet
     assert "What is the contents coverage limit" in html                        # asked, with a skip
     assert "Blue velvet sofa" in html and "Table saw" in html and f'data-removed="1" hidden data-id="{ids['gone']}"' in html

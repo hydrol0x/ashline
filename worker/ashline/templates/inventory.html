@@ -5,153 +5,137 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>{{ name }} · Ashline</title>
+<link rel="icon" href="/static/img/favicon.png">
+<link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png">
+<link rel="stylesheet" href="/static/brand.css">
 <style>
-  [hidden] { display: none !important; }
-  :root {
-    --bg: #FAF7F2; --card: #FFFFFF; --ink: #2A2826; --muted: #7C766D; --line: #E8E1D6;
-    --accent: #1F6F6B; --accent-soft: #9CC5C0; --pending: #DCD5C9;
-  }
-  * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
-  body { margin: 0; background: var(--bg); color: var(--ink);
-         font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; }
-  main { max-width: 1120px; margin: 0 auto; padding: 20px 16px 120px; }
-  h1 { font-size: 22px; font-weight: 600; margin: 4px 0 2px; letter-spacing: -0.01em; }
-  .sub { color: var(--muted); font-size: 13px; margin: 0 0 18px; }
-  button, input, select { font: inherit; color: inherit; }
+  main { max-width: 1160px; margin: 0 auto; padding: 0 18px 120px; }
+  .masthead { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--rule); margin-bottom: 26px; }
+  .masthead .brand img { height: 26px; }
+  .masthead .brand span { font-size: 19px; }
+  .masthead small { color: var(--muted); font-size: 13px; }
+  h1 { font: 700 clamp(28px, 4.4vw, 40px)/1.05 var(--sans); letter-spacing: -0.025em; margin: 0 0 6px; }
+  h1 .count { color: var(--red); font-weight: 400; }
+  .sub { color: var(--muted); font-size: 14px; margin: 0 0 22px; }
 
-  .meter { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 18px 18px 16px; margin-bottom: 18px; }
-  .meter .figure { font-size: 26px; font-weight: 600; letter-spacing: -0.02em; }
-  .meter .figure small { font-size: 15px; font-weight: 400; color: var(--muted); letter-spacing: 0; }
-  .bar { display: flex; height: 12px; border-radius: 6px; overflow: hidden; background: #F0EBE2; margin: 12px 0 10px; }
+  .meter { position: relative; overflow: hidden; border-top: 2px solid var(--ink); padding: 18px 0 20px; margin-bottom: 26px; }
+  .meter .figure { font: 700 clamp(34px, 6vw, 48px)/1 var(--sans); letter-spacing: -0.03em; }
+  .meter .figure small { display: block; font-size: 15px; font-weight: 500; color: var(--muted); letter-spacing: 0; margin-top: 8px; }
+  .bar { display: flex; height: 10px; overflow: hidden; background: var(--panel); margin: 16px 0 12px; }
   .bar span { display: block; height: 100%; }
-  .bar .backed { background: var(--accent); }
-  .bar .memory { background: var(--accent-soft); }
-  .bar .pending { background: repeating-linear-gradient(135deg, var(--pending) 0 5px, #EEE8DE 5px 10px); }
-  .key { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--muted); }
-  .key i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: baseline; }
-  .key b { color: var(--ink); font-weight: 600; }
-  .due { margin-top: 10px; font-size: 13px; color: var(--muted); }
-  .ask { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); font-size: 13.5px; }
-  .ask form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; align-items: center; }
-  .ask input[type=text] { flex: 1 1 150px; min-width: 0; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
-  .btn { padding: 9px 14px; border-radius: 10px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
-  .btn.quiet { background: transparent; color: var(--muted); border-color: var(--line); }
+  .bar .backed { background: var(--red); }
+  .bar .memory { background: var(--flame-soft); }
+  .bar .pending { background: repeating-linear-gradient(135deg, #C9CED2 0 4px, var(--panel) 4px 8px); }
+  .key { display: flex; flex-wrap: wrap; gap: 6px 22px; font-size: 13.5px; color: var(--muted); }
+  .key i { display: inline-block; width: 10px; height: 10px; margin-right: 7px; vertical-align: -1px; }
+  .key b { color: var(--ink); font-weight: 700; }
+  .due { margin-top: 12px; font-size: 14px; color: var(--red-deep); font-weight: 600; }
+  .ask { margin-top: 16px; padding: 16px 18px; background: var(--panel); font-size: 15px; }
+  .ask form { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
+  .ask input[type=text] { flex: 1 1 150px; min-width: 0; padding: 10px 12px; border: 1.5px solid var(--rule); border-radius: 3px; background: #fff; }
+  .ask input[type=text]:focus { outline: none; border-color: var(--ink); }
 
-  .chips { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 10px; margin: 0 -16px; padding-left: 16px; padding-right: 16px; scrollbar-width: none; }
+  .review { display: flex; align-items: center; gap: 16px; justify-content: space-between; border: 1.5px solid var(--ink); padding: 14px 16px; margin: 0 0 22px; }
+  .review b { display: block; font-size: 17px; font-weight: 700; }
+  .review div > span { font-size: 14px; color: var(--muted); }
+  .review .btn { flex: none; }
+
+  .chips { display: flex; gap: 22px; overflow-x: auto; margin: 0 -18px; padding: 0 18px; border-bottom: 1px solid var(--rule); scrollbar-width: none; }
   .chips::-webkit-scrollbar { display: none; }
-  .chip { flex: none; padding: 7px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--card);
-          font-size: 13px; cursor: pointer; white-space: nowrap; }
-  .chip span { color: var(--muted); margin-left: 4px; }
-  .chip[aria-pressed=true] { background: var(--ink); border-color: var(--ink); color: #fff; }
-  .chip[aria-pressed=true] span { color: #D8D2C8; }
-  .chip.removed-chip { border-style: dashed; color: var(--muted); }
-  .item.rejected { opacity: .6; }
-  .tools { display: flex; justify-content: space-between; align-items: center; margin: 2px 0 12px; font-size: 13px; color: var(--muted); }
-  .tools select { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 5px 8px; }
+  .chip { flex: none; padding: 10px 0 11px; border: 0; border-bottom: 2px solid transparent; margin-bottom: -1px; background: none; font-size: 15px; font-weight: 600; color: var(--muted); cursor: pointer; }
+  .chip span { font-weight: 500; margin-left: 5px; color: var(--muted); }
+  .chip[aria-pressed=true] { color: var(--ink); border-bottom-color: var(--red); }
+  .chip.removed-chip { font-weight: 500; }
+  .tools { display: flex; justify-content: space-between; align-items: center; margin: 14px 0 16px; font-size: 14px; color: var(--muted); }
+  .tools select { appearance: none; -webkit-appearance: none; border: 0; border-bottom: 1.5px solid var(--ink); background: transparent; padding: 3px 20px 3px 2px; font-weight: 600; color: var(--ink); cursor: pointer;
+                  background-image: linear-gradient(45deg, transparent 50%, var(--ink) 50%), linear-gradient(135deg, var(--ink) 50%, transparent 50%);
+                  background-position: calc(100% - 9px) 55%, calc(100% - 4px) 55%; background-size: 5px 5px; background-repeat: no-repeat; border-radius: 0; }
 
-  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-  @media (min-width: 640px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; } }
-  @media (min-width: 920px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } main { padding-top: 32px; } h1 { font-size: 26px; } }
-  .item { background: var(--card); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; cursor: pointer;
-          display: flex; flex-direction: column; text-align: left; padding: 0; width: 100%; }
-  .item[hidden] { display: none; }
-  .item.suggested { border: 1.5px dashed #CDC4B5; }
-  .item .shot { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: #F1ECE3; display: flex; align-items: center; justify-content: center; flex: none; }
-  .item .shot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
-  .item .shot .mem { font-size: 12px; color: var(--muted); border: 1px solid var(--line); background: var(--card); padding: 5px 10px; border-radius: 999px; }
-  .item .body { padding: 10px 11px 11px; }
-  .item .name { font-size: 13.5px; font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .item .line { font-size: 12px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .item .price { font-size: 13px; margin-top: 6px; }
-  .item .foot { font-size: 11.5px; color: var(--muted); margin-top: 5px; display: flex; justify-content: space-between; gap: 8px; }
+  .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 14px; }
+  @media (min-width: 640px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px 20px; } }
+  @media (min-width: 920px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  .item { background: none; border: 0; cursor: pointer; display: flex; flex-direction: column; text-align: left; padding: 0; width: 100%; }
+  .item .shot { position: relative; aspect-ratio: 4 / 3; overflow: hidden; background: var(--panel); display: flex; align-items: center; justify-content: center; flex: none; }
+  .item .shot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; transition: transform .25s; }
+  .item:hover .shot img { transform: scale(1.03); }
+  .item .shot .mem { font: 700 italic 15px var(--serif); color: var(--ink-2); padding: 0 14px; text-align: center; }
+  .item.suggested .shot::after { content: "To check"; position: absolute; left: 0; top: 0; background: #fff; color: var(--red); font-size: 12px; font-weight: 700; padding: 4px 8px; }
+  .item.confirmed .shot::after { content: "Yours"; position: absolute; left: 0; top: 0; background: var(--ink); color: #fff; font-size: 12px; font-weight: 700; padding: 4px 8px; }
+  .item.rejected { opacity: .55; }
+  .item.rejected .shot::after { content: "Removed"; position: absolute; left: 0; top: 0; background: var(--panel); color: var(--ink); font-size: 12px; font-weight: 700; padding: 4px 8px; }
+  .item .body { padding: 10px 0 0; border-top: 0; }
+  .item .name { font-size: 16px; font-weight: 700; line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .item .line { font-size: 13px; color: var(--muted); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .item .price { font-size: 15px; font-weight: 600; margin-top: 6px; font-variant-numeric: tabular-nums; }
+  .item .foot { font-size: 12.5px; color: var(--muted); margin-top: 4px; display: flex; justify-content: space-between; gap: 8px; }
   .item .foot span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .empty { color: var(--muted); text-align: center; padding: 48px 12px; }
+  .empty { color: var(--muted); padding: 48px 0; font-size: 16px; }
 
-  .footer { position: fixed; left: 0; right: 0; bottom: 0; background: rgba(250, 247, 242, 0.96); backdrop-filter: blur(6px);
-            border-top: 1px solid var(--line); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); }
-  .footer div { max-width: 1120px; margin: 0 auto; display: flex; gap: 10px; }
-  .footer a { flex: 1; text-align: center; text-decoration: none; padding: 11px 10px; border-radius: 12px; font-size: 14px; white-space: nowrap; }
+  .footer { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid var(--rule); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); z-index: 5; }
+  .footer div { max-width: 1160px; margin: 0 auto; display: flex; gap: 10px; }
+  .footer a { flex: 1; text-align: center; text-decoration: none; padding: 12px 10px; border-radius: 3px; font-size: 15px; font-weight: 600; white-space: nowrap; }
   .footer .wide { display: none; }
   @media (min-width: 520px) { .footer .wide { display: inline; } .footer .narrow { display: none; } }
-  .footer a.sheet { border: 1px solid var(--line); color: var(--ink); background: var(--card); }
-  .footer a.pdf { background: var(--accent); color: #fff; border: 1px solid var(--accent); }
-  .note { color: var(--muted); font-size: 11.5px; margin: 28px 0 0; text-align: center; }
+  .footer a.sheet { border: 1.5px solid var(--rule); color: var(--ink); background: #fff; }
+  .footer a.pdf { background: var(--ink); color: #fff; border: 1.5px solid var(--ink); }
+  .note { color: var(--muted); font-size: 12.5px; margin: 36px 0 0; max-width: 46em; }
 
-  dialog { border: 0; padding: 0; width: min(560px, 100vw); max-width: 100vw; max-height: 92vh; border-radius: 18px 18px 0 0;
-           margin: auto auto 0; background: var(--card); color: var(--ink); }
-  @media (min-width: 640px) { dialog { border-radius: 18px; margin: auto; } }
-  dialog::backdrop { background: rgba(42, 40, 38, 0.45); }
-  .sightings { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; background: #1E1D1B; }
+  dialog { border: 0; padding: 0; width: min(580px, 100vw); max-width: 100vw; max-height: 94vh; border-radius: 6px 6px 0 0; margin: auto auto 0; background: #fff; color: var(--ink); overscroll-behavior: contain; }
+  @media (min-width: 640px) { dialog { border-radius: 4px; margin: auto; } }
+  dialog::backdrop { background: rgba(23, 22, 21, .55); }
+  html:has(dialog[open]) { overflow: hidden; }
+  .close { position: absolute; top: 10px; right: 10px; width: 34px; height: 34px; border-radius: 2px; border: 0; background: #fff; color: var(--ink); font-size: 16px; cursor: pointer; z-index: 2; }
+  .sightings { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; background: #121110; }
   .sightings figure { flex: 0 0 100%; margin: 0; scroll-snap-align: center; position: relative; }
   .sightings img { width: 100%; max-height: 46vh; object-fit: contain; display: block; }
-  .sightings figcaption { position: absolute; left: 10px; bottom: 8px; font-size: 11.5px; color: #fff; background: rgba(0,0,0,.5); padding: 3px 8px; border-radius: 999px; }
-  .sightings .quote { color: #EDE7DD; padding: 26px 20px; font-size: 14px; }
-  .sheet { padding: 16px 18px 18px; }
-  .sheet h2 { font-size: 18px; margin: 0 0 2px; }
-  .sheet p { margin: 6px 0; font-size: 13.5px; }
+  .sightings figcaption { position: absolute; left: 0; bottom: 0; font-size: 12px; color: #fff; background: rgba(0,0,0,.6); padding: 4px 10px; }
+  .sightings .quote { color: #F1EEE9; padding: 30px 22px; font: 700 italic 18px/1.4 var(--serif); }
+  .sheet { padding: 16px 20px max(20px, env(safe-area-inset-bottom)); }
+  .sheet h2 { font-size: 24px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 2px; line-height: 1.15; }
+  .sheet p { margin: 6px 0; font-size: 15px; }
   .sheet .muted { color: var(--muted); }
-  .sheet .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
-  .sheet .row .btn { flex: 1 1 auto; }
-  .editor { margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); }
-  .editor-label { display: block; font-weight: 600; font-size: 14.5px; }
-  .editor-hint { color: var(--muted); font-size: 12.5px; margin: 4px 0 0 !important; }
-  .editor-field { display: flex; align-items: center; margin-top: 10px; background: #fff; border: 1px solid var(--line);
-                  border-radius: 12px; padding: 0 12px; transition: border-color .15s, box-shadow .15s; }
-  .editor-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31, 111, 107, .15); }
-  .editor-field .prefix { color: var(--muted); margin-right: 4px; font-size: 16px; }
-  .editor-field input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; padding: 12px 0; font-size: 16px; }
+  .sheet .small { font-size: 13.5px; }
+  .sheet.loading { opacity: .45; pointer-events: none; transition: opacity .12s; }
+  .price-line { font-weight: 700; font-size: 19px !important; font-variant-numeric: tabular-nums; }
+  .progress { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: var(--muted); padding-bottom: 12px; margin: 0 0 14px; border-bottom: 1px solid var(--rule); }
+  .progress .count { text-align: center; flex: 1; }
+  .progress > * { min-width: 70px; }
+  .progress > :last-child { text-align: right; }
+  .link { border: 0; background: none; color: var(--ink); font: inherit; font-weight: 700; padding: 4px 0; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--red); text-decoration-thickness: 2px; }
+  .decide { display: grid; grid-template-columns: 1fr 1.6fr; gap: 10px; margin-top: 18px; }
+  .btn.big { padding: 15px 16px; font-size: 17px; }
+  .btn.chosen-yes { background: var(--red); border-color: var(--red); }
+  .btn.chosen-no { background: var(--panel); border-color: var(--ink); color: var(--ink); }
+  .hint-line { grid-column: 1 / -1; text-align: center; margin: 0 !important; }
+  .sheet .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .sheet .row .btn { flex: 1 1 0; font-size: 14px; padding: 10px 8px; }
+  .saved { color: var(--red); font-weight: 700; font-size: 14px !important; animation: fade 2.4s forwards; }
+  @keyframes fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
+  .error { color: var(--red-deep); font-size: 14px !important; font-weight: 600; grid-column: 1 / -1; margin: 4px 0 0 !important; }
+  .editor { margin-top: 16px; padding: 16px; background: var(--panel); }
+  .editor-label { display: block; font-weight: 700; font-size: 17px; }
+  .editor-hint { color: var(--muted); font-size: 14px !important; margin: 4px 0 0 !important; }
+  .editor-field { display: flex; align-items: center; margin-top: 12px; background: #fff; border: 1.5px solid var(--rule); border-radius: 3px; padding: 0 12px; }
+  .editor-field:focus-within { border-color: var(--ink); }
+  .editor-field .prefix { color: var(--muted); margin-right: 4px; font-size: 17px; font-weight: 600; }
+  .editor-field input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; padding: 13px 0; font-size: 17px; font-weight: 600; }
   .editor-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
   .editor-buttons .btn { min-width: 96px; }
-  .btn:disabled { opacity: .6; cursor: default; }
-  .tools select { appearance: none; -webkit-appearance: none; padding-right: 26px;
-                  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
-                  background-position: calc(100% - 13px) 50%, calc(100% - 8px) 50%; background-size: 5px 5px; background-repeat: no-repeat; cursor: pointer; }
-  .close { position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border-radius: 16px; border: 0; background: rgba(0,0,0,.45); color: #fff; font-size: 16px; cursor: pointer; z-index: 2; }
-  .review { display: flex; align-items: center; gap: 12px; justify-content: space-between; background: #E6F0EF; border: 1px solid #C9DEDC;
-            border-radius: 14px; padding: 12px 14px; margin: 0 0 14px; }
-  .review b { display: block; font-size: 14.5px; }
-  .review div > span { font-size: 12.5px; color: var(--muted); }
-  .review .btn { flex: none; padding: 10px 18px; font-weight: 600; }
-  .progress { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; color: var(--muted); margin: 0 0 10px; }
-  .link { border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; padding: 4px 0; cursor: pointer; }
-  .price-line { font-weight: 600; font-size: 15px !important; }
-  .sheet .small { font-size: 12.5px; }
-  .state { font-size: 13px; font-weight: 600; color: var(--muted); }
-  .state.ok { color: var(--accent); }
-  .decide { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; margin-top: 16px; }
-  .decide .btn:only-child { grid-column: 1 / -1; }
-  .btn.big { padding: 14px 16px; font-size: 16px; font-weight: 600; border-radius: 12px; }
-  .sheet .row .btn { flex: 1 1 0; font-size: 13.5px; padding: 10px 8px; }
-  .done { text-align: center; padding: 26px 8px 8px; }
-  .done-mark { width: 56px; height: 56px; border-radius: 28px; background: var(--accent); color: #fff; font-size: 28px; line-height: 56px; margin: 0 auto 12px; }
-  .done .btn { width: 100%; margin-top: 14px; }
-  .done .link { margin-top: 12px; }
-  .progress .count { text-align: center; flex: 1; }
-  .progress > * { min-width: 64px; }
-  .progress > :last-child { text-align: right; }
-  .btn.chosen-yes { box-shadow: 0 0 0 3px rgba(31, 111, 107, .25); }
-  .btn.chosen-no { background: #F4E7E3; border-color: #D9B8AE; color: #8A3F2C; }
-  .hint-line { grid-column: 1 / -1; text-align: center; margin: 0 !important; }
-  html:has(dialog[open]) { overflow: hidden; }
-  .sheet.loading { opacity: .45; pointer-events: none; transition: opacity .12s; }
-  .error { color: #A1452F; font-size: 13px !important; grid-column: 1 / -1; margin: 4px 0 0 !important; }
-  .toast { position: fixed; left: 50%; bottom: calc(84px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--ink); color: #fff;
-           padding: 10px 16px; border-radius: 999px; font-size: 14px; z-index: 50; transition: opacity .4s; box-shadow: 0 6px 20px rgba(0,0,0,.18); }
+  .done { padding: 28px 4px 8px; }
+  .done-mark { font: 400 64px/1 var(--sans); color: var(--red); margin-bottom: 8px; letter-spacing: -0.04em; }
+  .done h2 { font-size: 28px !important; }
+  .done .btn { width: 100%; margin-top: 18px; }
+  .done .link { margin-top: 14px; }
+  .toast { position: fixed; left: 50%; bottom: calc(86px + env(safe-area-inset-bottom)); transform: translateX(-50%); background: var(--ink); color: #fff;
+           padding: 11px 18px; border-radius: 2px; font-size: 15px; font-weight: 600; z-index: 50; transition: opacity .4s; }
   .toast.gone { opacity: 0; }
-  .saved { color: var(--accent); font-weight: 600; font-size: 13px !important; animation: fade 2.4s forwards; }
-  @keyframes fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
-  dialog { overscroll-behavior: contain; }
-  .sheet { padding-bottom: max(18px, env(safe-area-inset-bottom)); }
-  @media (max-width: 639px) {
-    dialog { width: 100vw; max-height: 94vh; }
-    .sightings img { max-height: 40vh; }
-  }
+  @media (max-width: 639px) { dialog { width: 100vw; } .sightings img { max-height: 40vh; } }
 </style>
 </head>
 <body>
 <main>
-  <h1>{{ name }} · {{ items|length }} item{{ '' if items|length == 1 else 's' }}</h1>
+  <div class="masthead"><a class="brand" href="/"><img src="/static/img/logo.png" alt=""><span>Ashline</span></a><small>Private to your family</small></div>
+  <h1>{{ name }} <span class="count">{{ items|length }} item{{ '' if items|length == 1 else 's' }}</span></h1>
   <p class="sub">Updated {{ updated }}{% if members %} · {{ members }} family member{{ '' if members == 1 else 's' }} contributing{% endif %}</p>
 
   <section class="meter" aria-label="Progress">
@@ -166,9 +150,9 @@
       <span class="pending" style="width: {{ '%.2f'|format(bar.pending) }}%"></span>
     </div>
     <div class="key">
-      <span><i style="background: var(--accent)"></i><b>{{ money(meter.backed) }}</b> with a photo or receipt</span>
-      {% if meter.memory %}<span><i style="background: var(--accent-soft)"></i><b>{{ money(meter.memory) }}</b> from memory</span>{% endif %}
-      {% if meter.pending %}<span><i style="background: var(--pending)"></i><b>{{ money(meter.pending) }}</b> waiting for an OK ({{ meter.pending_items }})</span>{% endif %}
+      <span><i style="background: var(--red)"></i><b>{{ money(meter.backed) }}</b> with a photo or receipt</span>
+      {% if meter.memory %}<span><i style="background: var(--flame-soft)"></i><b>{{ money(meter.memory) }}</b> from memory</span>{% endif %}
+      {% if meter.pending %}<span><i style="background: #C9CED2"></i><b>{{ money(meter.pending) }}</b> waiting for an OK ({{ meter.pending_items }})</span>{% endif %}
     </div>
     {% if meter.days_left is not none %}<div class="due">Proof of loss due in {{ meter.days_left }} day{{ '' if meter.days_left == 1 else 's' }}</div>{% endif %}
     {% if not meter.limit and not case.coverage_skipped and role == 'owner' %}
@@ -185,7 +169,7 @@
 
   {% if role == 'owner' %}
   <div class="review" id="review" hidden>
-    <div><b>Check <span id="review-count"></span></b><span>Tap yes or no on each one. It takes a few seconds per item.</span></div>
+    <div><b><span id="review-count"></span> to check</b><span>Yes or no on each one. A few seconds an item.</span></div>
     <button class="btn" type="button" id="review-start">Start</button>
   </div>
   {% endif %}
@@ -215,14 +199,14 @@
             data-new="{{ i.created }}" data-name="{{ i.title|lower }}">
       <div class="shot">
         {% if i.has_photo %}<img loading="lazy" src="/p/{{ token }}/crop/{{ i.id }}.jpg" alt="">
-        {% else %}<span class="mem">from memory</span>{% endif %}
+        {% else %}<span class="mem">“From memory”</span>{% endif %}
       </div>
       <div class="body">
         <div class="name">{{ i.title }}</div>
         <div class="line">{{ i.room }} · {{ i.category }}{% if i.brand %} · {{ i.brand }}{% endif %}</div>
         {% if i.price %}<div class="price">{{ i.price }}</div>{% endif %}
         <div class="foot">
-          <span>{% if i.badges.photo %}📷 {{ i.badges.photo }}{% endif %}{% if i.badges.memory %} 🎙 {{ i.badges.memory }}{% endif %}{% if i.badges.receipt %} 🧾 {{ i.badges.receipt }}{% endif %}{% if i.status == 'suggested' %} · to check{% endif %}</span>
+          <span>{{ [(i.badges.photo ~ (' photo' if i.badges.photo == 1 else ' photos')) if i.badges.photo else none, ('from memory' if i.badges.memory else none), ((i.badges.receipt ~ ' receipt') if i.badges.receipt else none)]|select|join(' · ') }}</span>
           <span>{{ i.contributors|join(', ') }}</span>
         </div>
       </div>
@@ -234,14 +218,14 @@
             data-new="{{ i.created }}" data-name="{{ i.title|lower }}">
       <div class="shot">
         {% if i.has_photo %}<img loading="lazy" src="/p/{{ token }}/crop/{{ i.id }}.jpg" alt="">
-        {% else %}<span class="mem">from memory</span>{% endif %}
+        {% else %}<span class="mem">“From memory”</span>{% endif %}
       </div>
       <div class="body">
         <div class="name">{{ i.title }}</div>
         <div class="line">{{ i.room }} · {{ i.category }}{% if i.brand %} · {{ i.brand }}{% endif %}</div>
         {% if i.price %}<div class="price">{{ i.price }}</div>{% endif %}
         <div class="foot">
-          <span>{% if i.badges.photo %}📷 {{ i.badges.photo }}{% endif %}{% if i.badges.memory %} 🎙 {{ i.badges.memory }}{% endif %}{% if i.badges.receipt %} 🧾 {{ i.badges.receipt }}{% endif %}{% if i.status == 'suggested' %} · to check{% endif %}</span>
+          <span>{{ [(i.badges.photo ~ (' photo' if i.badges.photo == 1 else ' photos')) if i.badges.photo else none, ('from memory' if i.badges.memory else none), ((i.badges.receipt ~ ' receipt') if i.badges.receipt else none)]|select|join(' · ') }}</span>
           <span>{{ i.contributors|join(', ') }}</span>
         </div>
       </div>
@@ -348,8 +332,7 @@
     c.classList.remove('suggested', 'confirmed', 'rejected'); c.classList.add(status);
     c.dataset.review = status === 'suggested' ? '1' : '0';
     var foot = c.querySelector('.foot span');
-    if (foot) foot.textContent = foot.textContent.replace(/ · (to check|removed|✓)$/, '') +
-      (status === 'rejected' ? ' · removed' : status === 'confirmed' ? ' · ✓' : ' · to check');
+    if (foot) foot.textContent = foot.textContent.replace(/ · (to check|removed|✓)$/, '');
     refreshReview();
   }
   function updateCard(d) {

@@ -1,0 +1,53 @@
+/* Ashline brand, taken from the pitch deck: white paper, ink-black type, one deep red,
+   hairline rules, and the grainy flame swoosh. Lora for the wordmark, Urbanist for everything else. */
+@font-face { font-family: "Lora"; font-weight: 700; font-display: swap; src: url(/static/fonts/lora-latin-700-normal.woff2) format("woff2"); }
+@font-face { font-family: "Urbanist"; font-weight: 400; font-display: swap; src: url(/static/fonts/urbanist-latin-400-normal.woff2) format("woff2"); }
+@font-face { font-family: "Urbanist"; font-weight: 500; font-display: swap; src: url(/static/fonts/urbanist-latin-500-normal.woff2) format("woff2"); }
+@font-face { font-family: "Urbanist"; font-weight: 600; font-display: swap; src: url(/static/fonts/urbanist-latin-600-normal.woff2) format("woff2"); }
+@font-face { font-family: "Urbanist"; font-weight: 700; font-display: swap; src: url(/static/fonts/urbanist-latin-700-normal.woff2) format("woff2"); }
+
+:root {
+  --paper: #FFFFFF;
+  --ink: #171615;
+  --ink-2: #3D3A37;
+  --muted: #6C6863;
+  --rule: #D5DCDE;
+  --panel: #F2F3F5;
+  --red: #B3171D;
+  --red-deep: #8E1217;
+  --flame: #E1513A;
+  --flame-soft: #F4B3A5;
+  --sans: "Urbanist", "Avenir Next", "Segoe UI", sans-serif;
+  --serif: "Lora", Georgia, serif;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--paper); color: var(--ink); font: 500 16px/1.5 var(--sans); }
+button, input, select { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+a { color: inherit; }
+
+/* Wordmark lockup */
+.brand { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; color: var(--ink); }
+.brand img { height: 30px; width: auto; display: block; }
+.brand span { font: 700 21px/1 var(--serif); letter-spacing: -0.01em; }
+
+/* Buttons: square-ish, ink primary, hairline secondary. Red is for marks, not for buttons. */
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 11px 18px; border-radius: 3px;
+       border: 1.5px solid var(--ink); background: var(--ink); color: #fff; font-weight: 600; text-decoration: none; cursor: pointer;
+       transition: background .12s, color .12s; }
+.btn:hover { background: #000; }
+.btn.quiet { background: var(--paper); color: var(--ink); border-color: var(--rule); }
+.btn.quiet:hover { border-color: var(--ink); }
+.btn:disabled { opacity: .55; cursor: default; }
+.btn:focus-visible, .chip:focus-visible, a:focus-visible { outline: 2px solid var(--red); outline-offset: 2px; }
+
+/* The grainy swoosh from the deck */
+.swoosh { position: absolute; pointer-events: none; background: url(/static/img/swoosh.jpg) center / cover no-repeat; }
+.swoosh::after { content: ""; position: absolute; inset: 0; opacity: .35; mix-blend-mode: multiply;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.45 0 0 0 0 0.45 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
+
+/* Hand-drawn loop around a word, as on the "We bend so we don't break" slide */
+.loop { position: relative; white-space: nowrap; }
+.loop svg { position: absolute; left: -8%; top: -18%; width: 116%; height: 136%; overflow: visible; pointer-events: none; }
+.loop path { fill: none; stroke: var(--red); stroke-width: 2; stroke-linecap: round; vector-effect: non-scaling-stroke; }

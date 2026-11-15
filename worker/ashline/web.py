@@ -295,12 +295,21 @@ def create_app(store_factory=Store) -> FastAPI:
             raise HTTPException(status_code=404)
         return TEMPLATES.get_template(f"preview_{kind}.html").render(**preview_context(token, store, case))
 
-    @app.get("/static/pdfjs/{name}")
-    def pdfjs(name: str):
-        path = Path(__file__).parent / "static" / "pdfjs" / name
-        if name not in ("pdf.min.mjs", "pdf.worker.min.mjs") or not path.exists():
+    static_root = (Path(__file__).parent / "static").resolve()
+    static_types = {".mjs": "text/javascript", ".js": "text/javascript", ".css": "text/css", ".png": "image/png",
+                    ".jpg": "image/jpeg", ".woff2": "font/woff2", ".svg": "image/svg+xml"}
+
+    @app.get("/static/{path:path}")
+    def static(path: str):
+        target = (static_root / path).resolve()
+        if static_root not in target.parents or not target.is_file() or target.suffix not in static_types:
             raise HTTPException(status_code=404)
-        return FileResponse(path, media_type="text/javascript", headers={"Cache-Control": "public, max-age=86400"})
+        return FileResponse(target, media_type=static_types[target.suffix],
+                            headers={"Cache-Control": "public, max-age=86400"})
+
+    @app.get("/favicon.ico")
+    def favicon():
+        return FileResponse(static_root / "img" / "favicon.png", media_type="image/png")
 
     @app.get("/p/{token}/export.{kind}")
     def export(token: str, kind: str, inline: int = 0):

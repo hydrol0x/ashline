@@ -146,13 +146,13 @@ def export_pdf(case_id: str, store: Store | None = None, include_suggested: bool
     m = meter(case_id, store)
     styles = getSampleStyleSheet()
     small = ParagraphStyle("small", parent=styles["Normal"], fontSize=8.5, leading=11)
-    note = ParagraphStyle("note", parent=small, textColor=colors.HexColor("#6B655C"))
-    ink, line = colors.HexColor("#2A2826"), colors.HexColor("#D9D2C7")
+    note = ParagraphStyle("note", parent=small, textColor=colors.HexColor("#6C6863"))
+    ink, line, red = colors.HexColor("#171615"), colors.HexColor("#D5DCDE"), colors.HexColor("#B3171D")
 
     def footer(canvas, doc):
         canvas.saveState()
         canvas.setFont("Helvetica", 7.5)
-        canvas.setFillColor(colors.HexColor("#6B655C"))
+        canvas.setFillColor(colors.HexColor("#6C6863"))
         canvas.drawString(0.75 * inch, 0.5 * inch, DISCLAIMER)
         canvas.drawRightString(letter[0] - 0.75 * inch, 0.5 * inch, f"Page {doc.page}")
         canvas.restoreState()
@@ -166,7 +166,18 @@ def export_pdf(case_id: str, store: Store | None = None, include_suggested: bool
             width, height = width * max_height / height, max_height
         return RLImage(buf, width=width, height=height)
 
-    story = [Paragraph(f"Contents inventory: {case.get('name') or 'Home'}", styles["Title"])]
+    title = ParagraphStyle("title", parent=styles["Title"], alignment=0, fontSize=22, leading=26, textColor=ink, spaceAfter=4)
+    logo_path = Path(__file__).parent / "static" / "img" / "logo.png"
+    story = []
+    if logo_path.exists():
+        mark = RLImage(str(logo_path), width=0.42 * inch, height=0.42 * inch * 304 / 360)
+        brand = Table([[mark, Paragraph("<font name='Times-Bold' size='14'>Ashline</font>", small)]],
+                      colWidths=[0.5 * inch, 2 * inch], hAlign="LEFT")
+        brand.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
+        story += [brand, Spacer(1, 0.18 * inch)]
+    story += [Paragraph(f"Contents inventory: {case.get('name') or 'Home'}", title),
+              Table([[""]], colWidths=[6.8 * inch], rowHeights=[2], hAlign="LEFT",
+                    style=TableStyle([("BACKGROUND", (0, 0), (-1, -1), red)]))]
     facts = [["Items listed", str(sum(int(r['qty'] or 1) for r in rows))],
              ["Estimated replacement cost (mid)", money(sum(float(r['rcv_mid'] or 0) * int(r['qty'] or 1) for r in rows))],
              ["Range (low to high)", f"{money(m['low'])} to {money(m['high'])}"],
@@ -182,7 +193,7 @@ def export_pdf(case_id: str, store: Store | None = None, include_suggested: bool
                   ["Still to document", money(m["target"])]]
     table = Table(facts, colWidths=[3.6 * inch, 3.2 * inch])
     table.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 10), ("LINEBELOW", (0, 0), (-1, -1), 0.4, line),
-                               ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#6B655C")),
+                               ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#6C6863")),
                                ("BOTTOMPADDING", (0, 0), (-1, -1), 6), ("TOPPADDING", (0, 0), (-1, -1), 6)]))
     story += [Spacer(1, 0.15 * inch), table, Spacer(1, 0.2 * inch),
               Paragraph("Values are estimates of the cost to replace each item new today. Items marked "
@@ -210,11 +221,11 @@ def export_pdf(case_id: str, store: Store | None = None, include_suggested: bool
             except OSError:
                 thumb = ""
         brand = f" ({row['brand_model']})" if row["brand_model"] else ""
-        data.append([thumb, Paragraph(f"{row['item']}{brand}<br/><font color='#6B655C'>{row['category']}</font>", small),
+        data.append([thumb, Paragraph(f"{row['item']}{brand}<br/><font color='#6C6863'>{row['category']}</font>", small),
                      Paragraph(row["room"], small), row["qty"],
                      money(row["rcv_low"]) if row["rcv_low"] != "" else "", money(row["rcv_mid"]) if row["rcv_mid"] != "" else "",
                      money(row["rcv_high"]) if row["rcv_high"] != "" else "",
-                     Paragraph(f"{row['evidence']}<br/><font color='#6B655C'>{row['contributor']}</font>", small)])
+                     Paragraph(f"{row['evidence']}<br/><font color='#6C6863'>{row['contributor']}</font>", small)])
     table = Table(data, colWidths=[0.9 * inch, 2.1 * inch, 1.0 * inch, 0.4 * inch, 0.6 * inch, 0.6 * inch, 0.6 * inch, 1.3 * inch],
                   repeatRows=1)
     table.setStyle(TableStyle([("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 8.5),

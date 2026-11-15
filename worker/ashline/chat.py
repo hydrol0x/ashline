@@ -538,10 +538,11 @@ class Engine:
         self._save(chat_id, context)
         lines = "\n".join(f"{n}. {_cap(bank.describe(m))}" for n, m in enumerate(matches, 1))
         count = len(matches)
-        return [Outbound(chat_id, f"I found {count} card purchase{'s' if count != 1 else ''} that match"
-                                  f"{'' if count != 1 else 'es'} things on your list:\n{lines}\n\n"
-                                  "Should I use what you paid as the price for these? A purchase record is also "
-                                  "proof for the insurer. Reply yes or no.")]
+        found = (f"I found {count} card purchases that match things on your list" if count != 1
+                 else "I found 1 card purchase that matches something on your list")
+        return [Outbound(chat_id, f"{found}:\n{lines}\n\nShould I use what you paid as the price for "
+                                  f"{'these' if count != 1 else 'it'}? A purchase record is also proof for the "
+                                  "insurer. Reply yes or no.")]
 
     def _bank_apply(self, case: dict, chat_id: str, member: dict, pending: list) -> list[Outbound]:
         from . import bank

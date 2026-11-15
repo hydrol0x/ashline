@@ -35,6 +35,9 @@ SOURCE_PREFIX = "bank record"
 STOP = {"the", "a", "an", "and", "with", "of", "for", "in", "on", "to", "from", "by", "new", "set", "pack", "inch", "in",
         "size", "large", "small", "medium", "big", "black", "white", "gray", "grey", "brown", "blue", "red", "green",
         "dark", "light", "partly", "visible", "only", "model", "series", "edition", "color", "colour"}
+# Materials help confirm a match but say nothing about which object it is: "leather" alone matches nothing.
+MATERIALS = {"leather", "wood", "wooden", "metal", "steel", "stainless", "glass", "plastic", "fabric", "velvet",
+             "cotton", "brass", "oak", "walnut", "pine", "chrome", "ceramic", "marble", "wool", "linen"}
 # The same thing under two names.
 SAME = {"tv": "television", "couch": "sofa", "loveseat": "sofa", "sectional": "sofa", "fridge": "refrigerator",
         "laptop": "computer", "notebook": "computer", "macbook": "computer", "recliner": "armchair", "hoover": "vacuum",
@@ -144,7 +147,7 @@ def score(item: dict, purchase: dict) -> float:
         return 0.0
     label = words(item["label"]) | words(item.get("brand_guess") or "")
     common = said & label
-    if not common:
+    if not common - MATERIALS:
         return 0.0
     value = len(common) / max(min(len(said), len(label)), 1)
     brand = words(item.get("brand_guess") or "")
@@ -153,9 +156,9 @@ def score(item: dict, purchase: dict) -> float:
     # A $12 purchase is not the sofa, and a $2,000 one is not the lamp.
     mid, qty = float(item.get("price_mid") or 0), int(item.get("qty") or 1)
     if mid:
-        ratio = purchase["amount"] / (mid * qty)
-        ratio_one = purchase["amount"] / mid
-        if not (0.25 <= ratio <= 4 or 0.25 <= ratio_one <= 4):
+        # With a single word in common ("sofa") the amount has to be close to the estimate to count.
+        low, high = (0.25, 4) if len(common) > 1 else (0.5, 2)
+        if not any(low <= purchase["amount"] / expected <= high for expected in (mid * qty, mid)):
             return 0.0
     return min(value, 1.0)
 
@@ -177,17 +180,26 @@ def match_purchases(items: list[dict], bought: list[dict], threshold: float = 0.
 
 def find_matches(case_id: str, store, client: NessieClient | None = None) -> list[dict]:
     """Purchases that match this case's inventory lines and are not already used as their price."""
-    items = [i for i in store.get_items(case_id, canonical_only=True)
-             if i["status"] != "rejected" and i.get("price_source") != "set by family"
+    everything = [i for i in store.get_items(case_id, canonical_only=True) if i["status"] != "rejected"]
+    used = set()                                            # purchases that already are some item's price
+    for item in everything:
+        if (item.get("price_source") or "").startswith(SOURCE_PREFIX):
+            try:
+                used |= {ref.get("bank_id") for ref in json.loads(item.get("price_ref") or "[]")}
+            except (ValueError, AttributeError):
+                pass
+    items = [i for i in everything if i.get("price_source") != "set by family"
              and not (i.get("price_source") or "").startswith(SOURCE_PREFIX)]
-    return match_purchases(items, purchases(client))
+    return match_purchases(items, [p for p in purchases(client) if p["id"] not in used])
 
 
 def describe(match: dict) -> str:
     purchase, item = match["purchase"], match["item"]
     where = f" at {purchase['merchant']}" if purchase["merchant"] else ""
     when = f" on {purchase['date']}" if purchase.get("date") else ""
-    before = f" (the list had about {money(item['price_mid'])})" if item.get("price_mid") else ""
+    qty = int(item.get("qty") or 1)
+    before = (f" (the list had about {money(item['price_mid'] * qty)}{f' for all {qty}' if qty > 1 else ''})"
+              if item.get("price_mid") else "")
     return f"{item['label']}: {money(purchase['amount'])}{where}{when}{before}"
 
 

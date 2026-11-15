@@ -101,6 +101,12 @@ def test_a_purchase_matches_the_item_it_names_once():
     found = {m["item"]["item_id"]: m["purchase"]["id"] for m in bank.match_purchases([sofa, other_sofa, lamp, tv], bought)}
     assert found == {1: "a", 3: "c", 4: "d"}            # 'tv' is a television; wipes are not a sofa; one sofa bought
     assert bank.score(sofa, bought[1]) == 0             # $5 is not a $900 sofa
+    # One shared word is not enough when the amount is far from the estimate; materials do not count as shared.
+    recliner = {"item_id": 5, "label": "black leather recliner armchair", "price_mid": 350, "qty": 1}
+    loveseat = {"id": "f", "description": "Gray leather reclining loveseat", "amount": 828.0, "merchant": "IKEA", "date": None}
+    assert bank.score(recliner, loveseat) == 0
+    assert bank.score({**recliner, "price_mid": 800}, loveseat) == 0          # close in price, still only "leather"
+    assert bank.words("Stainless steel French-door refrigerators") == {"stainless", "steel", "french", "door", "refrigerator"}
     assert bank.describe({"item": sofa, "purchase": bought[0]}) == \
         "blue velvet sofa: $1,149 at IKEA on 2024-03-12 (the list had about $900)"
 
@@ -126,6 +132,12 @@ def test_checking_the_bank_in_chat_proposes_then_applies_and_undoes(nessie, clie
     assert after["price_source"] == "bank record: IKEA"
     assert json.loads(after["price_ref"])[0]["bank_id"] == "p1"
     assert "found none" in texts(f.say(MOM, "check my bank"))[0]                           # already used
+    # A purchase that is already one item's price is not offered for another item.
+    twin = f.store.add_item(f.case_id, {"label": "blue velvet sofa", "category": "furniture", "room_label": "Den"},
+                            source="voice")
+    f.store.update_item(f.case_id, twin, price_mid=1000)
+    assert "found none" in texts(f.say(MOM, "check my bank"))[0]
+    f.store.set_item_status(f.case_id, twin, "rejected")
 
     assert texts(f.say(MOM, "undo")) == ["Undone: those prices are back to the estimates."]
     back = f.store.get_item(f.case_id, sofa["item_id"])
@@ -158,6 +170,10 @@ def test_a_card_purchase_counts_as_proof_for_a_remembered_item(client):
     matches = bank.find_matches(f.case_id, f.store, client)
     assert bank.apply_matches(f.store, f.case_id, matches) == 1
     assert meter(f.case_id, f.store)["backed"] == 1149 and meter(f.case_id, f.store)["memory"] == 0
+
+    from ashline.export import export_rows
+    assert export_rows(f.case_id, f.store)[0]["evidence"] == \
+        "From memory, with a card purchase at IKEA on 2024-03-12 ($1,149.00)"
 
     from fastapi.testclient import TestClient
 

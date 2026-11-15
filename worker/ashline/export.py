@@ -12,6 +12,7 @@ items are always labelled as such.
 from __future__ import annotations
 
 import csv
+import json
 from pathlib import Path
 
 from . import config
@@ -35,8 +36,31 @@ def evidence_text(source: str, date: str | None) -> str:
     }.get(source, source)
 
 
+def purchase_text(item: dict) -> str:
+    """'card purchase at IKEA on 2024-03-12 ($1,149.00)' for an item priced from a bank record, else ''."""
+    if not (item.get("price_source") or "").startswith("bank record"):
+        return ""
+    try:
+        ref = json.loads(item.get("price_ref") or "[]")[0]
+        amount = f" (${float(ref['price']):,.2f})"
+    except (ValueError, LookupError, TypeError):
+        return "card purchase record"
+    return (f"card purchase at {ref.get('retailer') or 'a store'}"
+            + (f" on {ref['date']}" if ref.get("date") else "") + amount)
+
+
 def _number(value) -> float | str:
     return round(float(value), 2) if value not in (None, "") else ""
+
+
+def _evidence(item: dict) -> str:
+    """What stands behind the line: how it was seen, plus the purchase record when there is one."""
+    seen, bought = evidence_text(item["source"], item["evidence_date"]), purchase_text(item)
+    if not bought:
+        return seen
+    if item["source"] == "voice":                           # the purchase is the proof a remembered item lacked
+        return f"From memory, with a {bought}"
+    return f"{seen}; {bought}"
 
 
 def export_rows(case_id: str, store: Store | None = None, include_suggested: bool = False,
@@ -58,7 +82,7 @@ def export_rows(case_id: str, store: Store | None = None, include_suggested: boo
             "qty": item["qty"] or 1, "brand_model": item["brand_guess"] or "", "age": "",
             "rcv_low": _number(item.get("price_low")), "rcv_mid": _number(item.get("price_mid")),
             "rcv_high": _number(item.get("price_high")),
-            "source": item["source"], "evidence": evidence_text(item["source"], item["evidence_date"]),
+            "source": item["source"], "evidence": _evidence(item),
             "status": item["status"],
             "photo_refs": ", ".join(dict.fromkeys(s["photo_id"] for s in sightings if s.get("photo_id"))),
             "contributor": ", ".join(people), "evidence_link": link, "_id": item["item_id"],

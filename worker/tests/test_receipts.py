@@ -103,7 +103,7 @@ def test_the_item_sheet_and_the_export_name_the_receipt():
     detail = TestClient(create_app(lambda: f.store)).get(f"/p/{token}/item/{sofa['item_id']}.json").json()
     assert detail["price_basis"] == "What the family paid, from a receipt they sent."
     assert (detail["price_sources"][0]["kind"], detail["price_sources"][0]["detail"]) == ("paid", "Receipt from IKEA, 2024-03-12")
-    assert detail["badges"]["receipt"] == 1 and detail["basis"] == "paid"
+    assert detail["badges"]["receipt"] == 1 and detail["price_from"] == "paid"
     f.store.set_item_status(f.case_id, sofa["item_id"], "confirmed")
     row = next(r for r in export_rows(f.case_id, f.store) if "sofa" in r["item"])
     assert row["evidence"].endswith("receipt from IKEA dated 2024-03-12 ($1,149.00)") and row["basis"].startswith("Paid")

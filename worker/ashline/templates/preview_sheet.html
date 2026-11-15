@@ -19,6 +19,9 @@
   tr.total td { font-weight: 700; border-bottom: 0; border-top: 2px solid var(--ink); background: #fff; font-size: 16px; }
   tr.total td:first-child { background: #fff; }
   .muted { color: var(--muted); }
+  .claims { margin: 0 0 16px; border-top: 1px solid var(--rule); }
+  .claim { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--rule); }
+  .claim b { font-weight: 700; } .claim span { color: var(--ink-2); font-variant-numeric: tabular-nums; }
   .hint { font-size: 12px; color: var(--muted); margin: 8px 2px 0; }
   @media (min-width: 761px) { .hint { display: none; } }
 </style>
@@ -35,6 +38,11 @@
     <div><b>{{ money(total["mid"]) }}</b>estimated replacement cost</div>
     <div><b>{{ money_range(total["low"], total["high"]) if total["mid"] else "—" }}</b>range</div>
   </div>
+  {% if claim_groups %}
+  <div class="claims">
+    {% for g in claim_groups %}<div class="claim"><b>{{ g.title }}</b><span>{{ g["items"] }} item{{ '' if g["items"] == 1 else 's' }} · {{ money(g.new) }} new{% if g.basis == 'acv' %} · about {{ money(g.acv) }} depreciated{% endif %}</span></div>{% endfor %}
+  </div>
+  {% endif %}
   <p class="notice">Only items you have confirmed are included.{% if pending %} {{ pending }} more {{ 'is' if pending == 1 else 'are' }} waiting for your OK on <a href="/p/{{ token }}">the list</a>.{% endif %}</p>
 
   {% if rows %}

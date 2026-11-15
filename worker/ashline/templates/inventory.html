@@ -69,6 +69,19 @@
   .item .price { font-size: 15px; font-weight: 600; margin-top: 6px; font-variant-numeric: tabular-nums; }
   .item .foot { font-size: 12.5px; color: var(--muted); margin-top: 4px; display: flex; justify-content: space-between; gap: 8px; }
   .item .foot span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .claims { margin-top: 16px; border-top: 1px solid var(--rule); }
+  .claim { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 0; border-bottom: 1px solid var(--rule); font-size: 15px; }
+  .claim b { font-weight: 700; }
+  .claim span { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+  .claims-note { font-size: 12.5px; color: var(--muted); margin: 8px 0 0; }
+  .item .acv { font-size: 13px; color: var(--muted); margin-top: 1px; }
+  .tags { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+  .tag { font-size: 11.5px; font-weight: 700; padding: 2px 7px; border: 1.5px solid var(--rule); color: var(--ink-2); }
+  .tag.flood { border-color: #2F5D8A; color: #2F5D8A; }
+  .tag.wind { border-color: var(--muted); }
+  .tag.essential { border-color: var(--red); color: var(--red); }
+  .claim-pick { display: flex; gap: 8px; align-items: center; margin-top: 12px; font-size: 14px; color: var(--muted); }
+  .claim-pick .btn { flex: 1; padding: 9px 8px; font-size: 14px; }
   .empty { color: var(--muted); padding: 48px 0; font-size: 16px; }
 
   .footer { position: fixed; left: 0; right: 0; bottom: 0; background: #fff; border-top: 1px solid var(--rule); padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); z-index: 5; }
@@ -174,6 +187,18 @@
       {% if meter.memory %}<span><i style="background: var(--flame-soft)"></i><b>{{ money(meter.memory) }}</b> from memory</span>{% endif %}
       {% if meter.pending %}<span><i style="background: #C9CED2"></i><b>{{ money(meter.pending) }}</b> waiting for an OK ({{ meter.pending_items }})</span>{% endif %}
     </div>
+    {% if claims|length > 1 or (claims and claims[0].basis == 'acv') %}
+    <div class="claims">
+      {% for c in claims %}
+      <div class="claim">
+        <b>{{ c.title }}</b>
+        <span>{{ c["items"] }} item{{ '' if c["items"] == 1 else 's' }} · {{ money(c.new) }} new{% if c.basis == 'acv' %} · about {{ money(c.acv) }} depreciated{% endif %}</span>
+      </div>
+      {% endfor %}
+      {% if claims|selectattr('basis', 'equalto', 'acv')|list %}<p class="claims-note">Flood insurance pays depreciated value. Those figures are estimates for typical age and wear.</p>{% endif %}
+    </div>
+    {% endif %}
+    {% if show_essentials and essentials %}<div class="due">{{ essentials }} essential item{{ '' if essentials == 1 else 's' }} marked for FEMA (appliances, furniture, a computer)</div>{% endif %}
     {% if meter.days_left is not none %}<div class="due">Proof of loss due in {{ meter.days_left }} day{{ '' if meter.days_left == 1 else 's' }}</div>{% endif %}
     {% if not meter.limit and not case.coverage_skipped and role == 'owner' %}
       <div class="ask">
@@ -224,7 +249,9 @@
       <div class="body">
         <div class="name">{{ i.title }}</div>
         <div class="line">{{ i.room }} · {{ i.category }}{% if i.brand %} · {{ i.brand }}{% endif %}</div>
-        {% if i.price %}<div class="price">{{ i.price }}{% if i.basis and i.basis != 'estimate' %}<small>{{ i.basis }}</small>{% endif %}</div>{% endif %}
+        {% if i.price %}<div class="price">{{ i.price }}{% if i.price_from and i.price_from != 'estimate' %}<small>{{ i.price_from }}</small>{% endif %}</div>{% endif %}
+        {% if i.acv_text %}<div class="acv">about {{ i.acv_text }} depreciated</div>{% endif %}
+        {% if i.cause or (show_essentials and i.essential) %}<div class="tags">{% if i.cause %}<span class="tag {{ i.cause }}">{{ 'Flood' if i.cause == 'flood' else 'Wind & rain' }}</span>{% endif %}{% if show_essentials and i.essential %}<span class="tag essential">Essential</span>{% endif %}</div>{% endif %}
         <div class="foot">
           <span>{{ [(i.badges.photo ~ (' photo' if i.badges.photo == 1 else ' photos')) if i.badges.photo else none, ('from memory' if i.badges.memory else none), ((i.badges.receipt ~ ' receipt') if i.badges.receipt else none)]|select|join(' · ') }}</span>
           <span>{{ i.contributors|join(', ') }}</span>
@@ -243,7 +270,9 @@
       <div class="body">
         <div class="name">{{ i.title }}</div>
         <div class="line">{{ i.room }} · {{ i.category }}{% if i.brand %} · {{ i.brand }}{% endif %}</div>
-        {% if i.price %}<div class="price">{{ i.price }}{% if i.basis and i.basis != 'estimate' %}<small>{{ i.basis }}</small>{% endif %}</div>{% endif %}
+        {% if i.price %}<div class="price">{{ i.price }}{% if i.price_from and i.price_from != 'estimate' %}<small>{{ i.price_from }}</small>{% endif %}</div>{% endif %}
+        {% if i.acv_text %}<div class="acv">about {{ i.acv_text }} depreciated</div>{% endif %}
+        {% if i.cause or (show_essentials and i.essential) %}<div class="tags">{% if i.cause %}<span class="tag {{ i.cause }}">{{ 'Flood' if i.cause == 'flood' else 'Wind & rain' }}</span>{% endif %}{% if show_essentials and i.essential %}<span class="tag essential">Essential</span>{% endif %}</div>{% endif %}
         <div class="foot">
           <span>{{ [(i.badges.photo ~ (' photo' if i.badges.photo == 1 else ' photos')) if i.badges.photo else none, ('from memory' if i.badges.memory else none), ((i.badges.receipt ~ ' receipt') if i.badges.receipt else none)]|select|join(' · ') }}</span>
           <span>{{ i.contributors|join(', ') }}</span>
@@ -274,7 +303,7 @@
 
 <script>
 (function () {
-  var token = {{ token|tojson }}, grid = document.getElementById('grid');
+  var token = {{ token|tojson }}, grid = document.getElementById('grid'), DISASTER = {{ disaster|tojson }};
   var chips = [].slice.call(document.querySelectorAll('.chip')), room = '';
   var sortBox = document.getElementById('sort');
   try { var saved = localStorage.getItem('ashline-sort'); if (saved && sortBox.querySelector('option[value="' + saved + '"]')) sortBox.value = saved; } catch (e) {}
@@ -362,7 +391,7 @@
     if (d.price) {
       if (!price) { price = el('div', null, 'price'); c.querySelector('.line').after(price); }
       price.textContent = d.price;
-      if (d.basis && d.basis !== 'estimate') price.appendChild(el('small', d.basis));
+      if (d.price_from && d.price_from !== 'estimate') price.appendChild(el('small', d.price_from));
     }
     c.dataset.value = d.value; c.dataset.name = (d.title || '').toLowerCase();
   }
@@ -457,6 +486,7 @@
     sheet.appendChild(el('h2', d.title));
     sheet.appendChild(el('p', [d.room, d.category, d.brand].filter(Boolean).join(' · '), 'muted'));
     if (d.price) sheet.appendChild(el('p', d.price, 'price-line'));
+    if (d.acv_text) sheet.appendChild(el('p', 'About ' + d.acv_text + ' depreciated, which is what flood insurance pays (an estimate).', 'muted small'));
     if (d.qty > 1 && !d.price) sheet.appendChild(el('p', 'Quantity: ' + d.qty, 'price-line'));
     if (flash) { sheet.appendChild(el('p', flash, 'saved')); flash = ''; }
     var kinds = (d.price_sources || []).map(function (p) { return p.kind; });
@@ -560,7 +590,21 @@
       act(row, 'Fix name', 'quiet', function () { edit('What is it?', 'Be as specific as you can, e.g. "Pottery Barn arc floor lamp".', d.label, 'text', 'rename'); });
       act(row, 'Quantity', 'quiet', function () { edit('How many were there?', null, d.qty, 'qty', 'qty'); });
       act(row, 'Set price', 'quiet', function () { edit('What does one cost to buy new?', 'Your number replaces the estimate and is marked as set by the family.', d.price_mid ? Math.round(d.price_mid) : '', 'money', 'price'); });
-      sheet.appendChild(main); sheet.appendChild(row); sheet.appendChild(editor);
+      sheet.appendChild(main); sheet.appendChild(row);
+      if (DISASTER === 'storm' && d.cause) {             // move an item between the flood and the wind claim
+        var pick = el('div', null, 'claim-pick');
+        pick.appendChild(el('span', 'Claim'));
+        [['flood', 'Flood'], ['wind', 'Wind & rain']].forEach(function (c) {
+          var b = el('button', (d.cause === c[0] ? '✓ ' : '') + c[1], 'btn' + (d.cause === c[0] ? '' : ' quiet')); b.type = 'button';
+          b.addEventListener('click', function () {
+            if (d.cause === c[0]) return;
+            post('/item/' + id, { action: 'cause', value: c[0] }).then(function () { dirty++; delete cache[id]; flash = '✓ Moved to the ' + c[1].toLowerCase() + ' claim'; open(id); });
+          });
+          pick.appendChild(b);
+        });
+        sheet.appendChild(pick);
+      }
+      sheet.appendChild(editor);
       keys.yes = function () { if (editor.hidden) yesBtn.click(); };
       keys.no = function () { if (editor.hidden) noBtn.click(); };
       keys.editor = editor;

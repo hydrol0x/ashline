@@ -15,14 +15,15 @@ import csv
 import json
 from pathlib import Path
 
-from . import config
+from . import config, disaster
 from .meter import DISCLAIMER, meter
 from .rooms import tidy_room
 from .pricing import in_use, money, price_sources
 from .store import Store
 
 COLUMNS = ["room", "category", "item", "qty", "brand_model", "age", "rcv_low", "rcv_mid", "rcv_high",
-           "source", "evidence", "status", "photo_refs", "contributor", "evidence_link", "basis"]
+           "source", "evidence", "status", "photo_refs", "contributor", "evidence_link", "claim", "acv", "essential",
+           "basis"]
 
 
 def evidence_text(source: str, date: str | None) -> str:
@@ -90,10 +91,32 @@ def export_rows(case_id: str, store: Store | None = None, include_suggested: boo
             "status": item["status"],
             "photo_refs": ", ".join(dict.fromkeys(s["photo_id"] for s in sightings if s.get("photo_id"))),
             "contributor": ", ".join(people), "evidence_link": link, "_id": item["item_id"],
+            **_claim_fields(case, item),
         })
     first, second = ("category", "room") if group_by == "category" else ("room", "category")
-    rows.sort(key=lambda r: (r[first], r[second], r["item"].lower()))
+    order = {key: n for n, (key, _, _) in enumerate(disaster.claims(case))}
+    rows.sort(key=lambda r: (order.get(r["_claim"], 0), r[first], r[second], r["item"].lower()))
     return rows
+
+
+def _claim_fields(case: dict, item: dict) -> dict:
+    key = disaster.claim_key(case, item)
+    title, basis = next(((t, b) for k, t, b in disaster.claims(case) if k == key), ("Homeowners claim", "rcv"))
+    each = disaster.acv(item.get("price_mid"), item.get("category")) if basis == "acv" else None
+    return {"claim": title, "acv": _number(each), "essential": "yes" if disaster.is_essential(item) else "",
+            "_claim": key, "_basis": basis}
+
+
+def claim_groups(case: dict, rows: list[dict]) -> list[dict]:
+    """The rows split by claim, with totals, in the order the claims are listed."""
+    out = []
+    for key, title, basis in disaster.claims(case):
+        mine = [r for r in rows if r["_claim"] == key]
+        qty = lambda r: int(r["qty"] or 1)
+        out.append({"key": key, "title": title, "basis": basis, "rows": mine, "items": sum(qty(r) for r in mine),
+                    "new": sum(float(r["rcv_mid"] or 0) * qty(r) for r in mine),
+                    "acv": sum(float(r["acv"] or 0) * qty(r) for r in mine)})
+    return out
 
 
 def export_csv(case_id: str, store: Store | None = None, include_suggested: bool = False) -> Path:
@@ -117,15 +140,18 @@ def export_xlsx(case_id: str, store: Store | None = None, include_suggested: boo
     sheet = book.active
     sheet.title = "Inventory"
     headers = ["Room", "Category", "Item", "Qty", "Brand / model", "Age", "Low", "Mid", "High", "Evidence type",
-               "Evidence", "Status", "Photos", "Contributor", "Evidence link"]
+               "Evidence", "Status", "Photos", "Contributor", "Evidence link", "Claim", "Depreciated (est.)", "Essential"]
     sheet.append(headers)
     for cell in sheet[1]:
         cell.font = Font(bold=True)
     for row in rows:
         sheet.append([row[c] for c in COLUMNS])
-    for index, width in enumerate([22, 14, 44, 6, 18, 8, 10, 10, 10, 13, 38, 11, 22, 18, 40], 1):
+    for index, width in enumerate([22, 14, 44, 6, 18, 8, 10, 10, 10, 13, 38, 11, 22, 18, 40, 34, 16, 10], 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
     for row in sheet.iter_rows(min_row=2, min_col=7, max_col=9):
+        for cell in row:
+            cell.number_format = '"$"#,##0'
+    for row in sheet.iter_rows(min_row=2, min_col=17, max_col=17):
         for cell in row:
             cell.number_format = '"$"#,##0'
     sheet.freeze_panes = "A2"
@@ -138,6 +164,40 @@ def export_xlsx(case_id: str, store: Store | None = None, include_suggested: boo
         cell.font = Font(bold=True)
     for name, t in category_totals(rows).items():
         totals.append([name, t["items"], t["low"], t["mid"], t["high"]])
+
+    case = store.get_case(case_id) or {}
+    groups = claim_groups(case, rows)
+    if len(groups) > 1 or groups[0]["basis"] == "acv":
+        summary = book.create_sheet("By claim", 1)
+        summary.append(["Claim", "Items", "Replacement cost (new)", "Depreciated value (est.)"])
+        for cell in summary[1]:
+            cell.font = Font(bold=True)
+        for g in groups:
+            summary.append([g["title"], g["items"], g["new"], g["acv"] if g["basis"] == "acv" else None])
+        summary.append([])
+        summary.append([disaster.ACV_NOTE])
+        summary.column_dimensions["A"].width = 44
+        for col in "CD":
+            summary.column_dimensions[col].width = 24
+        for g in groups:                                   # one sheet per claim, ready to hand to that insurer
+            if not g["rows"]:
+                continue
+            part = book.create_sheet(("Flood claim" if g["key"] == "flood" else "Wind and rain claim"
+                                      if g["key"] == "wind" else "Claim")[:31])
+            part.append(headers)
+            for cell in part[1]:
+                cell.font = Font(bold=True)
+            for row in g["rows"]:
+                part.append([row[c] for c in COLUMNS])
+            part.freeze_panes = "A2"
+    if case.get("insured") == "no":
+        essentials = book.create_sheet("Essentials (FEMA)")
+        essentials.append(["Item", "Room", "Qty", "Replacement cost (mid)"])
+        for cell in essentials[1]:
+            cell.font = Font(bold=True)
+        for row in rows:
+            if row["essential"]:
+                essentials.append([row["item"], row["room"], row["qty"], row["rcv_mid"]])
     path = config.case_dir(case_id) / "inventory.xlsx"
     book.save(path)
     return path
@@ -225,19 +285,32 @@ def export_pdf(case_id: str, store: Store | None = None, include_suggested: bool
         facts.insert(0, ["Address", Paragraph(esc(case["address"]), small)])
     if case.get("loss_date"):
         facts.insert(1 if case.get("address") else 0, ["Date of loss", case["loss_date"][:10]])
+    groups = claim_groups(case, rows)
+    split = len(groups) > 1 or groups[0]["basis"] == "acv"
+    if case.get("disaster"):
+        facts.insert(0, ["What happened", disaster.NAMES.get(case["disaster"], "disaster").capitalize()])
+    if split:
+        for g in groups:
+            value = f"{g['items']} items · {money(g['new'])} new"
+            if g["basis"] == "acv":
+                value += f" · about {money(g['acv'])} depreciated"
+            facts.append([g["title"], value])
     if m["limit"]:
-        facts += [["Contents coverage limit", money(m["limit"])],
-                  ["Paid without an inventory under SB 495", money(m["advance"])],
-                  ["Still to document", money(m["target"])]]
+        facts += [["Contents coverage limit", money(m["limit"])]]
+        if m["advance"] is not None:
+            facts += [["Paid without an inventory under SB 495", money(m["advance"])]]
+        facts += [["Still to document", money(m["target"])]]
     table = Table(facts, colWidths=[3.6 * inch, 3.2 * inch])
     table.setStyle(TableStyle([("FONTSIZE", (0, 0), (-1, -1), 10), ("LINEBELOW", (0, 0), (-1, -1), 0.4, line),
                                ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#6C6863")),
                                ("BOTTOMPADDING", (0, 0), (-1, -1), 6), ("TOPPADDING", (0, 0), (-1, -1), 6)]))
     story += [Spacer(1, 0.15 * inch), table, Spacer(1, 0.2 * inch),
               Paragraph("Values are estimates of the cost to replace each item new today. Items marked "
-                        "\"from memory\" have no photo or receipt behind them. Under California SB 495 an insurer "
-                        "pays at least 60% of the contents limit, up to $350,000, without an inventory after a "
-                        "declared-disaster total loss.", note),
+                        "\"from memory\" have no photo or receipt behind them."
+                        + (" " + disaster.ACV_NOTE if split and any(g["basis"] == "acv" for g in groups) else "")
+                        + (" Under California SB 495 an insurer pays at least 60% of the contents limit, up to "
+                           "$350,000, without an inventory after a declared-disaster total loss."
+                           if disaster.uses_sb495(case) else ""), note),
               Spacer(1, 0.3 * inch), Paragraph("Totals by category", styles["Heading2"])]
 
     totals = [["Category", "Items", "Low", "Mid", "High"]] + [
@@ -246,30 +319,58 @@ def export_pdf(case_id: str, store: Store | None = None, include_suggested: bool
     table = Table(totals, colWidths=[2.6 * inch, 0.8 * inch, 1.1 * inch, 1.1 * inch, 1.1 * inch])
     table.setStyle(TableStyle([("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 9.5),
                                ("LINEBELOW", (0, 0), (-1, -1), 0.4, line), ("ALIGN", (1, 0), (-1, -1), "RIGHT")]))
-    story += [table, PageBreak(), Paragraph("Items", styles["Heading2"])]
+    story += [table, PageBreak()]
 
-    data = [["", "Item", "Room", "Qty", "Low", "Mid", "High", "Evidence"]]
-    for row in rows:
+    def thumb_for(row):
         item = store.get_item(case_id, row["_id"])
         photo = store.get_photo(case_id, item["photo_id"]) if item and item.get("photo_id") else None
-        thumb = ""
         if photo and Path(photo["path"]).exists():
             try:
-                thumb = picture(crop_item(photo["path"], item["bbox"], max_side=220), 0.8 * inch, 0.8 * inch)
+                return picture(crop_item(photo["path"], item["bbox"], max_side=220), 0.8 * inch, 0.8 * inch)
             except Exception:                               # one unreadable photo must not sink the PDF
-                thumb = ""
-        brand = f" ({esc(row['brand_model'])})" if row["brand_model"] else ""
-        data.append([thumb, Paragraph(f"{esc(row['item'])}{brand}<br/><font color='#6C6863'>{esc(row['category'])}</font>", small),
-                     Paragraph(esc(row["room"]), small), row["qty"],
-                     money(row["rcv_low"]) if row["rcv_low"] != "" else "", money(row["rcv_mid"]) if row["rcv_mid"] != "" else "",
-                     money(row["rcv_high"]) if row["rcv_high"] != "" else "",
-                     Paragraph(f"{esc(row['evidence'])}<br/><font color='#6C6863'>{esc(row['contributor'])}</font>", small)])
-    table = Table(data, colWidths=[0.9 * inch, 2.1 * inch, 1.0 * inch, 0.4 * inch, 0.6 * inch, 0.6 * inch, 0.6 * inch, 1.3 * inch],
-                  repeatRows=1)
-    table.setStyle(TableStyle([("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+                return ""
+        return ""
+
+    def items_table(subset, basis):
+        acv_cols = basis == "acv"
+        head = ["", "Item", "Room", "Qty"] + (["New", "Depr. (est.)"] if acv_cols else ["Low", "Mid", "High"]) + ["Evidence"]
+        data = [head]
+        for row in subset:
+            brand = f" ({esc(row['brand_model'])})" if row["brand_model"] else ""
+            label = f"{esc(row['item'])}{brand}<br/><font color='#6C6863'>{esc(row['category'])}</font>"
+            cell = lambda v: money(v) if v != "" and v is not None else ""
+            values = [cell(row["rcv_mid"]), cell(row["acv"])] if acv_cols else \
+                     [cell(row["rcv_low"]), cell(row["rcv_mid"]), cell(row["rcv_high"])]
+            data.append([thumb_for(row), Paragraph(label, small), Paragraph(esc(row["room"]), small), row["qty"], *values,
+                         Paragraph(f"{esc(row['evidence'])}<br/><font color='#6C6863'>{esc(row['contributor'])}</font>", small)])
+        widths = ([0.9, 2.1, 1.0, 0.4, 0.75, 0.75, 1.4] if acv_cols else [0.9, 2.1, 1.0, 0.4, 0.6, 0.6, 0.6, 1.3])
+        t = Table(data, colWidths=[w * inch for w in widths], repeatRows=1)
+        last_money = 5 if acv_cols else 6
+        t.setStyle(TableStyle([("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 8.5),
                                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LINEBELOW", (0, 0), (-1, -1), 0.4, line),
-                               ("ALIGN", (3, 0), (6, -1), "RIGHT"), ("TEXTCOLOR", (0, 0), (-1, -1), ink)]))
-    story.append(table)
+                               ("ALIGN", (3, 0), (last_money, -1), "RIGHT"), ("TEXTCOLOR", (0, 0), (-1, -1), ink)]))
+        return t
+
+    if split:
+        for n, g in enumerate(groups):
+            if not g["rows"]:
+                continue
+            total = f"{g['items']} items · {money(g['new'])} new"
+            if g["basis"] == "acv":
+                total += f" · about {money(g['acv'])} depreciated"
+            story += ([PageBreak()] if n and story and not isinstance(story[-1], PageBreak) else []) + [
+                Paragraph(esc(g["title"]), styles["Heading2"]), Paragraph(total, note), Spacer(1, 0.08 * inch),
+                items_table(g["rows"], g["basis"])]
+    else:
+        story += [Paragraph("Items", styles["Heading2"]), items_table(rows, groups[0]["basis"])]
+
+    if case.get("insured") == "no":
+        essentials = [r for r in rows if r["essential"]]
+        if essentials:
+            story += [PageBreak(), Paragraph("Essential items", styles["Heading2"]),
+                      Paragraph("Appliances, furniture and a computer: the kinds of personal property FEMA's "
+                                "Individuals and Households Program can help repair or replace for uninsured households.", note),
+                      Spacer(1, 0.08 * inch), items_table(essentials, "rcv")]
 
     # Appendix: each evidence photo once, with the listed items numbered on it.
     by_photo: dict[str, list[dict]] = {}

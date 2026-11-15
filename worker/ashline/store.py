@@ -57,9 +57,10 @@ MIGRATIONS = {
     "home": {"listing": "TEXT"},
     "cases": {"name": "TEXT", "invite_code": "TEXT", "owner_token": "TEXT", "member_token": "TEXT",
               "coverage_limit": "REAL", "coverage_skipped": "INTEGER DEFAULT 0", "review_hour": "INTEGER DEFAULT 18",
-              "last_review_at": "TEXT", "rooms_note": "TEXT", "reminders": "TEXT"},
+              "last_review_at": "TEXT", "rooms_note": "TEXT", "reminders": "TEXT",
+              "disaster": "TEXT", "insured": "TEXT", "room_causes": "TEXT"},
     "items": {"price_low": "REAL", "price_mid": "REAL", "price_high": "REAL", "price_source": "TEXT",
-              "detail": "TEXT", "reviewed": "INTEGER DEFAULT 0", "price_ref": "TEXT"},
+              "detail": "TEXT", "reviewed": "INTEGER DEFAULT 0", "price_ref": "TEXT", "cause": "TEXT"},
     "members": {"dm_chat": "TEXT"},
     "photos": {"number": "INTEGER", "batch_id": "TEXT", "taken": "TEXT", "status": "TEXT DEFAULT 'done'",
                "chat_id": "TEXT"},
@@ -126,7 +127,8 @@ class Store:
 
     def set_case(self, case_id: str, **fields) -> None:
         allowed = ("name", "invite_code", "owner_token", "member_token", "coverage_limit", "coverage_skipped",
-                   "review_hour", "last_review_at", "loss_date", "address", "rooms_note", "reminders")
+                   "review_hour", "last_review_at", "loss_date", "address", "rooms_note", "reminders",
+                   "disaster", "insured", "room_causes")
         with self.tx() as db:
             db.execute("INSERT OR IGNORE INTO cases (case_id, created_at) VALUES (?, ?)", (case_id, _now()))
             for key, value in fields.items():
@@ -371,7 +373,7 @@ class Store:
 
     def update_item(self, case_id: str, item_id: int, **fields) -> None:
         allowed = ("label", "category", "brand_guess", "qty", "room_id", "room_label", "detail", "price_low",
-                   "price_mid", "price_high", "price_source", "reviewed", "cluster_id", "status", "price_ref")
+                   "price_mid", "price_high", "price_source", "reviewed", "cluster_id", "status", "price_ref", "cause")
         with self.tx() as db:
             for key, value in fields.items():
                 if key in allowed:

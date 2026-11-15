@@ -90,7 +90,8 @@ def test_onboarding_then_family_group_shares_one_list(tg):
         api.message(text)
         bridge.poll()
     assert texts(api)[0].startswith("I'm Ashline.")
-    assert "make a new Telegram group" in texts(api)[-1] and "@AshlineHomeBot" in texts(api)[-1]
+    invite = next(t for t in texts(api) if "make a new Telegram group" in t)
+    assert "@AshlineHomeBot" in invite
 
     api.sent.clear()
     api.message(None, chat=-500, kind="group", user=1, group_chat_created=True)  # owner creates the family group

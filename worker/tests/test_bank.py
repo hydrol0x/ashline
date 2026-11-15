@@ -189,7 +189,7 @@ def test_a_card_purchase_counts_as_proof_for_a_remembered_item(client):
     assert detail["price_evidence"] == [{"text": "$1,149.00 · Card purchase at IKEA, 2024-03-12", "url": ""}]
     assert [(p["kind"], p["amount"], p["in_use"]) for p in detail["price_sources"]] == [
         ("paid", "$1,149.00", True), ("estimate", "$600–$1,300", False)]
-    assert detail["basis"] == "paid"
+    assert detail["price_from"] == "paid"
     assert detail["badges"]["receipt"] == 1 and not detail["needs_proof"]
 
 
@@ -336,7 +336,7 @@ def test_the_item_sheet_shows_every_price_and_which_is_in_use(client):
     def sheet(item):
         return web.get(f"/p/{token}/item/{item['item_id']}.json").json()
 
-    assert [p["kind"] for p in sheet(sofa)["price_sources"]] == ["estimate"] and sheet(sofa)["basis"] == "estimate"
+    assert [p["kind"] for p in sheet(sofa)["price_sources"]] == ["estimate"] and sheet(sofa)["price_from"] == "estimate"
     found = {"price": 1299.0, "low": 1199.0, "high": 1349.0, "retailer": "Acme Home", "matches": [
         {"title": "Velvet sofa", "price": 1299.0, "retailer": "Acme Home", "url": "https://shop.example/sofa"},
         {"title": "Another", "price": 1199.0, "retailer": "Other", "url": "javascript:alert(1)"}]}
@@ -351,7 +351,7 @@ def test_the_item_sheet_shows_every_price_and_which_is_in_use(client):
     stack = sheet(sofa)["price_sources"]
     assert [(p["kind"], p["in_use"]) for p in stack] == [("paid", True), ("online", False), ("estimate", False)]
     assert stack[0]["amount"] == "$1,149.00" and stack[0]["detail"] == "Card purchase at IKEA, 2024-03-12"
-    assert sheet(sofa)["price"] == "$1,149" and sheet(sofa)["basis"] == "paid"
+    assert sheet(sofa)["price"] == "$1,149" and sheet(sofa)["price_from"] == "paid"
     assert "paid" in web.get(f"/p/{token}").text
 
     # The family's own figure beats them all; undoing the bank step leaves the online price in use.

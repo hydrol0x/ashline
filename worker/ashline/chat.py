@@ -543,10 +543,15 @@ class Engine:
         Matches one of the home's rooms first; a short caption that names no known room is used as
         the room name itself, so 'dorm room' or 'Maya's bedroom' still keeps photos apart.
         """
-        caption = (text or "").strip(" .!").lower()
+        caption = (text or "").strip(" .!?").lower()
+        caption = re.sub(r"^(?:(?:just|only|this is|that's|thats|it's|its|here's|heres|in|from|the|our|my|"
+                         r"mom's|dad's|a|an)\s+)+", "", caption).strip()
         if not caption:
             return None
-        for name in sorted(self._room_names(case_id), key=len, reverse=True):
+        # Rooms of the home, then rooms earlier photos were given, so "basement" and "Basement" are one room.
+        known = list(self._room_names(case_id))
+        known += [p["room_label"] for p in self.store.get_photos(case_id, source="photo") if p.get("room_label")]
+        for name in sorted(dict.fromkeys(known), key=len, reverse=True):
             if re.search(rf"\b{re.escape(name.lower())}\b", caption):
                 return name
         if len(caption.split()) <= 3 and not re.search(r"\d", caption):

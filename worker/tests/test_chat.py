@@ -538,3 +538,15 @@ def test_plain_requests_to_delete_still_ask_first(fam):
     assert "Reply yes to delete" in fam.say(MOM, "Can you please delete my case")[0].text
     assert "deleted" in fam.say(MOM, "Yes really delete my case")[0].text
     assert fam.store.get_case(fam.case_id) is None
+
+
+
+def test_room_captions_are_tidied_and_reused(fam):
+    fam.say(MAYA, "just basement", [photo(640)])
+    fam.wait()
+    fam.say(MAYA, "basement", [photo(648)])
+    fam.wait()
+    fam.say(MAYA, "this is the Basement", [photo(656)])
+    fam.wait()
+    rooms = {fam.store.get_photo(fam.case_id, number=n)["room_label"] for n in (1, 2, 3)}
+    assert rooms == {"Basement"}

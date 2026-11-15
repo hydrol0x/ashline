@@ -77,8 +77,26 @@ def enabled(engine) -> bool:
 
 def _model(engine):
     model = getattr(engine, "assistant_model", None)
-    return model if model is not None else (config.env("ASHLINE_CHAT_MODEL") or config.env("ASHLINE_AGENT_MODEL")
-                                            or "anthropic:claude-opus-5-5")
+    if model is not None:
+        return model
+    return chat_model_name(config.env("ASHLINE_CHAT_MODEL") or config.env("ASHLINE_AGENT_MODEL"))
+
+
+def chat_model_name(name: str | None) -> str:
+    """The model string for the chat agent, always naming Anthropic as the provider.
+
+    The chat agent runs on the Anthropic key. A setting written without a provider
+    ("claude-opus-5-5"), or in another service's style ("anthropic/claude-sonnet-5.5"), would
+    otherwise be taken for another provider's model and fail for want of that provider's key."""
+    name = (name or "").strip()
+    if not name:
+        return "anthropic:claude-opus-5-5"
+    if name.startswith("anthropic:"):
+        return name
+    bare = name.split("/", 1)[-1].split(":", 1)[-1]
+    if bare.startswith("claude"):
+        return "anthropic:" + bare.replace(".", "-")
+    return "anthropic:claude-opus-5-5"                      # a model of another provider: this agent cannot use it
 
 
 def build_tools(engine, inbound, member: dict, case: dict, now: datetime, outbox: list) -> tuple[list, list]:

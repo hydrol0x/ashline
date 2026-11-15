@@ -31,7 +31,7 @@ import requests
 from . import config
 from .chat import TELEGRAM_PREFIX, Engine, Inbound, Outbound
 
-API = "https://api.telegram.org"
+API = "https://api.telegram.org"   # TELEGRAM_API_BASE in .env overrides it (a relay, for networks that block Telegram)
 POLL_TIMEOUT = 2                 # seconds Telegram holds a getUpdates call open; short so engine timers stay on time
 TEXT_LIMIT = 4096                # Telegram's maximum message length
 CAPTION_LIMIT = 1024
@@ -61,6 +61,7 @@ def split_text(text: str, limit: int = TEXT_LIMIT) -> list[str]:
 class TelegramBridge:
     def __init__(self, token: str | None = None, engine: Engine | None = None, session=None):
         self.token = token or config.env("TELEGRAM_BOT_TOKEN", required=True)
+        self.api = (config.env("TELEGRAM_API_BASE") or API).rstrip("/")
         self.http = session or requests.Session()
         self.engine = engine or Engine()
         self.state_path = config.data_dir() / "telegram_state.json"
@@ -71,7 +72,7 @@ class TelegramBridge:
 
     # ------------------------------------------------------------- Bot API
     def call(self, method: str, http_timeout: float = 30, files=None, **params):
-        response = self.http.post(f"{API}/bot{self.token}/{method}", data=params if files else None,
+        response = self.http.post(f"{self.api}/bot{self.token}/{method}", data=params if files else None,
                                   json=None if files else params, files=files, timeout=http_timeout)
         body = response.json()
         if not body.get("ok"):
@@ -187,7 +188,7 @@ class TelegramBridge:
         for attempt in range(1, tries + 1):
             try:
                 path = self.call("getFile", file_id=file_id)["file_path"]
-                response = self.http.get(f"{API}/file/bot{self.token}/{path}", timeout=60)
+                response = self.http.get(f"{self.api}/file/bot{self.token}/{path}", timeout=60)
                 if response.ok and response.content:
                     return response.content
             except Exception as exc:
@@ -220,7 +221,16 @@ class TelegramBridge:
 
     # ---------------------------------------------------------------- loop
     def run(self) -> None:
-        self.identify()
+        while True:                                       # wait for Telegram instead of crashing at startup
+            try:
+                self.identify()
+                break
+            except KeyboardInterrupt:
+                return
+            except Exception as exc:
+                print(f"telegram: can't reach {self.api} ({type(exc).__name__}). This network may block Telegram; "
+                      "try another network, or set TELEGRAM_API_BASE to a relay. Retrying in 10 s.")
+                time.sleep(10)
         print(f"Ashline is listening on Telegram as @{self.username}. Message the bot to start. Ctrl-C to stop.")
         while True:
             try:

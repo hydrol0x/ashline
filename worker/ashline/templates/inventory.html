@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>{{ name }} · Ashline</title>
+<!-- A link to this page may be previewed in a chat or on a lock screen: the preview names nothing about the family. -->
+<title>Your home's list · Ashline</title>
+<meta property="og:title" content="Your home's list · Ashline">
+<meta property="og:description" content="A private page for one family.">
 <link rel="icon" href="/static/img/favicon.png?v={{ v }}">
 <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png?v={{ v }}">
 <link rel="stylesheet" href="/static/brand.css?v={{ v }}">
@@ -497,6 +500,7 @@
 
 <script>
 (function () {
+  document.title = {{ name|tojson }} + ' · Ashline';   // the home's name only once the page is open
   var token = {{ token|tojson }}, grid = document.getElementById('grid'), DISASTER = {{ (disaster or 'fire')|tojson }};
   var chips = [].slice.call(document.querySelectorAll('.chip')), room = '';
   var tabs = [].slice.call(document.querySelectorAll('.tab')), status = '';

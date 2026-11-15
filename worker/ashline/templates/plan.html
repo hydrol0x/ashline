@@ -59,6 +59,9 @@
   .canvas { position: relative; overflow: hidden; padding: 6px; }
   .canvas svg { display: block; width: 100%; min-height: 280px; max-height: 68vh; touch-action: none; cursor: grab; }
   .canvas svg.dragging { cursor: grabbing; }
+  /* On a computer the whole plan card, zoom buttons included, fits the first screen. --above is what
+     stands over the plan and under it (header, title, the row of buttons), measured once the page is drawn. */
+  @media (min-width: 900px) { .canvas svg { max-height: calc(100vh - var(--above, 340px)); } }
   .under { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; border-top: 1px solid var(--card-line); padding: 12px 12px 8px; margin-top: 4px; }
   .under .why { color: var(--muted); font-size: 13px; flex: 1 1 220px; }
   .zoom { display: flex; gap: 8px; margin-left: auto; }
@@ -232,6 +235,12 @@
     svg.setAttribute("viewBox", [view.x, view.y, view.w, view.h].join(" ")); resize(); };
   apply();
   svg.style.aspectRatio = full.w + " / " + full.h;
+  const card = svg.parentNode;
+  const room4plan = () => {                                            // header and title above, zoom row and a margin below
+    const below = card.getBoundingClientRect().bottom - svg.getBoundingClientRect().bottom;
+    svg.style.setProperty("--above", Math.round(svg.getBoundingClientRect().top + window.scrollY + below + 16) + "px");
+  };
+  room4plan();
   const unit = Math.min(Math.max(full.w / 62, 0.3), 0.7);              // text and dots grow with the size of the home
   svg.style.setProperty("--u", unit);
 
@@ -626,9 +635,10 @@
     if (Math.abs(dx) + Math.abs(dy) > 4) { moved = true; svg.classList.add("dragging"); unthing(); }
     if (moved) { view.x = drag.vx - dx * s; view.y = drag.vy - dy * s; apply(); }
   });
-  window.addEventListener("resize", resize);
+  window.addEventListener("resize", () => { room4plan(); resize(); });
   window.addEventListener("pointerup", () => { drag = null; svg.classList.remove("dragging"); setTimeout(() => { moved = false; }, 0); });
 
+  room4plan();                                                          // again, now the chips above it are drawn
   select(null);
   const wanted = /^#item-(\d+)$/.exec(location.hash);                  // a link from the list opens that thing here
   const first = wanted && L.pins.find(p => String(p.id) === wanted[1]);

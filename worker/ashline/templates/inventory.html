@@ -109,7 +109,8 @@
   .mini.sketch .rm, .locator.sketch .rm { fill: var(--paper); stroke-dasharray: 5 4; }
   .mini .rm.go { cursor: pointer; }
   .mini .rm.go:hover { fill: #EEEDEA; }
-  .mini .rm.on, .locator .rm.on { fill: var(--room-on); stroke: var(--red); stroke-width: 2; }
+  .mini .rm.on, .mini .rm.go.on:hover, .locator .rm.on { fill: var(--room-on); stroke: var(--red); stroke-width: 2; }
+  .mini .rm:focus, .locator .rm:focus { outline: none; }
   .mini .rm:focus-visible { outline: none; stroke: var(--red); stroke-width: 2.4; }
   .fullplan { display: inline-block; margin: 4px 2px 2px; color: var(--muted); font-size: 13.5px; font-weight: 600; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--card-line); }
   .fullplan:hover { color: var(--red); }
@@ -302,7 +303,7 @@
   .btn.chosen-no { background: var(--panel); border-color: var(--ink); color: var(--ink); }
   .hint-line { grid-column: 1 / -1; text-align: center; margin: 0 !important; }
   .sheet .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-  .sheet .row .btn { flex: 1 1 0; font-size: 14px; padding: 10px 8px; min-height: 42px; }
+  .sheet .row .btn { flex: 1 1 auto; font-size: 14px; padding: 10px 12px; min-height: 42px; white-space: nowrap; }
   .saved { color: var(--red); font-weight: 700; font-size: 14px !important; animation: fade 2.4s forwards; }
   @keyframes fade { 0%, 70% { opacity: 1; } 100% { opacity: 0; } }
   .error { color: var(--red-deep); font-size: 14px !important; font-weight: 600; grid-column: 1 / -1; margin: 4px 0 0 !important; }

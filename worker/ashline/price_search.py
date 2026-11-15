@@ -535,7 +535,31 @@ def price_check(case_id: str, store: Store | None = None, top: int = 20, searche
 # ------------------------------------------------- without being asked
 AUTO_TOP = 6                    # items looked up after each batch of new items, most valuable first
 AUTO_MIN = 150.0                # only items estimated at this much or more (for the whole quantity)
-AUTO_TRUST = 3.0                # an unasked lookup is used only within this factor of the estimate, either way
+AUTO_TRUST = 3.0                # a lone listing is used unasked only within this factor of the estimate, either way
+AGREE = 2.0                     # two checked listings within this factor of each other are trusted whatever the estimate
+
+
+def fixed_figure(item: dict) -> bool:
+    """True when the item's estimate is the fixed figure for its whole category, which says
+    nothing about this particular thing."""
+    return (item.get("price_source") or "").startswith("category default")
+
+
+def trusted(result: dict, item: dict) -> bool:
+    """May a price found without anyone asking replace the item's estimate?
+
+    Two or more checked listings that agree with each other (the two nearest the mid, within 2x)
+    are used whatever the estimate says. Otherwise the 3x rule against the estimate holds, except
+    that a fixed category figure is no yardstick at all."""
+    matches = result.get("matches") or []
+    if result.get("verified") and len(matches) >= 2:
+        a, b = float(matches[0]["price"]), float(matches[1]["price"])
+        if min(a, b) > 0 and max(a, b) / min(a, b) <= AGREE:
+            return True
+    if fixed_figure(item):
+        return True
+    estimate = float(item.get("price_mid") or 0)
+    return not estimate or estimate / AUTO_TRUST <= float(result["price"]) <= estimate * AUTO_TRUST
 
 
 def item_picture(store: Store, case_id: str, item: dict):
@@ -561,9 +585,9 @@ def auto_price(case_id: str, store: Store, item_ids: list[int] | None = None, se
 
     Considers `item_ids` (or every line), leaves out prices the family set, paid or already
     looked up, and anything estimated under `minimum`; takes the `top` most valuable. Lookups
-    run a few at a time. A found price far from the estimate (more than three times, or under a
-    third) is not used: with nobody watching, that is more likely the wrong product than a
-    better number. Each result is also kept as news for the chat to mention once.
+    run a few at a time. A found price is used when `trusted` says so: two checked listings that
+    agree, or a lone one near the estimate (any, when the estimate is a fixed category figure).
+    Each result is also kept as news for the chat to mention once.
     Returns [{item_id, label, price, retailer, before}].
     """
     searcher = searcher or get_searcher()
@@ -591,9 +615,8 @@ def auto_price(case_id: str, store: Store, item_ids: list[int] | None = None, se
     for item, result in zip(items, found):
         if not result.get("found"):
             continue
-        estimate = float(item.get("price_mid") or 0)
-        if estimate and not estimate / AUTO_TRUST <= float(result["price"]) <= estimate * AUTO_TRUST:
-            continue        # far from the estimate: likely the wrong product, so nobody's price changes unasked
+        if not trusted(result, item):
+            continue        # likely the wrong product, so nobody's price changes unasked
         line = apply_price(store, case_id, item["item_id"], result, log=False)
         if line.startswith("Recorded"):
             results.append({"item_id": item["item_id"], "label": item["label"], "price": nice(result["price"]),

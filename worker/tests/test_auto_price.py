@@ -62,11 +62,20 @@ def test_small_items_and_prices_the_family_trusts_are_left_alone(monkeypatch):
     assert price_search.auto_price(f.case_id, f.store, searcher=searcher, minimum=0) == []       # already looked up or kept
 
 
+class ModelPricer:
+    """Stands in for the model's estimate: a real estimate, not a fixed category figure."""
+    source = "claude estimate"
+
+    def prices(self, items):
+        return {i["item_id"]: {"blue velvet sofa": 900.0, "brass floor lamp": 120.0}.get(i["label"], 200.0) for i in items}
+
+
 def test_a_found_price_far_from_the_estimate_is_not_used_unasked():
     class Wild:
         def search(self, description, brand=None, image=None):
             return [{"title": "Designer sofa", "price": 9800.0, "retailer": "Luxe", "url": "https://luxe.example/s"}]
     f = family(Wild())
+    f.engine.pricer = ModelPricer()
     f.say(MAYA, photos=[photo(640)])
     out = texts(f.wait())
     assert not any((i.get("price_source") or "").startswith("web") for i in f.store.get_items(f.case_id))
@@ -122,3 +131,66 @@ def test_news_is_handed_out_once_even_to_two_readers(tmp_path, monkeypatch):
     assert not list((tmp_path / "c1" / "price_news").glob("*.part"))          # nothing half-written is left visible
     first, second = price_search.take_news("c1"), price_search.take_news("c1")
     assert [row["item_id"] for row in first] == [1, 2] and second == []
+
+
+class Staged:
+    """A searcher that looks in stages: returns the kept listings it is given for every item."""
+
+    def __init__(self, prices, read=False):
+        self.prices, self.read, self.asked = prices, read, []
+
+    def lookup(self, description, brand=None, image=None):
+        self.asked.append(description)
+        spec = {"kind": description, "brand": "Acme" if self.read else "", "model": "X1" if self.read else "",
+                "brand_read": self.read, "enough_to_price": True}
+        return {"matches": [{"title": f"listing {n}", "price": p, "retailer": f"Shop {n}", "url": f"https://s{n}.example/"}
+                            for n, p in enumerate(self.prices)],
+                "spec": spec, "queries": [description], "checked": len(self.prices) + 2, "dropped": 2}
+
+    def search(self, description, brand=None, image=None):
+        raise AssertionError("the staged lookup worked, so the single search is not used")
+
+
+def chair_case(source="category default", mid=450.0, label="wood-back dining chair", f=None):
+    if f is None:
+        f = Family().setup()
+        f.engine.searcher, f.engine.background = None, False
+    item = f.store.add_item(f.case_id, {"label": label, "category": "furniture", "room_label": "Kitchen"},
+                            source="photo", added_by="Maya")
+    f.store.set_cluster(f.case_id, item, [item], 1)
+    f.store.update_item(f.case_id, item, price_low=mid * 0.6, price_mid=mid, price_high=mid * 1.5, price_source=source)
+    return f, item
+
+
+def test_the_450_chair_becomes_about_90():
+    """Three checked listings that agree replace the fixed furniture figure, however far below it."""
+    f, chair = chair_case()
+    out = price_search.auto_price(f.case_id, f.store, [chair], Staged([80.0, 92.0, 99.0]), minimum=0)
+    item = f.store.get_item(f.case_id, chair)
+    assert out and (item["price_mid"], item["price_low"], item["price_high"]) == (90, 80, 100)
+
+
+def test_two_agreeing_listings_are_used_whatever_the_estimate():
+    f, chair = chair_case("claude estimate", 900.0)                       # a real estimate, 10x off
+    assert price_search.auto_price(f.case_id, f.store, [chair], Staged([85.0, 150.0]), minimum=0)
+    assert f.store.get_item(f.case_id, chair)["price_mid"] == 85          # two listings: the lower
+
+
+def test_two_listings_that_disagree_fall_back_to_the_3x_rule():
+    f, chair = chair_case("claude estimate", 900.0)
+    assert price_search.auto_price(f.case_id, f.store, [chair], Staged([85.0, 400.0]), minimum=0) == []
+    _, chair = chair_case("claude estimate", 200.0, f=f)
+    assert price_search.auto_price(f.case_id, f.store, [chair], Staged([85.0, 400.0]), minimum=0)
+
+
+def test_one_listing_keeps_the_3x_rule_except_against_a_fixed_figure():
+    f, chair = chair_case("claude estimate", 900.0)
+    assert price_search.auto_price(f.case_id, f.store, [chair], Staged([90.0], read=True), minimum=0) == []
+    _, chair = chair_case("claude estimate", 200.0, f=f)
+    assert price_search.auto_price(f.case_id, f.store, [chair], Staged([90.0], read=True), minimum=0)
+    _, chair = chair_case("category default", 450.0, f=f)
+    assert price_search.auto_price(f.case_id, f.store, [chair], Staged([90.0], read=True), minimum=0)
+    # A lone listing for a brand nobody read is not enough evidence, so nothing is recorded at all.
+    _, chair = chair_case("category default", 450.0, f=f)
+    assert price_search.auto_price(f.case_id, f.store, [chair], Staged([90.0]), minimum=0) == []
+    assert f.store.get_item(f.case_id, chair)["price_mid"] == 450

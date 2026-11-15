@@ -148,15 +148,52 @@ TYPICAL_PRICE = {
 }
 
 
+SMALL_THINGS = {"remote control": 20, "extension cord": 15, "power strip": 20, "laptop sleeve": 25, "table": 200,
+                "table top": 200, "seat cushion": 25, "chair cushion": 25, "phone case": 20, "tv remote": 20,
+                "microwave oven": 100, "vacuum cleaner": 150, "sectional sofa": 1200, "toaster oven": 60,
+                "sofa bed": 600, "bed frame": 350, "bunk bed": 400}
+# A label ending in one of these names a part or an accessory, not the thing itself.
+ACCESSORY = ("sleeve", "case", "cover", "remote", "control", "cord", "cable", "charger", "cushion", "mat", "holder",
+             "bag", "box", "pouch", "tray", "stand", "panel", "sign", "strap", "shelf", "rack", "hose")
+_SPLIT = re.compile(r"\s(?:with|on|in|for|of|from|under|beside|next to|against)\s|[,(;]")
+
+
 def typical_price(label: str | None) -> float | None:
-    """The table's figure for the longest phrase found in the label, or None."""
-    words = " " + re.sub(r"[^a-z0-9]+", " ", (label or "").lower()) + " "
-    best = None
-    for phrase, price in TYPICAL_PRICE.items():
-        if f" {phrase} " in words or f" {phrase}s " in words or (phrase == "tv" and " tvs " in words):
-            if best is None or len(phrase) > len(best[0]):
-                best = (phrase, price)
-    return float(best[1]) if best else None
+    """The table's figure for the thing a label names, or None.
+
+    The thing is the noun the label's first phrase ends on: "bed" in "bed with gray upholstered
+    headboard", "dining chair" in "wood-back dining chair with black metal frame". A table phrase
+    found only elsewhere ("laptop" in "teal laptop sleeve", "tv" in "black TV remote control") is a
+    part or an accessory of something dearer and is not used. When the first phrase names nothing
+    the table knows, a bracketed guess such as "(smart speaker or clock)" may still be read.
+    """
+    text = (label or "").lower()
+    table = {**TYPICAL_PRICE, **SMALL_THINGS}
+
+    def clean(part: str) -> str:
+        return " " + re.sub(r"[^a-z0-9]+", " ", part).strip() + " "
+
+    def ends_on(words: str) -> tuple[str, float] | None:
+        best = None
+        for phrase, price in table.items():
+            if words.endswith(f" {phrase} ") or words.endswith(f" {phrase}s "):
+                if best is None or len(phrase) > len(best[0]):
+                    best = (phrase, price)
+        return best
+
+    text = re.sub(r"^\s*(?:a |the |\d+ )?(?:set|pair|group|couple|pile|stack|row|collection|lot)s? of (?:\d+ )?", "", text)
+    head = clean(_SPLIT.split(text, 1)[0])
+    found = ends_on(head)
+    if found:
+        return float(found[1])
+    if head.strip().split(" ")[-1:] and head.strip().split(" ")[-1].rstrip("s") in ACCESSORY:
+        return None
+    for guess in re.findall(r"\(([^)]*)\)", text):                  # "(smart speaker or small clock)"
+        for part in re.split(r"\sor\s|,|/", guess):
+            found = ends_on(clean(part))
+            if found:
+                return float(found[1])
+    return None
 
 
 class DefaultPricer:
@@ -237,6 +274,9 @@ def get_pricer():
     if kind == "defaults":
         return DefaultPricer()
     raise PricingError(f"Unknown ASHLINE_PRICER {kind!r}: use claude or defaults.")
+
+
+ROUGH = ("category default", "typical price")      # figures made without a model
 
 
 def _cache_key(item: dict) -> str:
@@ -337,14 +377,16 @@ def price_items(case_id: str, store: Store | None = None, pricer=None, only_miss
     model call fails, category defaults are used and the reason is reported.
     """
     store = store or Store()
+    # A rough figure (no model was available) is not a price worth keeping: it is worked out again,
+    # so a home priced before a key was set, or before the table of typical prices, gets better numbers.
     items = [i for i in store.get_items(case_id, canonical_only=True) if i["status"] != "rejected"
-             and not kept_price(i) and not (only_missing and i.get("price_mid"))]
+             and not kept_price(i) and not (only_missing and i.get("price_mid") and i.get("price_source") not in ROUGH)]
     if not items:
         return {"priced": 0, "source": None, "calibrated": load_calibration()["calibrated"]}
 
     cache_path = config.case_dir(case_id) / "prices.json"
     cache = json.loads(cache_path.read_text()) if cache_path.exists() else {}
-    todo = [i for i in items if _cache_key(i) not in cache]
+    todo = [i for i in items if cache.get(_cache_key(i), {}).get("source") in (None, *ROUGH)]
     note = None
     if todo:
         pricer = pricer or get_pricer()

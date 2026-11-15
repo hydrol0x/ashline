@@ -182,16 +182,25 @@ def price_stack(item: dict) -> list[dict]:
                                   + (f": {str(match['title'])[:70]}" if match.get("title") else ""),
                           "url": url if url.startswith(("https://", "http://")) else ""})
         count = len(matches) or 1
-        rows.append({"kind": "online", "title": "Found online",
-                     "detail": f"{count} listing{'s' if count != 1 else ''} for the same kind of thing",
+        try:                                                # how many listings were looked at before these were kept
+            looked = int(online.get("checked") or 0)
+        except (TypeError, ValueError):
+            looked = 0
+        detail = (f"{count} of {looked} listings matched: the same kind of thing, new, priced for one" if looked > count
+                  else f"{count} listing{'s' if count != 1 else ''} for the same kind of thing")
+        if any(m.get("per_unit") for m in matches):
+            detail += " · sets divided into one"
+        rows.append({"kind": "online", "title": "Found online", "detail": detail,
                      "amount": money_range(online.get("low"), online.get("high")), "links": links})
     guess = kept.get("estimate") or ({"low": item.get("price_low"), "mid": item.get("price_mid"),
                                       "high": item.get("price_high"), "source": item.get("price_source")}
                                      if using == "estimate" else None)
     if guess and guess.get("mid"):
-        rough = guess.get("source") == "category default"
+        source = str(guess.get("source") or "")
         rows.append({"kind": "estimate", "title": "Estimate",
-                     "detail": "A rough figure for this kind of item" if rough else "A rough allowance for buying it new today",
+                     "detail": "A rough figure for this kind of item" if source == "category default"
+                     else "A typical price for this kind of thing" if source == "typical price"
+                     else "A rough allowance for buying it new today",
                      "amount": money_range(guess.get("low"), guess.get("high")), "links": []})
     for row in rows:
         row["in_use"] = row["kind"] == using
@@ -436,7 +445,8 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
         view = item_view(item, sightings, case)
         calibrated = load_calibration()["calibrated"]
         basis = {"set by family": "Price set by the family.",
-                 "category default": "A rough figure for this kind of item. Set the price if you know it."}.get(
+                 "category default": "A rough figure for this kind of item. Set the price if you know it.",
+                 "typical price": "A typical price for this kind of thing. Set the price if you know it."}.get(
             item.get("price_source") or "", "Estimate of buying it new today, at a typical mid-range price.")
         source = item.get("price_source") or ""
         evidence = price_evidence(item)

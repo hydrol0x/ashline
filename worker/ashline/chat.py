@@ -585,7 +585,7 @@ class Engine:
         import threading
         threading.Thread(target=lambda: work(type(self.store)(self.store.path)), daemon=True).start()
 
-    def _price_news(self, case: dict) -> list[Outbound]:
+    def _price_news(self, case: dict, owns=None) -> list[Outbound]:
         """Tell the family, once, which prices the agent firmed up online."""
         from . import price_search
         news = price_search.take_news(case["case_id"])
@@ -593,10 +593,15 @@ class Engine:
             return []
         owner = self._owner(case["case_id"])
         by_chat: dict[str, list[dict]] = {}
+        later = []
         for row in news:
             chat = row.get("chat_id") or (owner or {}).get("dm_chat")
-            if chat:
+            if chat and owns and not owns(chat):
+                later.append(row)                           # another bridge's chat: left for that bridge to say
+            elif chat:
                 by_chat.setdefault(chat, []).append(row)
+        if later:
+            price_search.add_news(case["case_id"], later)
         out = []
         for chat, rows in by_chat.items():
             lines = []
@@ -678,9 +683,7 @@ class Engine:
             if owner and owns(owner.get("dm_chat") or owner["phone"]):   # the owner's own platform sends these
                 out += self._daily_review(case, now)
                 out += self._reminders(case, now)
-            out += self._price_news(case)
-            out += self._daily_review(case, now)
-            out += self._reminders(case, now)
+            out += self._price_news(case, owns)
         return out
 
     def _reminders(self, case: dict, now: datetime) -> list[Outbound]:

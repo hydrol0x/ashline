@@ -37,6 +37,9 @@ BATCH_SECONDS = 60                      # wait this long after the last photo of
 ANNOTATE_UP_TO = 5                       # bursts this small get every photo back annotated
 QUESTION_HOURS = 4                      # an unanswered "same item?" expires after this
 CODE = re.compile(r"\b(HOME-\d{4})\b", re.I)
+NEW_ITEMS = (r"(?:(?:no,?\s*)?(?:they|these|those|it|this|that)(?:'re| are| were| was|'s| is)?\s+)?(?:new|"
+             r"not (?:previously |already )?(?:added|listed|on (?:the|my) list)|(?:were|was)n't (?:previously |already )?(?:added|listed)|"
+             r"not the same(?: (?:ones?|things?|items?))?|different(?: (?:ones?|things?|items?))?)")
 TELEGRAM_PREFIX = "tg:"                            # chat and sender ids that came from the Telegram bridge
 ADDRESSED = re.compile(r"^\s*@?ashline\b[,:]?\s*", re.I)
 MEMORY_QUESTIONS = 6                    # a text "call" asks at most this many questions
@@ -692,9 +695,37 @@ class Engine:
         text = f"{new} new" if new else "nothing new"
         return text + (f" · {merged} already listed" if merged else "")
 
+    def _make_new(self, case_id: str, chat_id: str, member: dict, number: str | None) -> list[Outbound]:
+        """The family says items Ashline matched to the list are really new: give the ones in the
+        last photo their own lines again. Undo puts them back."""
+        context = self._context(chat_id)
+        in_photo = context.get("photo_items", {})
+        targets = [in_photo[number]] if number and number in in_photo else ([] if number else list(in_photo.values()))
+        moved, was = [], {}
+        for item_id in targets:
+            item = self.store.get_item(case_id, item_id)
+            if item and item.get("cluster_id") not in (None, item_id):
+                was[item_id] = item["cluster_id"]
+                self.store.update_item(case_id, item_id, cluster_id=item_id)
+                self.store.set_item_status(case_id, item_id, "suggested")
+                moved.append(item_id)
+        if not moved:
+            return [Outbound(chat_id, f"Number {number} is already its own item." if number else
+                             "Everything in that photo is already its own item, so there's nothing to change.")]
+        self.store.log_event(case_id, "unmatch", {"was": was}, member["member_id"])   # undo puts each back
+        price_items(case_id, self.store, self.pricer)
+        for n, item_id in in_photo.items():
+            if item_id in moved:
+                context.setdefault("list", {})[n] = item_id
+        self._save(chat_id, context)
+        names = [self.store.get_item(case_id, i)["label"] for i in moved]
+        what = names[0] if len(names) == 1 else f"{len(names)} items ({', '.join(dict.fromkeys(names))})"
+        return [Outbound(chat_id, f"Got it, those are new. Added {what} to the list, waiting for your OK. "
+                                  "Say undo if that was a mistake.")]
+
     def _annotated(self, case_id: str, chat_id: str, photo: dict, context: dict, extra: str = "") -> Outbound:
         """The original photo with numbered boxes, and a legend in the text."""
-        shown, boxes, entries = {}, [], []
+        shown, boxes, entries, in_photo, listed = {}, [], [], {}, 0
         detections = [i for i in self.store.get_items(case_id) if i["photo_id"] == photo["photo_id"]
                       and i["status"] != "rejected" and i.get("bbox")]
         new_canon = {i["item_id"] for i in detections if i["cluster_id"] in (None, i["item_id"])}
@@ -706,12 +737,18 @@ class Engine:
             line = self.store.get_item(case_id, canonical) or item
             entries.append({"n": n, "label": self._display(line) if status != "listed" else f"{line['label']} · already listed"})
             shown[str(n)] = canonical
+            in_photo[str(n)] = item["item_id"]
+            listed += status == "listed"
         out_path = config.case_dir(case_id) / "annotated" / f"{photo['photo_id']}.jpg"
         annotate(photo["path"], boxes, out_path)
         context["list"] = shown
+        context["photo_items"] = in_photo                 # which detection in this photo each number is
         text = legend(entries) if entries else "I couldn't make out items in this one."
         if extra and entries:
             text = f"Found {len(entries)} item{'s' if len(entries) != 1 else ''} · {extra}\n\n{text}"
+        if listed:
+            text += ('\n\nNot the same things? Reply "new" and I\'ll list them separately.' if listed > 1 else
+                     '\n\nNot the same thing? Reply "new" and I\'ll list it separately.')
         return Outbound(chat_id, text, image=str(out_path))
 
     def _ask_same(self, case_id: str, chat_id: str, pairs: list, now: datetime) -> list[Outbound]:
@@ -863,6 +900,10 @@ class Engine:
                 self.store.update_item(case_id, item_id, price_low=value, price_mid=value, price_high=value,
                                        price_source="set by family")
                 return [Outbound(chat_id, f"Set the {item['label']} to {money(value)}, marked as a price set by the family.")]
+        match = (re.fullmatch(r"#?(\d+)\s+(?:is|was|are)\s+(?:new|different|not the same|not (?:already )?(?:listed|added))", low.strip(" .!"))
+                 or re.fullmatch(NEW_ITEMS, low.strip(" .!")))
+        if match:
+            return self._make_new(case_id, chat_id, member, match.group(1) if match.groups() else None)
         match = re.fullmatch(r"(?:split|separate)\s+#?(\d+)", low)
         if match:
             item_id = self._context(chat_id).get("list", {}).get(match.group(1))
@@ -934,6 +975,10 @@ class Engine:
         elif action == "add":
             self.store.set_item_status(case_id, payload["item_id"], "rejected")
             text = "Undone: I've taken that off the list."
+        elif action == "unmatch":
+            for item_id, cluster in payload["was"].items():
+                self.store.update_item(case_id, int(item_id), cluster_id=cluster)
+            text = "Undone: those are back on the lines they were matched to."
         elif action == "split":
             for item_id in payload["moved"]:
                 self.store.update_item(case_id, item_id, cluster_id=payload["into"])

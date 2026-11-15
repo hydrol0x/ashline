@@ -565,3 +565,34 @@ def test_photos_that_could_not_be_fetched_or_opened_are_mentioned(fam):
 def test_rooms_answer_in_a_sentence():
     assert split_rooms("it only has basement") == ["Basement"]
     assert split_rooms("we had a kitchen, 2 bedrooms and our garage") == ["Kitchen", "Bedroom", "Bedroom 2", "Garage"]
+
+
+def test_saying_these_are_new_unmatches_items_from_the_last_photo(fam):
+    fam.say(MAYA, "", [photo(640)])
+    fam.wait()
+    fam.say(MAYA, "", [photo(648)])                               # its sofa gets matched to the first one
+    out = fam.wait()
+    legend = next(o.text for o in out if o.image)
+    assert "already listed" in legend and legend.endswith('Reply "new" and I\'ll list it separately.')
+    before = len(fam.store.get_items(fam.case_id, canonical_only=True))
+
+    reply = fam.say(MAYA, "These were not previously added")
+    assert reply[0].text.startswith("Got it, those are new. Added")
+    assert len(fam.store.get_items(fam.case_id, canonical_only=True)) == before + 1
+    sofas = [i for i in fam.store.get_items(fam.case_id, canonical_only=True) if "sofa" in i["label"]]
+    assert len(sofas) == 2 and all(i["price_mid"] for i in sofas)            # the new one is priced too
+
+    assert "back on the lines" in fam.say(MAYA, "undo")[0].text
+    assert len(fam.store.get_items(fam.case_id, canonical_only=True)) == before
+    numbers = fam.engine._context(MAYA)["photo_items"]
+    sofa_n = next(n for n, i in numbers.items() if "sofa" in fam.store.get_item(fam.case_id, i)["label"])
+    assert fam.say(MAYA, f"{sofa_n} is new")[0].text.startswith("Got it, those are new.")   # just that one, by number
+    other_n = next(n for n in numbers if n != sofa_n)
+    assert "already its own item" in fam.say(MAYA, f"{other_n} is new")[0].text
+
+
+@pytest.mark.parametrize("words", ["new", "they're new", "those are different", "not the same", "these weren't added",
+                                   "no, they are not on the list", "2 is new"])
+def test_ways_of_saying_new(words):
+    from ashline.chat import NEW_ITEMS
+    assert re.fullmatch(NEW_ITEMS, words) or re.fullmatch(r"#?(\d+)\s+(?:is|was|are)\s+(?:new|different)", words)

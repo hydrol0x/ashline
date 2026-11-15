@@ -47,6 +47,9 @@ last numbered list, X is text the person gave):
 - ok                 (approve all items waiting for review)
 - remove N           (take item N off the list)
 - split N            (item N is really several different objects)
+- new                (the items Ashline just called "already listed" are NOT on the list yet; list them as new.
+                      Use this for "these weren't added", "not the same", "those are different", "they're new")
+- N is new           (only item N from the last photo is new, not the same as the one already listed)
 - N is X             (rename item N, e.g. 3 is a walnut dresser)
 - price N X          (the family's own price for item N, e.g. price 2 $450)
 - undo               (undo the last change)
@@ -64,7 +67,7 @@ Rules:
 - Choose "delete my case" only when the person clearly asks to delete or erase their case, list or data.
   It does not delete anything by itself: Ashline asks them to confirm first."""
 
-ALLOWED = ("1", "2", "list", "how much so far", "review", "ok", "undo", "export", "call me", "pause", "help",
+ALLOWED = ("new", "1", "2", "list", "how much so far", "review", "ok", "undo", "export", "call me", "pause", "help",
            "delete my case")
 PREFIXES = ("show ", "remove ", "split ", "price ")
 
@@ -77,7 +80,7 @@ def valid_command(command: str | None) -> str | None:
     if command in ALLOWED or command.startswith(PREFIXES):
         return command
     head = command.split(" ", 2)
-    if len(head) >= 3 and head[0].lstrip("#").isdigit() and head[1] in ("is", "was"):
+    if len(head) >= 3 and head[0].lstrip("#").isdigit() and head[1] in ("is", "was"):   # also "N is new"
         return command
     return None
 

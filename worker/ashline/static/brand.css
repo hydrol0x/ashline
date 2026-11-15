@@ -28,9 +28,9 @@ button, input, select { font: inherit; color: inherit; }
 a { color: inherit; }
 
 /* Wordmark lockup */
-.brand { display: inline-flex; align-items: center; gap: 8px; text-decoration: none; color: var(--ink); }
-.brand img { height: 30px; width: auto; display: block; }
-.brand span { font: 700 21px/1 var(--serif); letter-spacing: -0.01em; }
+.brand { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: var(--ink); }
+.brand img { height: 42px; width: auto; display: block; }
+.brand span { font: 700 25px/1 var(--serif); letter-spacing: -0.01em; }
 
 /* Buttons: square-ish, ink primary, hairline secondary. Red is for marks, not for buttons. */
 .btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 11px 18px; border-radius: 3px;

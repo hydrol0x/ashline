@@ -171,6 +171,15 @@ def price_stack(item: dict) -> list[dict]:
     return rows
 
 
+def scan_link(store: Store, case_id: str, item: dict) -> str | None:
+    """Where to walk to this thing in the home's 3D scan, when it was seen in one."""
+    from . import layout
+    if item.get("source") != "scan" or not item.get("photo_id"):
+        return None
+    sweep = layout.sweep_of(store.get_photo(case_id, item["photo_id"]))
+    return layout.tour_url((store.get_home(case_id) or {}).get("sid"), sweep) if sweep else None
+
+
 def shop_search(item: dict) -> list[dict]:
     """Search links for the same or a similar thing: [{text, url}]. A search, not a listing we found."""
     from urllib.parse import quote_plus
@@ -337,7 +346,7 @@ def create_app(store_factory=Store) -> FastAPI:
                       else " The range is a rough allowance for uncertainty.")
         return JSONResponse({
             **view, "label": item["label"], "price_basis": basis, "price_evidence": evidence,
-            "shop_search": shop_search(item),
+            "shop_search": shop_search(item), "tour": scan_link(store, case["case_id"], item),
             "price_sources": price_stack(item),
             "price_mid": item.get("price_mid"), "editable": role == "owner",
             "sightings": [{

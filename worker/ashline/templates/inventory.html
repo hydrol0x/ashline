@@ -568,6 +568,11 @@
       });
       sheet.appendChild(stack);
     } else sheet.appendChild(el('p', d.price_basis, 'muted small'));
+    if (d.tour) {                                                        // walk to it in the scan of the home
+      var walk = el('p', null, 'muted small'), w = document.createElement('a');
+      w.href = d.tour; w.target = '_blank'; w.rel = 'noopener noreferrer'; w.textContent = 'See it in the 3D scan of the home';
+      w.style.color = 'var(--red)'; walk.appendChild(w); sheet.appendChild(walk);
+    }
     if ((d.shop_search || []).length) {                                  // look for the same or a similar thing
       var shops = el('p', null, 'muted small shops');
       d.shop_search.forEach(function (l, n) {

@@ -78,7 +78,23 @@
   .tip.thing b { display: block; font-size: 14px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
   .tip.thing span { color: var(--muted); font-size: 13px; }
 
+  .main { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); min-width: 0; }
+  .tour { padding: 16px; }
+  .tour .row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+  .tour h2 { font: 700 17px/1.2 var(--sans); margin: 0 0 4px; }
+  .tour .muted { color: var(--muted); font-size: 14px; margin: 0; max-width: 46ch; }
+  .tour .go { font: inherit; font-weight: 700; padding: 11px 18px; min-height: 44px; border-radius: 14px; border: 1.5px solid var(--ink);
+              background: var(--ink); color: #fff; cursor: pointer; }
+  .tour .go:hover { background: #000; }
+  .tour .frame { margin-top: 14px; aspect-ratio: 16 / 10; border-radius: 14px; overflow: hidden; background: var(--panel); }
+  .tour .frame iframe { width: 100%; height: 100%; border: 0; display: block; }
   .side { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+  .records dl { margin: 0; }
+  .records dt { font-weight: 700; font-size: 14.5px; margin-top: 10px; }
+  .records dt:first-child { margin-top: 0; }
+  .records dd { margin: 2px 0 0; color: var(--muted); font-size: 14px; }
+  /* On a phone the open room, or the open thing, comes straight under the plan, before the table of rooms. */
+  @media (max-width: 899px) { .side .things, .side .thing { order: -1; } }
   .side .card { padding: 16px 16px 10px; min-width: 0; }
   .side h2 { font: 700 17px/1.2 var(--sans); margin: 0 0 10px; }
   .side .row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
@@ -125,6 +141,7 @@
 
   {% if layout.rooms %}
   <div class="layout">
+    <div class="main">
     <div class="card canvas">
       <svg id="plan" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Plan of the home"></svg>
       <div class="tip" id="tip" hidden></div>
@@ -133,6 +150,15 @@
         {% if layout.unplaced %}<span class="pill rough">{{ layout.unplaced }} item{{ '' if layout.unplaced == 1 else 's' }} with no room yet</span>{% endif %}
         <div class="zoom"><button id="out" aria-label="Zoom out">−</button><button id="in" aria-label="Zoom in">+</button><button id="fit" aria-label="Show everything">⤢</button></div>
       </div>
+    </div>
+    {% if layout.tour %}
+    <div class="card tour" id="tour">
+      <div class="row"><div><h2>The home in 3D</h2>
+        <p class="muted">Walk through the scan of the home from before. It opens in the 3D viewer of the company that made the scan.</p></div>
+        <button class="go" id="tour-open" type="button">Open the 3D scan</button></div>
+      <div class="frame" id="tour-frame" hidden></div>
+    </div>
+    {% endif %}
     </div>
     <aside class="side" id="side"></aside>
   </div>
@@ -308,6 +334,28 @@
     foot.appendChild(html("td", "", "All")); foot.appendChild(html("td", "n", everything.length)); foot.appendChild(html("td", "n", money(worth(everything))));
   }
 
+  function recordsCard() {                                              // what was on file for this address from before
+    if (!(L.records || []).length) return;
+    const card = side.appendChild(html("div", "card records"));
+    card.appendChild(html("h2", "", "On file for this address"));
+    const dl = card.appendChild(html("dl"));
+    L.records.forEach(r => { dl.appendChild(html("dt", "", r.what)); if (r.detail) dl.appendChild(html("dd", "", r.detail)); });
+  }
+
+  function walkTo(sweep) {                                              // the 3D scan, at the spot a thing was seen from
+    const frame = document.getElementById("tour-frame");
+    if (!frame || !L.tour) return;
+    frame.textContent = "";
+    const view = frame.appendChild(html("iframe"));
+    view.title = "3D scan of the home"; view.allow = "fullscreen; xr-spatial-tracking"; view.setAttribute("allowfullscreen", "");
+    view.loading = "lazy"; view.referrerPolicy = "no-referrer";
+    view.src = L.tour + (sweep ? "&ss=" + encodeURIComponent(sweep) : "");
+    frame.hidden = false;
+    document.getElementById("tour").scrollIntoView({behavior: "smooth", block: "center"});
+  }
+  const opener = document.getElementById("tour-open");
+  if (opener) opener.addEventListener("click", () => walkTo(null));
+
   function listCard(r) {                                                // the open room's things, dearest first
     const pins = shownIn(r.id).sort((a, b) => b.value - a.value), card = side.appendChild(html("div", "card things"));
     const top = card.appendChild(html("div", "row"));
@@ -316,6 +364,8 @@
       const all = top.appendChild(html("a", "", more ? "Show fewer" : "See all " + pins.length));
       all.addEventListener("click", () => { more = !more; draw(); });
     }
+    if (pins.length) card.appendChild(html("p", "muted", pins.length + (pins.length === 1 ? " item" : " items") +
+      (worth(pins) ? " · about " + money(worth(pins)) + ", a rough allowance" : "")));
     const ul = card.appendChild(html("ul"));
     (more ? pins : pins.slice(0, 6)).forEach(p => {
       const li = ul.appendChild(html("li"));
@@ -352,6 +402,10 @@
       : p.exact ? "Placed where it stood on the floor in the scan." + (p.wide ? " About " + p.wide + " m wide, measured from the scan." : "")
       : p.shape ? "Its place is approximate, and its outline is a typical size for this kind of thing."
       : "Its place on the plan is approximate."));
+    if (L.tour && p.sweep) {
+      const walk = card.appendChild(html("a", "more", "See it in the 3D scan"));
+      walk.href = "#tour"; walk.addEventListener("click", ev => { ev.preventDefault(); walkTo(p.sweep); });
+    }
     const link = card.appendChild(html("a", "open", "Open in the list"));
     link.href = "/p/" + token + "#item-" + p.id;
   }
@@ -361,6 +415,7 @@
     roomsCard();
     const p = side.dataset.item ? L.pins.find(x => String(x.id) === side.dataset.item) : null, r = L.rooms.find(x => x.id === room);
     if (p) itemCard(p); else if (r) listCard(r);
+    recordsCard();
   }
 
   function frame(r) {                                                   // bring a room into view, or the whole home
@@ -430,6 +485,9 @@
   window.addEventListener("pointerup", () => { drag = null; svg.classList.remove("dragging"); setTimeout(() => { moved = false; }, 0); });
 
   select(null);
+  const wanted = /^#item-(\d+)$/.exec(location.hash);                  // a link from the list opens that thing here
+  const first = wanted && L.pins.find(p => String(p.id) === wanted[1]);
+  if (first) show(first);
 })();
 </script>
 </body>

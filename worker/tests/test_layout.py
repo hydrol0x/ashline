@@ -202,6 +202,33 @@ def test_a_thing_seen_from_a_room_the_scan_gives_no_outline_for_is_not_lost(scan
     assert pin["x"] is not None and pin["room_id"] is None        # drawn, and counted as outside the rooms
 
 
+def test_the_scan_can_be_walked_and_what_was_on_file_is_listed(scanned):
+    store, sofa, mixer, lost = scanned
+    assert layout.build("c1", store)["tour"] is None and layout.build("c1", store)["records"] == []      # no scan id on file
+    store.set_home("c1", sid="AbC123xyz90", scan_captured="2026-05-29", aerial_captured="2024-08-13",
+                   listing=json.dumps({"beds": 4, "baths": 2.5, "sqft": 2140, "year_built": 1958}))
+    drawn = layout.build("c1", store)
+    assert drawn["tour"] == "https://my.matterport.com/show/?m=AbC123xyz90&play=1&qs=1&brand=0"
+    assert drawn["records"] == [
+        {"what": "3D scan of the home", "detail": "made in May 2026 · 2 rooms"},
+        {"what": "Aerial photo", "detail": "taken in August 2024"},
+        {"what": "Sale listing", "detail": "4 bed · 2.5 bath · 2,140 sq ft · built 1958"}]
+    pin = next(p for p in drawn["pins"] if p["id"] == sofa)
+    assert pin["sweep"] == "1"                                      # seen in panorama 1: the viewer can start there
+    assert layout.tour_url("AbC123xyz90", "13").endswith("&ss=13")
+    assert layout.tour_url("not a scan id; drop table", "1") is None and layout.tour_url(None) is None
+
+    from fastapi.testclient import TestClient
+
+    from ashline.web import create_app
+    store.set_case("c1", owner_token="tok-owner-123456789012345", member_token="tok-member-12345678901234", name="Test home")
+    web = TestClient(create_app(lambda: store))
+    assert web.get(f"/p/tok-owner-123456789012345/item/{sofa}.json").json()["tour"].endswith("m=AbC123xyz90&play=1&qs=1&brand=0&ss=1")
+    assert web.get(f"/p/tok-owner-123456789012345/item/{mixer}.json").json()["tour"] is None       # never seen in the scan
+    page = web.get("/p/tok-owner-123456789012345/plan").text
+    assert "The home in 3D" in page and "On file for this address" in page
+
+
 def test_the_drawing_is_not_mirrored(scanned):
     """The scan's y axis points up, a page's points down: a room at the top of the scan is drawn at the top."""
     store = scanned[0]

@@ -461,6 +461,44 @@ def _image_size(path: str | None, cache: dict) -> tuple[int, int]:
     return cache[path]
 
 
+TOUR = "https://my.matterport.com/show/?m={sid}&play=1&qs=1&brand=0"      # the scan's own 3D viewer, as the sponsor's guide embeds it
+
+
+def tour_url(sid: str | None, sweep: str | None = None) -> str | None:
+    """The address of the walkable 3D scan, starting at one panorama when `sweep` (its number) is given."""
+    if not sid or not re.fullmatch(r"[A-Za-z0-9]{6,20}", sid):
+        return None
+    return TOUR.format(sid=sid) + (f"&ss={sweep}" if sweep and str(sweep).isdigit() else "")
+
+
+def sweep_of(photo: dict | None) -> str | None:
+    """A scan photo's panorama number, from its id ("scan-13-f2" is panorama 13)."""
+    found = re.fullmatch(r"scan-(\d+)-f\d", (photo or {}).get("photo_id") or "")
+    return found.group(1) if found else None
+
+
+def home_records(case_id: str, store) -> list[dict]:
+    """What was found for this address from before the loss: [{what, detail}], for the family to see."""
+    from .costar.matterport import _month_year
+    home = store.get_home(case_id) or {}
+    out = []
+    if home.get("sid"):
+        rooms = sum(1 for r in store.get_rooms(case_id) if r.get("source") == "scan")
+        when = _month_year(home.get("scan_captured"))
+        out.append({"what": "3D scan of the home", "detail": " · ".join(filter(None, [
+            f"made in {when}" if when else None, f"{rooms} rooms" if rooms else None]))})
+    if home.get("aerial_captured"):
+        out.append({"what": "Aerial photo", "detail": f"taken in {_month_year(home['aerial_captured']) or home['aerial_captured']}"})
+    listing = home.get("listing") if isinstance(home.get("listing"), dict) else None
+    if listing:
+        facts = [f"{listing['beds']:g} bed" if listing.get("beds") else None,
+                 f"{listing['baths']:g} bath" if listing.get("baths") else None,
+                 f"{int(listing['sqft']):,} sq ft" if listing.get("sqft") else None,
+                 f"built {int(listing['year_built'])}" if listing.get("year_built") else None]
+        out.append({"what": "Sale listing", "detail": " · ".join(f for f in facts if f)})
+    return out
+
+
 def build(case_id: str, store, drawn: dict | None = None) -> dict:
     """The plan and the pins for a case, ready to draw. `drawn` is an optional model sketch."""
     lines = _lines(store, case_id)
@@ -527,7 +565,8 @@ def build(case_id: str, store, drawn: dict | None = None) -> dict:
                                      outlines.get(room_id), others=same_floor, doors=doors_of.get(room_id))
             floor = camera.get("floor") or floor_of.get(room_id)
             px, py = to_page(x, y, floor)
-            pin = {**pin, "x": px, "y": py, "exact": exact, "room_id": room_id if room_id in outlines else None}
+            pin = {**pin, "x": px, "y": py, "exact": exact, "room_id": room_id if room_id in outlines else None,
+                   "sweep": sweep_of(photo)}
             kind = typical(item["label"]) if exact else None      # only where the floor point is real
             if kind:
                 wide = min(max(seen_width(camera, photo.get("face") or 1, bbox, _image_size(photo.get("path"), sizes), x, y), 0.3), 4.0)
@@ -575,6 +614,8 @@ def build(case_id: str, store, drawn: dict | None = None) -> dict:
             "floors": [{"id": f, "label": labels.get(f) or "", "x": round(shift[f][0], 2)} for f in floors if f in shift]
             if len(shift) > 1 else [],
             "rooms": rooms, "pins": pins, "dotted": dotted,
+            "tour": tour_url((store.get_home(case_id) or {}).get("sid")) if plan["kind"] == "scan" else None,
+            "records": home_records(case_id, store),
             "unplaced": sum(1 for p in pins if p["x"] is None and p["room_id"] is None)}
 
 

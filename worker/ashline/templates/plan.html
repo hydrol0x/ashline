@@ -597,9 +597,22 @@
   document.getElementById("out").addEventListener("click", () => zoom(1.4));
   document.getElementById("fit").addEventListener("click", () => { view = Object.assign({}, full); apply(); unthing(); refresh(); });
   svg.addEventListener("wheel", ev => { ev.preventDefault(); const p = toPlan(ev); zoom(ev.deltaY > 0 ? 1.15 : 0.87, p.x, p.y); }, {passive: false});
-  let drag = null, moved = false;
-  svg.addEventListener("pointerdown", ev => { drag = {x: ev.clientX, y: ev.clientY, vx: view.x, vy: view.y}; moved = false; });
+  let drag = null, moved = false, pinch = null;
+  const touches = new Map();                                            // fingers on the plan, for pinch to zoom
+  const spread = () => { const [a, b] = [...touches.values()]; return {d: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+    clientX: (a.x + b.x) / 2, clientY: (a.y + b.y) / 2}; };
+  svg.addEventListener("pointerdown", ev => {
+    touches.set(ev.pointerId, {x: ev.clientX, y: ev.clientY});
+    if (touches.size === 2) { pinch = spread(); drag = null; moved = true; return; }
+    drag = {x: ev.clientX, y: ev.clientY, vx: view.x, vy: view.y}; moved = false; });
+  const lift = ev => { touches.delete(ev.pointerId); if (touches.size < 2) pinch = null; };
+  svg.addEventListener("pointerup", lift); svg.addEventListener("pointercancel", lift); svg.addEventListener("pointerleave", lift);
   svg.addEventListener("pointermove", ev => {
+    if (touches.has(ev.pointerId)) touches.set(ev.pointerId, {x: ev.clientX, y: ev.clientY});
+    if (pinch && touches.size === 2) {                                  // two fingers: zoom about the point between them
+      const now = spread(), at = toPlan(now);
+      zoom(pinch.d / now.d, at.x, at.y); pinch = now; return;
+    }
     if (!drag) return;
     const s = toPlan(ev).s, dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
     if (Math.abs(dx) + Math.abs(dy) > 4) { moved = true; svg.classList.add("dragging"); unthing(); }

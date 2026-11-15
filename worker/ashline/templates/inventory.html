@@ -225,6 +225,9 @@
   @media (min-width: 1180px) {
     .dock dialog:not(:modal) { position: relative; inset: auto; width: 100%; max-width: none; max-height: calc(100vh - 32px); margin: 0; overflow-y: auto;
                                border: 1.5px solid var(--card-line); border-radius: var(--r); scrollbar-width: thin; }
+    /* The answer buttons stay in sight at the bottom of the docked item while its photos and prices scroll. */
+    .dock dialog:not(:modal) .decide { position: sticky; bottom: 0; z-index: 1; background: #fff; margin: 18px -20px 0; padding: 12px 20px 14px;
+                                       border-top: 1px solid var(--rule); }
   }
   dialog::backdrop { background: rgba(23, 22, 21, .55); }
   html:has(dialog:modal) { overflow: hidden; }
@@ -653,7 +656,7 @@
   var wide = window.matchMedia('(min-width: 1180px)');
   function showSheet() {
     if (dialog.open) return;
-    if (wide.matches) { dialog.show(); return; }
+    if (wide.matches) { dialog.show(); refit(); return; }
     dialog.showModal();
     if (!pushed) { pushed = true; history.pushState({ ashlineItem: true }, '', location.href); }   // Back closes the sheet
   }
@@ -661,6 +664,21 @@
     if (!dialog.open || dialog.matches(':modal') !== wide.matches) return;
     moving = true; dialog.close(); moving = false; showSheet();
   });
+  // The rail and the docked item are sticky: keep each within the visible part of the window, so its bottom
+  // (the last rooms, the answer buttons) is always on screen and the rest scrolls inside it.
+  var rail = document.querySelector('.rail'), fitting = false;
+  function fit() {
+    fitting = false;
+    [[rail, 760], [dialog, 1180]].forEach(function (p) {
+      var box = p[0]; if (!box) return;
+      if (window.innerWidth < p[1] || (box === dialog && dialog.matches(':modal'))) { box.style.maxHeight = ''; return; }
+      box.style.maxHeight = Math.max(240, window.innerHeight - Math.max(16, box.getBoundingClientRect().top) - 16) + 'px';
+    });
+  }
+  function refit() { if (!fitting) { fitting = true; requestAnimationFrame(fit); } }
+  window.addEventListener('scroll', refit, { passive: true });
+  window.addEventListener('resize', refit);
+  fit();
   function markOpen(id) {
     cards().forEach(function (c) { c.classList.toggle('open', c.dataset.id === id); });
     var c = id && wide.matches && card(id);

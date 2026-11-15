@@ -475,6 +475,16 @@ class Engine:
         self.store.set_case(case["case_id"], reminders=json.dumps(sent))
         return [Outbound(owner["dm_chat"], text)]
 
+    @staticmethod
+    def _default_grouper(case_id: str):
+        """Claude decides which detections across photos are one object, when a key is set.
+        ASHLINE_MERGER=rules turns it off (word-matching rules only)."""
+        kind = (config.env("ASHLINE_MERGER") or ("claude" if config.env("ANTHROPIC_API_KEY") else "rules")).lower()
+        if kind != "claude":
+            return None
+        from .merge_claude import ClaudeGrouper
+        return ClaudeGrouper(case_id)
+
     def _fingerprints(self, case_id: str) -> list[tuple]:
         """(photo number, (fingerprint, size)) of the family photos already in the case."""
         out = []
@@ -536,7 +546,11 @@ class Engine:
             return [Outbound(chat_id, "Couldn't make out items in this one, that's fine." if len(photos) == 1
                              else "Couldn't make out items in those, that's fine.")]
 
-        merged = merge_into_inventory(self.store, case_id, new_ids, self.grouper)
+        try:
+            merged = merge_into_inventory(self.store, case_id, new_ids, self.grouper or self._default_grouper(case_id))
+        except Exception as exc:                           # the model merger failed: word rules instead
+            print(f"ashline: merge by model failed ({exc}); using rules")
+            merged = merge_into_inventory(self.store, case_id, new_ids, None)
         price_items(case_id, self.store, self.pricer)
         lines = [self.store.get_item(case_id, i) for i in merged["new_lines"]]
         lines.sort(key=lambda i: -((i.get("price_mid") or 0) * (i.get("qty") or 1)))

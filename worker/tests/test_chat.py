@@ -491,3 +491,13 @@ def test_the_same_photo_twice_adds_nothing(fam):
     before = len(fam.store.get_items(fam.case_id))
     assert texts(fam.say(MAYA, "", [photo(640)])) == ["I already have that one (photo 1), so nothing new was added."]
     assert fam.wait() == [] and len(fam.store.get_items(fam.case_id)) == before
+
+
+def test_one_object_listed_twice_in_a_photo_is_folded():
+    from ashline.dedupe import dedupe_in_photo
+    items = [{"label": "gray sofa", "bbox": [0, 0, 400, 200], "confidence": 0.9},
+             {"label": "gray fabric sofa", "bbox": [20, 10, 300, 190], "confidence": 0.6},   # the same sofa again
+             {"label": "oak chair", "bbox": [500, 0, 600, 200], "confidence": 0.8},
+             {"label": "oak chair", "bbox": [610, 0, 710, 200], "confidence": 0.8}]          # a second chair
+    kept = dedupe_in_photo(items)
+    assert [i["label"] for i in kept] == ["gray sofa", "oak chair", "oak chair"]

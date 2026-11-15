@@ -377,3 +377,35 @@ def merge_into_inventory(store, case_id: str, new_ids: list[int], grouper=None) 
                 if twin and len(result["maybe"]) < 3:
                     result["maybe"].append((twin["item_id"], canonical["item_id"]))
     return result
+
+
+def dedupe_in_photo(items: list[dict], overlap: float = 0.6) -> list[dict]:
+    """One photo's detections with the same object listed twice folded into one.
+
+    Two entries about the same kind of thing (same noun) whose boxes mostly cover each other are
+    one object described twice, so the more confident entry is kept and its box widened to cover
+    both. Matching objects side by side (two chairs) barely overlap and stay separate.
+    """
+    def area(b):
+        return max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])
+
+    kept: list[dict] = []
+    for item in sorted(items, key=lambda i: -(i.get("confidence") or 0)):
+        box, key = item.get("bbox"), item_key(item.get("label", ""))
+        twin = None
+        if box and key:
+            for k in kept:
+                kb = k.get("bbox")
+                if not kb or item_key(k.get("label", "")) != key:
+                    continue
+                inter = area([max(box[0], kb[0]), max(box[1], kb[1]), min(box[2], kb[2]), min(box[3], kb[3])])
+                smaller = min(area(box), area(kb)) or 1
+                if inter / smaller >= overlap:
+                    twin = k
+                    break
+        if twin is None:
+            kept.append(dict(item))
+        else:
+            tb = twin["bbox"]
+            twin["bbox"] = [min(tb[0], box[0]), min(tb[1], box[1]), max(tb[2], box[2]), max(tb[3], box[3])]
+    return kept

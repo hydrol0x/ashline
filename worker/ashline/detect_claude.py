@@ -58,7 +58,10 @@ ROOM_ITEMS_SCHEMA = {
 
 INSTRUCTIONS = """
 
-List at most 30 items. Give each physical object its own entry (four bar stools = four entries).
+List at most 30 items. Give each physical object its own entry (four bar stools = four entries), and
+never the same object twice: one entry even when it is partly hidden or cut off by the frame, with one
+box around all of it. Skip what people are wearing (clothes, earbuds, watches, glasses) and what they
+hold in their hands; list furniture, electronics and other belongings of the home.
 `box` is the item's bounding box as [x0, y0, x1, y1] on a 0-1000 grid: origin top-left, x to the
 right, y down. An empty list is the right answer for a photo with no personal property in it."""
 

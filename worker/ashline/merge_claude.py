@@ -44,18 +44,20 @@ GROUPS_SCHEMA = {
 
 PROMPT = """You are tidying a home contents inventory for an insurance claim.
 
-Below are objects detected in one room of a home ({room}), from {panoramas} 360-degree panoramas taken at
-different spots in that room. Each line is: id | panorama | category | label.
+Below are objects detected in one room of a home ({room}), from {panoramas} photos or panoramas taken at
+different spots, angles or times in that room. Each line is: id | photo | category | label. A photo
+named like "line-12" is an item already on the inventory.
 
-The same physical object is usually detected from more than one panorama, and each detection was
-written without knowledge of the others, so the wording differs: "navy three-seat sofa with
-wooden legs" and "dark blue fabric couch" can be the same sofa.
+The same physical object is often seen in more than one photo, and each detection was written
+without knowledge of the others, so the wording differs: "navy three-seat sofa with wooden legs"
+and "dark blue fabric couch" can be the same sofa. Colour, material and shape still have to agree:
+an oak chair and a black chair, or a round table and a long bench table, are different objects.
 
 Group the ids so that each group is one line of the inventory:
-- Put together detections of the same physical object seen from different panoramas.
+- Put together detections of the same physical object seen in different photos.
 - Also put together identical matching objects that belong on one line, such as a set of matching
   dining chairs or a pair of matching nightstands, from the same or different panoramas.
-- Two detections from the same panorama are always two different physical objects. Group them only
+- Two detections from the same photo are always two different physical objects. Group them only
   if they are a matching set.
 - An object described as a reflection in a mirror is the same object as the real one in the room.
 - Do not group things that are merely the same type: two different plush toys, a TV and its

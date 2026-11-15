@@ -51,7 +51,7 @@ def test_owner_page_shows_meter_items_and_export(case):
     assert "The Example home · 3 items" in html and "2 family members contributing" in html
     assert "$1,800" in html and "documented · 2 items" in html                 # no coverage limit yet
     assert "What is the contents coverage limit" in html                        # asked, with a skip
-    assert "Blue velvet sofa" in html and "Table saw" in html and "not ours" not in html.lower()
+    assert "Blue velvet sofa" in html and "Table saw" in html and f'data-id="{ids['gone']}"' not in html
     assert f'/p/owner-token/crop/{ids["sofa"]}.jpg' in html and "from memory" in html
     assert "2 × $54–$135" in html                                               # two lamps, priced per unit
     assert "Download PDF for insurer" in html and "noindex" in html

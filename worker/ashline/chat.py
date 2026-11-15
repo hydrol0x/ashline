@@ -429,6 +429,10 @@ class Engine:
             if not re.match(r"(the|our|my)\b", name, re.I):
                 name = f"The {name}"
             self.store.set_case(case["case_id"], name=name[:60])
+            if not config.env("ASHLINE_ASK_ADDRESS", "").lower() in ("1", "on", "yes", "true"):
+                # Demo setting: the address question is off. "address 12 Oak St" still works any time.
+                self.store.set_member(member["member_id"], state={"step": "rooms"})
+                return [Outbound(inbound.chat_id, "Which rooms did it have? A rough list is fine.")]
             self.store.set_member(member["member_id"], state={"step": "address"})
             return [Outbound(inbound.chat_id, "What was the address? I'll check whether there's a 3D scan or a sale "
                                               "listing of the home to start from. You can say skip.")]
@@ -498,9 +502,13 @@ class Engine:
                                                    for n, r in enumerate(rooms, 1)], source="family")
         if not skipped:
             self.store.set_case(case["case_id"], rooms_note=text[:300])
-        self.store.set_member(member["member_id"], state={"step": "disaster"})
         out = self._invite_messages(inbound, case)
         out[0].text = "Thank you. " + out[0].text
+        if not config.env("ASHLINE_ASK_WHAT_HAPPENED", "").lower() in ("1", "on", "yes", "true"):
+            # Demo setting: "what happened?" and the insurance question are off ("it was a hurricane" still works).
+            self.store.set_member(member["member_id"], state={})
+            return out + [Outbound(inbound.chat_id, "Send photos from inside the home whenever you're ready.")]
+        self.store.set_member(member["member_id"], state={"step": "disaster"})
         return out + [Outbound(inbound.chat_id, WHAT_HAPPENED)]
 
     # ------------------------------------------- what happened, and which claim(s) it means

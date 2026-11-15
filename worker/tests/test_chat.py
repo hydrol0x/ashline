@@ -909,3 +909,13 @@ def test_a_failed_scan_can_be_retried_and_the_error_is_plain(fam):
         assert len(calls) == 2
     finally:
         seed.seed_home_twin = real
+
+
+def test_demo_setup_skips_the_address_and_what_happened_questions():
+    f = Family()
+    f.say(MOM, "hi", name="Mom")
+    assert texts(f.say(MOM, "The Rivera home")) == ["Which rooms did it have? A rough list is fine."]
+    out = texts(f.say(MOM, "living room, kitchen"))
+    assert out[-1] == "Send photos from inside the home whenever you're ready." and "HOME-" in out[0]
+    assert not any("what happened" in t.lower() or "address" in t.lower() for t in out)
+    assert texts(f.say(MOM, "address 12 Example Ave, Los Angeles, CA 90001"))[0].startswith("Saved the address")

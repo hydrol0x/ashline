@@ -63,3 +63,11 @@ def _isolated_data_dir(tmp_path, monkeypatch):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("ASHLINE_DATA_DIR", str(tmp_path / "cases"))
     monkeypatch.setenv("ASHLINE_MERGER", "rules")
+
+
+@pytest.fixture(autouse=True)
+def _full_setup_questions(monkeypatch, request):
+    """The demo turns the address and what-happened questions off; the tests cover the full setup."""
+    if "demo_setup" not in request.node.name:
+        monkeypatch.setenv("ASHLINE_ASK_ADDRESS", "on")
+        monkeypatch.setenv("ASHLINE_ASK_WHAT_HAPPENED", "on")

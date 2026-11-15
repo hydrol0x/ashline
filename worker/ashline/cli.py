@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--host", default="127.0.0.1", help="use 0.0.0.0 to accept connections from a tunnel or phone")
 
-    p = sub.add_parser("price-check", help="look up the most valuable items' prices online")
+    p = sub.add_parser("price-check", help="refresh the estimates, then look up the most valuable items' prices online")
     p.add_argument("--case", required=True)
     p.add_argument("--top", type=int, default=20, help="how many items to look up, most valuable first")
 
@@ -161,6 +161,10 @@ def _run(args, parser) -> None:
         uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     elif args.cmd == "price-check":
         from .price_search import price_check
+        _known(args.case, parser)
+        from .pricing import price_items as refresh_estimates
+        refreshed = refresh_estimates(args.case)           # rough figures are worked out again first
+        print(f"estimates refreshed: {refreshed['priced']} items ({refreshed['source'] or 'nothing to do'})")
         print(json.dumps(price_check(args.case, top=args.top, report=print), indent=1))
     elif args.cmd == "photon":
         from .bridge_photon import PhotonBridge

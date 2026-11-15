@@ -127,3 +127,21 @@ def test_download_retries_until_the_file_is_ready(bridge, monkeypatch):
     assert b.download("att-1") and len(calls) == 3
     projects.download_attachment = lambda request: (_ for _ in ()).throw(RuntimeError("gone"))
     assert b.download("att-2") is None
+
+
+import pytest as _pytest
+
+
+@_pytest.fixture(autouse=True)
+def _old_test_stamps_count_as_new(monkeypatch, request):
+    if "backlog" not in request.node.name:             # the fixed stamps above are in the past
+        monkeypatch.setenv("ASHLINE_BACKLOG_MINUTES", "100000000")
+
+
+def test_backlog_from_while_the_bot_was_off_is_not_answered(bridge):
+    from datetime import datetime, timezone
+    b, projects = bridge
+    now = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+    projects.inbox = [received("old", "hi", at="2026-11-14T15:00:00.000Z"), received("new", "hi", at=now)]
+    assert b.poll() == 1
+    assert len(sent_text(projects)) >= 1 and "old" in b.state["seen"]

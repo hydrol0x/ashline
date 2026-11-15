@@ -69,6 +69,8 @@ class TelegramBridge:
         self.state_path = config.data_dir() / "telegram_state.json"
         self.state = json.loads(self.state_path.read_text()) if self.state_path.exists() else {}
         self.state.setdefault("offset", 0)
+        # Messages from while this machine was off are not answered on start-up (see bridge_photon).
+        self.cutoff = time.time() - 60 * float(config.env("ASHLINE_BACKLOG_MINUTES", "5"))
         self.state.setdefault("buttons", {})            # button token -> [chat id, reply text, message id]
         self.state.setdefault("live", {})               # chat id -> message id of its one question with buttons
         self.bot_id: int | None = None
@@ -106,6 +108,8 @@ class TelegramBridge:
                     self.send(self.engine.handle(inbound))
                     handled += 1
             message = update.get("message")
+            if message and message.get("date", time.time()) < self.cutoff:
+                continue                                    # stale: arrived while the bot was off here
             if message:
                 self.migrate(message)
                 self.send(self.joined(message))

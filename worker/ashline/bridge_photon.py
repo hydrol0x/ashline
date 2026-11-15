@@ -70,6 +70,17 @@ def multipart_related(data: bytes, content_type: str, filename: str) -> tuple[by
     return body, f"multipart/related; boundary={boundary}"
 
 
+def _when(stamp) -> datetime:
+    """Photon's createdAt (ISO text or a datetime) as an aware UTC datetime."""
+    if isinstance(stamp, datetime):
+        return stamp if stamp.tzinfo else stamp.replace(tzinfo=timezone.utc)
+    try:
+        when = datetime.fromisoformat(str(stamp).replace("Z", "+00:00"))
+    except ValueError:
+        return datetime.now(timezone.utc)                 # unreadable: treat as new rather than drop it
+    return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+
 class PhotonBridge:
     def __init__(self, photon=None, engine: Engine | None = None, project: str | None = None):
         self.project = project or config.env("PHOTON_PROJECT_ID", required=True)
@@ -84,6 +95,10 @@ class PhotonBridge:
             timespec="milliseconds").replace("+00:00", "Z"))
         self.state.setdefault("seen", [])
         self.state.setdefault("senders", {})          # conversation id -> the agent's id in it
+        # Texts that arrived while this machine was off (or while another machine ran the bot) are not
+        # answered on start-up: replaying hours of them floods every chat with stale replies.
+        self.cutoff = datetime.now(timezone.utc) - timedelta(minutes=float(config.env("ASHLINE_BACKLOG_MINUTES", "5")))
+        self.skipped = 0
 
     def _save(self) -> None:
         self.state["seen"] = self.state["seen"][-500:]
@@ -106,6 +121,10 @@ class PhotonBridge:
                     continue
                 self.state["seen"].append(message.id)
                 self.state["since"] = max(self.state["since"], message.createdAt)
+                if _when(message.createdAt) < self.cutoff:
+                    self.skipped += 1
+                    self._save()
+                    continue
                 inbound = self.to_inbound(message)
                 if inbound is not None:
                     self.send(self.engine.handle(inbound))
@@ -115,6 +134,9 @@ class PhotonBridge:
             if not isinstance(token, str):
                 break
             query["pageToken"] = token
+        if self.skipped:
+            print(f"ashline: skipped {self.skipped} text(s) that arrived while the bot was off here")
+            self.skipped = 0
         return handled
 
     def to_inbound(self, message) -> Inbound | None:

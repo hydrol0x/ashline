@@ -10,7 +10,7 @@ from PIL import Image
 
 from ashline import detect
 from ashline.detect import DetectionError
-from ashline.detect_claude import ITEMS_SCHEMA, ClaudeDetector
+from ashline.detect_claude import HOME_ITEMS_SCHEMA, ITEMS_SCHEMA, ROOM_ITEMS_SCHEMA, ClaudeDetector
 
 
 class FakeMessages:
@@ -61,6 +61,55 @@ def test_detect_returns_items_with_pixel_boxes(photo):
     image, text = call["messages"][0]["content"]
     assert image["type"] == "image" and image["source"]["media_type"] == "image/jpeg"
     assert "(taken in: Living Room)" in text["text"] and "0-1000 grid" in text["text"]
+
+
+ROOMS = ["Living room", "Kitchen", "Dining area", "Laundry closet"]
+THROUGH_A_DOORWAY = json.dumps({"room": "laundry closet", "items": [
+    {"label": "white top-load washing machine", "category": "appliances", "brand_guess": None, "confidence": 0.9,
+     "box": [100, 300, 500, 900], "in_room": None},
+    {"label": "rustic wood dining table", "category": "furniture", "brand_guess": None, "confidence": 0.8,
+     "box": [600, 500, 1000, 900], "in_room": "dining area"},
+    {"label": "patio umbrella", "category": "outdoor", "brand_guess": None, "confidence": 0.5,
+     "box": [900, 100, 1000, 300], "in_room": "Back yard"},
+    {"label": "white clothes dryer", "category": "appliances", "brand_guess": None, "confidence": 0.9,
+     "box": [500, 300, 600, 900], "in_room": "Laundry closet"},
+]})
+
+
+def test_a_family_photo_says_which_room_each_item_stands_in(photo):
+    client, plain, beta = fake_client(THROUGH_A_DOORWAY)
+    items = {i["label"]: i for i in ClaudeDetector(client=client).detect(photo, rooms=ROOMS)}
+    call = beta.calls[0]
+    assert call["output_config"]["format"]["schema"] == ROOM_ITEMS_SCHEMA
+    item_schema = ROOM_ITEMS_SCHEMA["properties"]["items"]["items"]
+    assert "in_room" in item_schema["required"] and item_schema["additionalProperties"] is False
+    text = call["messages"][0]["content"][1]["text"]
+    assert "the room this photo was taken in" in text and "`in_room`" in text and "Dining area, Laundry closet" in text
+    # Rooms are spelled as the home spells them. Items in the photo's room carry it; the table is filed where it stands.
+    assert items["white top-load washing machine"]["room"] == items["white top-load washing machine"]["photo_room"] == "Laundry closet"
+    assert (items["rustic wood dining table"]["room"], items["rustic wood dining table"]["photo_room"]) == \
+        ("Dining area", "Laundry closet")
+    assert items["patio umbrella"]["room"] == "Back yard"                        # a room the home did not list
+    assert items["white clothes dryer"]["room"] == "Laundry closet"              # naming the photo's own room changes nothing
+    assert all("in_room" not in i for i in items.values())
+
+
+def test_a_captioned_family_photo_still_separates_the_next_room(photo):
+    reply = json.dumps({"items": json.loads(THROUGH_A_DOORWAY)["items"][:2]})
+    client, plain, beta = fake_client(reply)
+    items = ClaudeDetector(client=client).detect(photo, "Laundry closet", rooms=ROOMS)
+    assert beta.calls[0]["output_config"]["format"]["schema"] == HOME_ITEMS_SCHEMA
+    assert "(taken in: Laundry closet)" in beta.calls[0]["messages"][0]["content"][1]["text"]
+    assert [(i["room"], i["photo_room"]) for i in items] == [("Laundry closet", "Laundry closet"),
+                                                              ("Dining area", "Laundry closet")]
+
+
+def test_a_scan_face_is_asked_nothing_about_rooms(photo):
+    client, plain, beta = fake_client(REPLY)
+    items = ClaudeDetector(client=client).detect(photo, "Living Room")
+    assert beta.calls[0]["output_config"]["format"]["schema"] == ITEMS_SCHEMA
+    assert "in_room" not in beta.calls[0]["messages"][0]["content"][1]["text"]
+    assert all("room" not in i and "photo_room" not in i for i in items)
 
 
 def test_models_without_server_side_fallback_use_the_plain_endpoint(photo):

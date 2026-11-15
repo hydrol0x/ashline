@@ -596,3 +596,27 @@ def test_saying_these_are_new_unmatches_items_from_the_last_photo(fam):
 def test_ways_of_saying_new(words):
     from ashline.chat import NEW_ITEMS
     assert re.fullmatch(NEW_ITEMS, words) or re.fullmatch(r"#?(\d+)\s+(?:is|was|are)\s+(?:new|different)", words)
+
+
+def test_an_item_seen_through_a_doorway_is_filed_where_it_stands(fam):
+    """A dining table glimpsed from the kitchen is the dining room's table, not a second one."""
+    class Doorway:
+        def detect(self, path, room_hint=None, rooms=None):
+            table = {"label": "oak dining table", "category": "furniture", "brand_guess": None, "confidence": 0.8,
+                     "bbox": [300, 200, 600, 440]}
+            if Image.open(path).width == 656:                       # taken in the kitchen, looking through the doorway
+                return [{"label": "red stand mixer", "category": "kitchen", "brand_guess": None, "confidence": 0.8,
+                         "bbox": [100, 100, 220, 260], "room": "Kitchen", "photo_room": "Kitchen"},
+                        {**table, "room": "Dining room", "photo_room": "Kitchen"}]
+            return [{**table, "room": "Dining room", "photo_room": "Dining room"}]      # taken in the dining room
+
+    fam.engine.detector = Doorway()
+    fam.say(MAYA, photos=[photo(656), photo(640)])
+    fam.wait()
+    photos = {p["number"]: p["room_label"] for p in fam.store.get_photos(fam.case_id, source="photo")}
+    assert photos == {1: "Kitchen", 2: "Dining room"}                # each photo keeps the room it was taken in
+    lines = [i for i in fam.store.get_items(fam.case_id) if i["cluster_id"] in (None, i["item_id"])]
+    assert sorted((i["label"], i["room_label"]) for i in lines) == [
+        ("oak dining table", "Dining room"), ("red stand mixer", "Kitchen")]
+    table = next(i for i in lines if "table" in i["label"])
+    assert len(fam.store.get_sightings(fam.case_id, table["item_id"])) == 2 and table["qty"] == 1

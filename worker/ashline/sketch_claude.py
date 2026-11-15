@@ -85,8 +85,8 @@ Draw the plan as rectangles seen from above, x to the right and y down, in metre
   consistent with where you put the walls and neighbouring rooms: an item beside the doorway to
   the kitchen goes on the wall shared with the kitchen. Things against a wall get a value near
   0 or 1; things in the middle of the floor do not.
-- An item is filed under the room its photo was taken in. If it really stands in the room next
-  door (seen through a doorway), put it on the wall of its filed room nearest to where it stands.
+- An item is filed under the room it stands in, which is not always the room its photo was
+  taken in (it may have been seen through a doorway). Place it inside the room it is filed under.
 - Two lines that look like the same object seen twice get the same position. Things on a wall or
   on top of furniture go where they are when seen from above.
 - An item from a photo not shown has no picture here: place it from its description, the room

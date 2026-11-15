@@ -49,12 +49,33 @@ ITEMS_SCHEMA = {
     "additionalProperties": False,
 }
 
+# Family photos: each item can say it stands in another room than the one the photo was taken in.
+_ITEM = ITEMS_SCHEMA["properties"]["items"]["items"]
+_ITEM_IN_ROOM = {**_ITEM, "required": _ITEM["required"] + ["in_room"], "properties": {**_ITEM["properties"], "in_room": {
+    "type": ["string", "null"],
+    "description": "Null for an item in the room the photo was taken in. The other room's name for an item that "
+                   "stands in a different room and is only seen from here."}}}
+HOME_ITEMS_SCHEMA = {
+    "type": "object",
+    "properties": {"items": {"type": "array", "items": _ITEM_IN_ROOM}},
+    "required": ["items"],
+    "additionalProperties": False,
+}
 ROOM_ITEMS_SCHEMA = {
     "type": "object",
-    "properties": {"room": {"type": ["string", "null"]}, "items": ITEMS_SCHEMA["properties"]["items"]},
+    "properties": {"room": {"type": ["string", "null"]}, "items": {"type": "array", "items": _ITEM_IN_ROOM}},
     "required": ["room", "items"],
     "additionalProperties": False,
 }
+
+IN_ROOM = """
+
+Some photos look into another room: through a doorway, down a hallway, or across an open-plan space
+(a kitchen behind a living-room sofa). For each item give `in_room`: null when the item stands in the
+room the photo was taken in, or the name of the room it really stands in when that is a different one.
+Decide by where the item stands, not by where the camera is: a dining table seen through a closet
+doorway belongs to the dining area, and a refrigerator seen across the room from the sofa belongs to
+the kitchen. Use the room names of this home when they fit."""
 
 INSTRUCTIONS = """
 
@@ -65,6 +86,26 @@ one box around all of it. Skip what people are wearing (clothes, earbuds, watche
 hold in their hands; list furniture, electronics and other belongings of the home.
 `box` is the item's bounding box as [x0, y0, x1, y1] on a 0-1000 grid: origin top-left, x to the
 right, y down. An empty list is the right answer for a photo with no personal property in it."""
+
+
+def place_items(items: list[dict], photo_room: str | None, rooms: list[str] | None) -> list[dict]:
+    """Give each item its room: the photo's, or its own `in_room` when it stands somewhere else.
+
+    Each item gets "room" (where it stands) and "photo_room" (where the photo was taken); the
+    two differ for an item seen through a doorway. A room name the home already has is used in
+    the home's own spelling, so "dining area" and "Dining Area" are one room.
+    """
+    known = {r.strip().lower(): r for r in rooms or []}
+    photo_room = known.get((photo_room or "").strip().lower(), photo_room)
+    for item in items:
+        other = item.pop("in_room", None)
+        other = known.get(other.strip().lower(), other.strip()) if other else None
+        if photo_room:
+            item["photo_room"] = photo_room
+        room = other if other and other.lower() != (photo_room or "").lower() else photo_room
+        if room:
+            item["room"] = room
+    return items
 
 
 class ClaudeDetector:
@@ -88,12 +129,15 @@ class ClaudeDetector:
 
         room = f" (taken in: {room_hint})" if room_hint else ""
         schema, ask_room = ITEMS_SCHEMA, ""
-        if not room_hint and rooms is not None:
-            schema = ROOM_ITEMS_SCHEMA
+        if rooms is not None:                              # a family photo: rooms are named, not measured
             known = f" The rooms of this home are: {', '.join(rooms)}." if rooms else ""
-            ask_room = (f"\n\nAlso give `room`: the room this photo shows.{known} Use one of those names when it "
-                        "fits, a plain name such as \"Garage\" when none does, or null when the photo is not "
-                        "inside or around a home.")
+            if room_hint:
+                schema, ask_room = HOME_ITEMS_SCHEMA, (f"\n\n{known.strip()}" if known else "") + IN_ROOM
+            else:
+                schema = ROOM_ITEMS_SCHEMA
+                ask_room = (f"\n\nAlso give `room`: the room this photo was taken in.{known} Use one of those names "
+                            "when it fits, a plain name such as \"Garage\" when none does, or null when the photo "
+                            "is not inside or around a home." + IN_ROOM)
         request = dict(
             model=self.model,
             max_tokens=16000,
@@ -136,7 +180,6 @@ class ClaudeDetector:
             raise DetectionError(f"Unexpected reply from Claude: {text[:200]}") from exc
         parsed = parse_items(json.dumps(items), width, height)
         guess = reply.get("room") if isinstance(reply.get("room"), str) else None
-        if guess and guess.strip():
-            for item in parsed:
-                item["room"] = guess.strip()
-        return parsed
+        if rooms is None:                                  # a scan face: its room is known from the scan
+            return parsed
+        return place_items(parsed, (guess or "").strip() or room_hint, rooms)

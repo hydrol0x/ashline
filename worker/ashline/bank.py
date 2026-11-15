@@ -17,8 +17,10 @@ Nessie holds mock data, so `seed_demo` can first write a few purchases that matc
 most valuable items; that is a demo helper and says so.
 
 Docs: http://api.nessieisreal.com/documentation. The key goes in the `key` query parameter.
-Not verified against the live service from the build environment (the host is not reachable
-there); the client follows the documented v2 endpoints and is covered by tests with a fake.
+Probed on the live service on 15 Nov 2026 with an invalid key (no real key was available): reads
+answer 200 with an empty list rather than an error, writes answer 401 "Invalid API key.", an
+unknown id answers 404, and a purchase needs a 24-character merchant id, a date and a status.
+The keyed calls follow the documented v2 endpoints and are covered by tests with a fake.
 """
 from __future__ import annotations
 
@@ -30,7 +32,7 @@ import requests
 from . import config
 from .pricing import money, nice
 
-API = "http://api.nessieisreal.com"
+API = "https://api.nessieisreal.com"
 SOURCE_PREFIX = "bank record"
 STOP = {"the", "a", "an", "and", "with", "of", "for", "in", "on", "to", "from", "by", "new", "set", "pack", "inch", "in",
         "size", "large", "small", "medium", "big", "black", "white", "gray", "grey", "brown", "blue", "red", "green",
@@ -108,6 +110,9 @@ def purchases(client: NessieClient | None = None, customer_id: str | None = None
     account_id = account_id or config.env("NESSIE_ACCOUNT_ID")
     customer_id = customer_id or config.env("NESSIE_CUSTOMER_ID")
     account_ids = [account_id] if account_id else [a["_id"] for a in client.accounts(customer_id)]
+    if not account_ids:                                     # the live API answers a wrong key with an empty list
+        raise BankError("The bank shows no accounts for this key. Check NESSIE_API_KEY, or create demo data "
+                        "with `ashline bank --case <case> --seed-demo 5`.")
     out = []
     for account in account_ids:
         for row in client.account_purchases(account):

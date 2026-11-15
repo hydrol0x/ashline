@@ -715,12 +715,16 @@ class Engine:
                                           "try again when you send the next one.")]
             # A room the family named with the photo wins over the detector's guess, so a chair in the
             # bedroom is never merged with the one in the kitchen.
-            room = photo.get("room_label") or next((i.get("room") for i in items if i.get("room")), None)
+            room = photo.get("room_label") or next(
+                (i.get("photo_room") or i.get("room") for i in items if i.get("photo_room") or i.get("room")), None)
             self.store.set_photo(case_id, photo["photo_id"], status="done", room_label=room)
             photo = {**photo, "room_label": room}
             for item in items:
-                new_ids.append(self.store.add_item(case_id, {**item, "room_label": room}, source="photo", photo=photo,
-                                                   added_by=photo.get("added_by")))
+                # An item seen through a doorway is filed under the room it stands in, not the photo's,
+                # so it merges with the sightings taken inside that room.
+                elsewhere = item.get("photo_room") and item.get("room") and item["room"] != item["photo_room"]
+                new_ids.append(self.store.add_item(case_id, {**item, "room_label": item["room"] if elsewhere else room},
+                                                   source="photo", photo=photo, added_by=photo.get("added_by")))
             found += len(items)
 
         if not found:

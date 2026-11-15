@@ -104,6 +104,9 @@ def parse_items(text: str, width: int, height: int) -> list[dict]:
             "bbox": [round(x0 * width / 1000), round(y0 * height / 1000),
                      round(x1 * width / 1000), round(y1 * height / 1000)],
         })
+        other = entry.get("in_room")                    # the item stands in another room than the photo's
+        if isinstance(other, str) and other.strip().lower() not in ("", "null", "none", "same", "unknown"):
+            items[-1]["in_room"] = other.strip()
     # Same label, heavily overlapping boxes: keep the more confident one.
     items.sort(key=lambda i: -i["confidence"])
     kept: list[dict] = []

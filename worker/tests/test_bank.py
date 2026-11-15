@@ -80,6 +80,9 @@ def test_purchases_are_read_with_the_merchant_name_and_the_key(client, nessie):
     assert all(params == {"key": "test-key"} for _, _, params in nessie.calls)
     with pytest.raises(bank.BankError, match="rejected the key"):
         bank.purchases(bank.NessieClient(key="wrong", session=nessie))
+    nessie.accounts = []                                    # what the live API returns for an unknown key
+    with pytest.raises(bank.BankError, match="no accounts for this key"):
+        bank.purchases(client)
 
 
 def test_no_key_is_a_clear_error(monkeypatch):

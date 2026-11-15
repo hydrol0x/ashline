@@ -47,10 +47,24 @@
   .chip[aria-pressed=true] { color: var(--ink); border-bottom-color: var(--red); }
   .chip.removed-chip { font-weight: 500; }
   .tools { display: flex; justify-content: space-between; align-items: center; margin: 14px 0 16px; font-size: 14px; color: var(--muted); }
-  .tools select { appearance: none; -webkit-appearance: none; border: 0; border-bottom: 1.5px solid var(--ink); background: transparent; padding: 3px 20px 3px 2px; font-weight: 600; color: var(--ink); cursor: pointer;
+  .tools select.unused { appearance: none; -webkit-appearance: none; border: 0; border-bottom: 1.5px solid var(--ink); background: transparent; padding: 3px 20px 3px 2px; font-weight: 600; color: var(--ink); cursor: pointer;
                   background-image: linear-gradient(45deg, transparent 50%, var(--ink) 50%), linear-gradient(135deg, var(--ink) 50%, transparent 50%);
                   background-position: calc(100% - 9px) 55%, calc(100% - 4px) 55%; background-size: 5px 5px; background-repeat: no-repeat; border-radius: 0; }
 
+  .native-sort { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+  .sort { position: relative; display: flex; align-items: center; gap: 8px; }
+  .sort-btn { display: inline-flex; align-items: center; gap: 8px; border: 0; border-bottom: 1.5px solid var(--ink); background: none;
+              padding: 4px 2px; font-weight: 700; color: var(--ink); cursor: pointer; border-radius: 0; }
+  .sort-btn::after { content: ""; width: 7px; height: 7px; border-right: 1.5px solid var(--ink); border-bottom: 1.5px solid var(--ink);
+                     transform: translateY(-2px) rotate(45deg); transition: transform .15s; }
+  .sort-btn[aria-expanded=true]::after { transform: translateY(2px) rotate(-135deg); }
+  .sort-list { position: absolute; right: 0; top: calc(100% + 8px); z-index: 20; min-width: 236px; margin: 0; padding: 6px 0; list-style: none;
+               background: #fff; border: 1.5px solid var(--ink); box-shadow: 6px 6px 0 rgba(23, 22, 21, .08); }
+  .sort-list li { display: flex; align-items: center; gap: 10px; padding: 10px 16px 10px 14px; font-size: 15px; font-weight: 500; color: var(--ink); cursor: pointer; }
+  .sort-list li::before { content: ""; width: 3px; height: 18px; background: transparent; flex: none; }
+  .sort-list li[aria-selected=true] { font-weight: 700; }
+  .sort-list li[aria-selected=true]::before { background: var(--red); }
+  .sort-list li.active, .sort-list li:hover { background: var(--panel); }
   .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 22px 14px; }
   @media (min-width: 640px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 28px 20px; } }
   @media (min-width: 920px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
@@ -205,7 +219,12 @@
   </nav>
   <div class="tools">
     <span id="shown">{{ items|length }} shown</span>
-    <label>Sort <select id="sort" aria-label="Sort items">
+    <div class="sort">
+      <span class="sort-label" id="sort-label">Sort</span>
+      <button class="sort-btn" id="sort-btn" type="button" aria-haspopup="listbox" aria-expanded="false" aria-labelledby="sort-label sort-btn"></button>
+      <ul class="sort-list" id="sort-list" role="listbox" aria-labelledby="sort-label" tabindex="-1" hidden></ul>
+    </div>
+    <select id="sort" class="native-sort" aria-hidden="true" tabindex="-1">
       <option value="value">Highest value</option>
       <option value="low">Lowest value</option>
       <option value="review">Waiting for your OK first</option>
@@ -213,7 +232,7 @@
       <option value="new">Newest first</option>
       <option value="old">Oldest first</option>
       <option value="name">Name A–Z</option>
-    </select></label>
+    </select>
   </div>
 
   {% if items or removed %}
@@ -320,6 +339,39 @@
     });
   });
   sortBox.addEventListener('change', apply);
+
+  // A sort menu in the page's own style instead of the browser's.
+  var sortBtn = document.getElementById('sort-btn'), sortList = document.getElementById('sort-list'), activeOpt = -1;
+  var opts = [].slice.call(sortBox.options).map(function (o, n) {
+    var li = el('li', o.textContent); li.setAttribute('role', 'option'); li.id = 'sort-opt-' + n; li.dataset.value = o.value;
+    li.addEventListener('click', function () { choose(o.value); });
+    li.addEventListener('mousemove', function () { highlight(n); });
+    sortList.appendChild(li); return li;
+  });
+  function syncSort() {
+    sortBtn.textContent = sortBox.options[sortBox.selectedIndex].textContent;
+    opts.forEach(function (li) { li.setAttribute('aria-selected', li.dataset.value === sortBox.value ? 'true' : 'false'); });
+  }
+  function highlight(n) {
+    activeOpt = n; opts.forEach(function (li, i) { li.classList.toggle('active', i === n); });
+    if (opts[n]) sortList.setAttribute('aria-activedescendant', opts[n].id);
+  }
+  function openSort() { sortList.hidden = false; sortBtn.setAttribute('aria-expanded', 'true'); highlight(sortBox.selectedIndex); sortList.focus(); }
+  function closeSort(refocus) { sortList.hidden = true; sortBtn.setAttribute('aria-expanded', 'false'); if (refocus) sortBtn.focus(); }
+  function choose(value) {
+    if (sortBox.value !== value) { sortBox.value = value; sortBox.dispatchEvent(new Event('change')); }
+    syncSort(); closeSort(true);
+  }
+  sortBtn.addEventListener('click', function () { sortList.hidden ? openSort() : closeSort(false); });
+  sortBtn.addEventListener('keydown', function (e) { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); openSort(); } });
+  sortList.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowDown') { e.preventDefault(); highlight(Math.min(opts.length - 1, activeOpt + 1)); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); highlight(Math.max(0, activeOpt - 1)); }
+    else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (opts[activeOpt]) choose(opts[activeOpt].dataset.value); }
+    else if (e.key === 'Escape' || e.key === 'Tab') { closeSort(e.key === 'Escape'); }
+  });
+  document.addEventListener('click', function (e) { if (!sortList.hidden && !e.target.closest('.sort')) closeSort(false); });
+  syncSort();
   apply();
 
   function post(path, body) {

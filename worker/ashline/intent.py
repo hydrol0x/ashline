@@ -104,7 +104,7 @@ class Interpreter:
     def client(self):
         if self._client is None:
             import anthropic
-            self._client = anthropic.Anthropic()
+            self._client = anthropic.Anthropic(timeout=180.0, max_retries=1)
         return self._client
 
     def __call__(self, message: str, context: str = "") -> dict:

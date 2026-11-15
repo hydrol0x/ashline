@@ -69,7 +69,7 @@ class ClaudeSearcher:
     def client(self):
         if self._client is None:
             import anthropic
-            self._client = anthropic.Anthropic()
+            self._client = anthropic.Anthropic(timeout=300.0, max_retries=1)
         return self._client
 
     def search(self, description: str, brand: str | None = None, image=None) -> list[dict]:
@@ -577,7 +577,7 @@ def price_check(case_id: str, store: Store | None = None, top: int = 20, searche
 
 
 # ------------------------------------------------- without being asked
-AUTO_TOP = 12                   # items looked up after each batch of new items, most valuable first
+AUTO_TOP = 6                    # items looked up after each batch of new items, most valuable first
 AUTO_MIN = 60.0                 # only items estimated at this much or more (for the whole quantity)
 AUTO_AT_ONCE = 3                # lookups running at the same time
 ALWAYS_WORTH = ("furniture", "electronics", "appliances")   # their fixed figures say nothing, so AUTO_MIN does not apply

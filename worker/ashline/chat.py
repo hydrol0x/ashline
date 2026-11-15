@@ -34,6 +34,7 @@ from .pricing import money, money_range, price_items
 from .rooms import tidy_room
 from .store import Store
 
+READ_AT_ONCE = 3                # photos of one burst read at the same time
 BATCH_SECONDS = 60                      # wait this long after the last photo of a burst
 ANNOTATE_UP_TO = 5                       # bursts this small get every photo back annotated
 QUESTION_HOURS = 4                      # an unanswered "same item?" expires after this
@@ -1140,10 +1141,24 @@ class Engine:
         get_detector = (lambda: self.detector) if self.detector else detect_mod.get_detector
 
         new_ids, found = [], 0
-        for photo in photos:
+
+        def read(photo: dict):
             try:
-                items = detect_cached(case_id, photo, None, get_detector=lambda: _RoomAware(get_detector(), rooms))
+                return detect_cached(case_id, photo, None, get_detector=lambda: _RoomAware(get_detector(), rooms))
             except detect_mod.DetectionError as exc:
+                return exc
+
+        # Photos are read a few at a time: each is a model call of many seconds, and one after
+        # another a burst of six kept the family (and every other chat) waiting for minutes.
+        if len(photos) > 1 and self.background:
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=READ_AT_ONCE) as pool:
+                readings = list(pool.map(read, photos))
+        else:
+            readings = [read(photo) for photo in photos]
+        for photo, items in zip(photos, readings):
+            if isinstance(items, detect_mod.DetectionError):
+                exc = items
                 print(f"ashline: could not read photo {photo['photo_id']}: {exc}")
                 self.store.set_photo(case_id, photo["photo_id"], status="failed")
                 self._unread += 1

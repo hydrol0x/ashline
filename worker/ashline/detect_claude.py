@@ -116,7 +116,7 @@ class ClaudeDetector:
         self.model = model or config.env("ASHLINE_CLAUDE_MODEL", DEFAULT_MODEL)
         self.effort = effort or config.env("ASHLINE_CLAUDE_EFFORT", "medium")
         self.max_side = max_side
-        self.client = client or anthropic.Anthropic()
+        self.client = client or anthropic.Anthropic(timeout=180.0, max_retries=1)
 
     def detect_short(self, path, room_hint=None, rooms=None) -> list[dict]:
         """The same request, asking for the 15 most valuable things only."""

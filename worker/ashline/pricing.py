@@ -223,7 +223,7 @@ class ClaudePricer:
     def client(self):
         if self._client is None:
             import anthropic
-            self._client = anthropic.Anthropic()
+            self._client = anthropic.Anthropic(timeout=180.0, max_retries=1)
         return self._client
 
     def prices(self, items: list[dict]) -> dict[int, float]:

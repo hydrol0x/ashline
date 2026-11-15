@@ -79,8 +79,14 @@ class Store:
             path = str(root / "ashline.sqlite")
         # The LangChain agent runs its tools on worker threads; callers serialize their use of a Store.
         self.path = path
-        self.db = sqlite3.connect(path, check_same_thread=False)
+        # The bridges, the web server and their background jobs all write here. Wait for another
+        # writer for up to half a minute, and let readers go on while one writes.
+        self.db = sqlite3.connect(path, check_same_thread=False, timeout=30)
         self.db.row_factory = sqlite3.Row
+        try:
+            self.db.execute("PRAGMA journal_mode=WAL")
+        except sqlite3.DatabaseError:
+            pass
         self.db.executescript(SCHEMA)
         self._migrate()
 

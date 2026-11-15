@@ -197,17 +197,17 @@ def test_one_listing_keeps_the_3x_rule_except_against_a_fixed_figure():
 
 
 def test_reach_more_items_and_cheaper_ones(monkeypatch):
-    assert (price_search.AUTO_TOP, price_search.AUTO_MIN, price_search.AUTO_AT_ONCE) == (12, 60.0, 3)
+    assert (price_search.AUTO_TOP, price_search.AUTO_MIN, price_search.AUTO_AT_ONCE) == (6, 60.0, 3)
     f, first = chair_case("claude estimate", 40.0, label="toaster")               # under $60: left alone
     ids = [first] + [chair_case("claude estimate", 70.0 + n, label=f"thing {n}", f=f)[1] for n in range(14)]
     staged = Staged([90.0, 95.0])
     price_search.auto_price(f.case_id, f.store, ids, staged)
-    assert len(staged.asked) == 12 and "toaster" not in staged.asked and "thing 0" not in staged.asked   # the 12 dearest
+    assert len(staged.asked) == 6 and "toaster" not in staged.asked and "thing 0" not in staged.asked    # the 6 dearest
     monkeypatch.setenv("ASHLINE_AUTO_PRICE_TOP", "1")
     monkeypatch.setenv("ASHLINE_AUTO_PRICE_MIN", "30")
     again = Staged([30.0, 35.0])
     price_search.auto_price(f.case_id, f.store, ids, again)
-    assert again.asked == ["thing 1"]                                              # what is left, dearest first
+    assert again.asked == ["thing 7"]                                              # what is left, dearest first
 
 
 def test_a_fixed_furniture_figure_is_looked_up_whatever_the_minimum():

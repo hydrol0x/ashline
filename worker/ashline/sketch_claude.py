@@ -208,7 +208,7 @@ class ClaudeSketcher:
         call = dict(model=self.model, max_tokens=16000,
                     output_config={"effort": self.effort, "format": {"type": "json_schema", "schema": SKETCH_SCHEMA}},
                     messages=[{"role": "user", "content": content}])
-        client = self._client or anthropic.Anthropic()
+        client = self._client or anthropic.Anthropic(timeout=180.0, max_retries=1)
         try:
             if self.model.startswith(FALLBACK_MODELS):
                 response = client.beta.messages.create(betas=[FALLBACK_BETA], fallbacks="default", **call)

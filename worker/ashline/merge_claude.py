@@ -99,7 +99,7 @@ class ClaudeGrouper:
     @property
     def client(self) -> anthropic.Anthropic:
         if self._client is None:                       # only built when a room is not cached
-            self._client = anthropic.Anthropic()
+            self._client = anthropic.Anthropic(timeout=180.0, max_retries=1)
         return self._client
 
     def _cache_path(self, prompt: str):

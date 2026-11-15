@@ -16,11 +16,11 @@ before any price changes, and one purchase is never used for two items.
 Nessie holds mock data, so `seed_demo` can first write a few purchases that match a case's
 most valuable items; that is a demo helper and says so.
 
-Docs: http://api.nessieisreal.com/documentation. The key goes in the `key` query parameter.
-Probed on the live service on 15 Nov 2026 with an invalid key (no real key was available): reads
-answer 200 with an empty list rather than an error, writes answer 401 "Invalid API key.", an
-unknown id answers 404, and a purchase needs a 24-character merchant id, a date and a status.
-The keyed calls follow the documented v2 endpoints and are covered by tests with a fake.
+Two generations of the API exist and both are supported (see `NessieClient`). Verified on the
+live v2 service on 15 Nov 2026 with a real key: creating a customer, a card, merchants and
+purchases, reading them back and matching them to items. v2 sets the purchase date itself (the
+time of the call) and a purchase starts as pending, then settles; both count here. The classic
+API was probed with an invalid key only: reads answer 200 with an empty list, writes 401.
 """
 from __future__ import annotations
 
@@ -32,7 +32,8 @@ import requests
 from . import config
 from .pricing import money, nice
 
-API = "https://api.nessieisreal.com"
+API = "https://api.nessieisreal.com"                 # classic Nessie: key in the URL
+API_V2 = "https://v2-prod-api.nessieisreal.com"      # Nessie v2: key in an Authorization header
 SOURCE_PREFIX = "bank record"
 STOP = {"the", "a", "an", "and", "with", "of", "for", "in", "on", "to", "from", "by", "new", "set", "pack", "inch", "in",
         "size", "large", "small", "medium", "big", "black", "white", "gray", "grey", "brown", "blue", "red", "green",
@@ -52,41 +53,83 @@ class BankError(RuntimeError):
 
 
 class NessieClient:
+    """Capital One's mock bank, either generation.
+
+    A key starting with `nsk_` belongs to Nessie v2 (v2-prod-api.nessieisreal.com): the key goes in
+    an `Authorization: Bearer` header, lists come as {"items": [...], "next_cursor"}, amounts are
+    in cents and a purchase is a transaction of kind "purchase". Any other key is for the classic
+    API (api.nessieisreal.com): the key goes in the URL and amounts are dollars. Both are read
+    into the same shape here, so the rest of the module does not care which bank it talks to.
+    """
+
     def __init__(self, key: str | None = None, base: str | None = None, session=None):
         config.load_env()
         self.key = key or config.env("NESSIE_API_KEY")
         if not self.key:
-            raise config.MissingKey("NESSIE_API_KEY is not set. Get a free key at http://api.nessieisreal.com "
+            raise config.MissingKey("NESSIE_API_KEY is not set. Get a free key at https://v2.nessieisreal.com "
                                     "and put it in .env.")
-        self.base = (base or config.env("NESSIE_API_URL") or API).rstrip("/")
+        self.v2 = self.key.startswith("nsk_")
+        self.base = (base or config.env("NESSIE_API_URL") or (API_V2 if self.v2 else API)).rstrip("/")
         self.session = session or requests.Session()
         self._merchants: dict = {}
 
-    def _call(self, method: str, path: str, body: dict | None = None):
+    def _call(self, method: str, path: str, body: dict | None = None, query: dict | None = None):
+        params, headers = dict(query or {}), {}
+        if self.v2:
+            headers["Authorization"] = f"Bearer {self.key}"
+        else:
+            params["key"] = self.key
         try:
-            resp = self.session.request(method, f"{self.base}{path}", params={"key": self.key}, json=body, timeout=30)
+            resp = self.session.request(method, f"{self.base}{path}", params=params, headers=headers, json=body,
+                                        timeout=30)
         except requests.RequestException as exc:
-            raise BankError(f"Could not reach the bank API: {exc}") from exc
+            raise BankError(f"Could not reach the bank API: {type(exc).__name__}") from None   # never echo the request
         if resp.status_code == 401:
             raise BankError("The bank API rejected the key. Check NESSIE_API_KEY in .env.")
         if resp.status_code == 404:
             return None
         if resp.status_code >= 400:
-            raise BankError(f"Bank API error {resp.status_code}: {resp.text[:200]}")
+            try:
+                problem = resp.json()
+                detail = problem.get("detail") or problem.get("message") or problem.get("title") if isinstance(problem, dict) else problem
+            except ValueError:
+                detail = resp.text
+            raise BankError(f"Bank API error {resp.status_code}: {str(detail)[:200]}")
         return resp.json() if resp.content else None
 
     def get(self, path: str):
         return self._call("GET", path)
 
+    def listing(self, path: str, limit: int = 100) -> list[dict]:
+        """Every row of a list endpoint. v2 pages with a cursor; the classic API returns it all at once."""
+        if not self.v2:
+            return self.get(path) or []
+        rows, cursor = [], None
+        for _ in range(20):
+            page = self._call("GET", path, query={"limit": limit, **({"cursor": cursor} if cursor else {})}) or {}
+            rows += page.get("items") or []
+            cursor = page.get("next_cursor")
+            if not cursor:
+                break
+        return [{**row, "_id": row.get("id")} for row in rows]
+
     def post(self, path: str, body: dict) -> dict:
         reply = self._call("POST", path, body) or {}
-        return reply.get("objectCreated") or reply
+        made = reply.get("objectCreated") or reply
+        return {**made, "_id": made.get("_id") or made.get("id")}
 
     def accounts(self, customer_id: str | None = None) -> list[dict]:
-        return self.get(f"/customers/{customer_id}/accounts" if customer_id else "/accounts") or []
+        return self.listing(f"/customers/{customer_id}/accounts" if customer_id else "/accounts")
 
     def account_purchases(self, account_id: str) -> list[dict]:
-        return self.get(f"/accounts/{account_id}/purchases") or []
+        """One account's purchases as {_id, merchant_id, purchase_date, amount (dollars), status, description}."""
+        if not self.v2:
+            return self.get(f"/accounts/{account_id}/purchases") or []
+        page = self._call("GET", f"/accounts/{account_id}/transactions", query={"limit": 5000}) or {}
+        return [{"_id": t.get("id"), "merchant_id": t.get("merchant_id"), "purchase_date": (t.get("created_at") or "")[:10],
+                 "amount": (t.get("amount_cents") or 0) / 100, "status": "cancelled" if t.get("status") == "declined"
+                 else t.get("status"), "description": t.get("description")}
+                for t in page.get("items") or [] if t.get("kind") == "purchase" and t.get("payer_id", account_id) == account_id]
 
     def merchant(self, merchant_id: str | None) -> dict:
         if not merchant_id:
@@ -97,6 +140,18 @@ class NessieClient:
             except BankError:
                 self._merchants[merchant_id] = {}
         return self._merchants[merchant_id]
+
+    # ---- writing (demo data only)
+    def open_card(self, customer_id: str, nickname: str, limit_dollars: int) -> dict:
+        body = ({"type": "Credit Card", "nickname": nickname, "balance_cents": 0, "credit_limit_cents": limit_dollars * 100}
+                if self.v2 else {"type": "Credit Card", "nickname": nickname, "rewards": 0, "balance": 0})
+        return self.post(f"/customers/{customer_id}/accounts", body)
+
+    def buy(self, account_id: str, merchant_id: str, amount: float, description: str, date: str) -> dict:
+        body = ({"merchant_id": merchant_id, "amount_cents": round(amount * 100), "description": description, "medium": "balance"}
+                if self.v2 else {"merchant_id": merchant_id, "medium": "balance", "purchase_date": date, "amount": amount,
+                                 "status": "completed", "description": description})
+        return self.post(f"/accounts/{account_id}/purchases", body)
 
 
 def purchases(client: NessieClient | None = None, customer_id: str | None = None,
@@ -250,8 +305,7 @@ def seed_demo(case_id: str, store, client: NessieClient | None = None, top: int 
     first, _, last = name.partition(" ")
     customer = client.post("/customers", {"first_name": first, "last_name": last or "Family", "address": {
         "street_number": "1", "street_name": "Demo Street", "city": "Princeton", "state": "NJ", "zip": "08540"}})
-    account = client.post(f"/customers/{customer['_id']}/accounts", {
-        "type": "Credit Card", "nickname": "Everyday card", "rewards": 0, "balance": 0})
+    account = client.open_card(customer["_id"], "Everyday card", limit_dollars=100_000)
     items = [i for i in store.get_items(case_id, canonical_only=True) if i["status"] != "rejected" and i.get("price_mid")]
     items.sort(key=lambda i: -(i["price_mid"] * (i.get("qty") or 1)))
     merchants, made = {}, []
@@ -264,8 +318,7 @@ def seed_demo(case_id: str, store, client: NessieClient | None = None, top: int 
                                                          "geocode": {"lat": 40.35, "lng": -74.66}})["_id"]
         qty = int(item.get("qty") or 1)
         amount = round(item["price_mid"] * qty * (0.92 + 0.05 * (n % 4)) - 0.01, 2)      # near, not equal to, the estimate
-        client.post(f"/accounts/{account['_id']}/purchases", {
-            "merchant_id": merchants[shop], "medium": "balance", "purchase_date": f"{2023 + n % 3}-{1 + (n * 5) % 12:02d}-15",
-            "amount": amount, "status": "completed", "description": (f"{qty} x " if qty > 1 else "") + item["label"][:80]})
+        client.buy(account["_id"], merchants[shop], amount, (f"{qty} x " if qty > 1 else "") + item["label"][:80],
+                   date=f"{2023 + n % 3}-{1 + (n * 5) % 12:02d}-15")
         made.append({"item": item["label"], "amount": amount, "merchant": shop})
     return {"customer_id": customer["_id"], "account_id": account["_id"], "purchases": made}

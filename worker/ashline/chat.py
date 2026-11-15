@@ -178,6 +178,8 @@ class Engine:
             config.env("ASHLINE_BATCH_SECONDS") or BATCH_SECONDS)
         self.video_frames = int(config.env("ASHLINE_VIDEO_FRAMES") or 14)     # stills kept from one video
         self.bank = None                                    # a bank client; built from NESSIE_API_KEY when first needed
+        self.searcher = None                                # looks prices up online; built from the key when first needed
+        self.background = True                              # False runs the after-work (price lookups) inline, for tests
 
     # ------------------------------------------------------------ helpers
     def link(self, case: dict, member: dict) -> str:
@@ -405,6 +407,7 @@ class Engine:
             return [Outbound(chat_id, f"I couldn't go through the scan just now ({exc}). You can still send photos; "
                                       "I'll work from those.")]
         priced = price_items(case_id, self.store, self.pricer)
+        self._research_later(case_id, chat_id, None)
         waiting = self.store.get_items(case_id, status="suggested", canonical_only=True)
         total = sum((i.get("price_mid") or 0) * (i.get("qty") or 1) for i in waiting)
         rooms = len({i["room_label"] for i in waiting if i.get("room_label")})
@@ -559,6 +562,53 @@ class Engine:
                                   f"paid, marked as a bank record. {meter_line(meter(case_id, self.store)).splitlines()[0]} "
                                   "Say undo to go back.")]
 
+    def _research_later(self, case_id: str, chat_id: str, item_ids: list[int] | None) -> None:
+        """Have the price agent look the bigger new items up online, without anyone asking.
+
+        It runs in the background, since each lookup is a web search; what it finds is mentioned
+        in the chat by the next tick. Needs an Anthropic key, and ASHLINE_AUTO_PRICE not off.
+        """
+        from . import price_search
+        if not price_search.auto_enabled():
+            return
+        searcher = self.searcher or price_search.get_searcher()
+        if searcher is None:
+            return
+
+        def work(store):
+            try:
+                price_search.auto_price(case_id, store, item_ids, searcher, chat_id=chat_id)
+            except Exception as exc:                        # the estimates stay
+                print(f"ashline: automatic price lookup failed ({exc})")
+        if not self.background:
+            return work(self.store)
+        import threading
+        threading.Thread(target=lambda: work(type(self.store)(self.store.path)), daemon=True).start()
+
+    def _price_news(self, case: dict) -> list[Outbound]:
+        """Tell the family, once, which prices the agent firmed up online."""
+        from . import price_search
+        news = price_search.take_news(case["case_id"])
+        if not news:
+            return []
+        owner = self._owner(case["case_id"])
+        by_chat: dict[str, list[dict]] = {}
+        for row in news:
+            chat = row.get("chat_id") or (owner or {}).get("dm_chat")
+            if chat:
+                by_chat.setdefault(chat, []).append(row)
+        out = []
+        for chat, rows in by_chat.items():
+            lines = []
+            for row in rows[:8]:
+                was = f" (I had guessed about {money(row['before'])})" if row.get("before") else ""
+                lines.append(f"• {_cap(row['label'])}: {money(row['price'])} at {row['retailer']}{was}")
+            count = len(rows)
+            out.append(Outbound(chat, f"I looked up {count} of the bigger item{'s' if count != 1 else ''} online to "
+                                      "firm up the price" + ("s" if count != 1 else "") + ":\n" + "\n".join(lines)
+                                      + "\n\nEach item's page shows the listing the price came from."))
+        return out
+
     def _sketch_later(self, case_id: str) -> None:
         """Redraw the plan sketch in the background after new photos, when a model is available."""
         from . import layout, sketch_claude
@@ -628,6 +678,9 @@ class Engine:
             if owner and owns(owner.get("dm_chat") or owner["phone"]):   # the owner's own platform sends these
                 out += self._daily_review(case, now)
                 out += self._reminders(case, now)
+            out += self._price_news(case)
+            out += self._daily_review(case, now)
+            out += self._reminders(case, now)
         return out
 
     def _reminders(self, case: dict, now: datetime) -> list[Outbound]:
@@ -738,6 +791,7 @@ class Engine:
             merged = merge_into_inventory(self.store, case_id, new_ids, None)
         price_items(case_id, self.store, self.pricer)
         self._sketch_later(case_id)
+        self._research_later(case_id, chat_id, merged["new_lines"])
         lines = [self.store.get_item(case_id, i) for i in merged["new_lines"]]
         lines.sort(key=lambda i: -((i.get("price_mid") or 0) * (i.get("qty") or 1)))
 

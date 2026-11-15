@@ -112,8 +112,8 @@ line as the one photographed in the dining room.
   items (`bank.py`, Capital One's Nessie mock bank, `NESSIE_API_KEY`). The owner sees the matches and
   says yes before any price changes; the purchase is kept as a bank record and counts as proof for
   an item known only from memory. Nessie holds mock data, so `ashline bank --case demo --seed-demo 5`
-  first writes purchases for the five most valuable items. Written from Nessie's documentation and
-  tested against a fake; not yet run against the live service.
+  first writes purchases for the five most valuable items. Works with Nessie v2 (`nsk_` keys, run
+  live on 15 Nov 2026) and with the classic API (older keys, tested against a fake only).
 
 ## Plan of the home
 

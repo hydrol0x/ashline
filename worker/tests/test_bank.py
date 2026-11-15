@@ -38,9 +38,10 @@ class FakeNessie:
         ]}
         self.calls, self.posted = [], []
 
-    def request(self, method, url, params=None, json=None, timeout=None):
+    def request(self, method, url, params=None, headers=None, json=None, timeout=None):
         path = url.split("nessieisreal.com", 1)[1]
         self.calls.append((method, path, params))
+        assert not headers                                  # the classic API takes the key in the URL only
         if params.get("key") != "test-key":
             return FakeResponse(401, {"code": 401})
         if method == "POST":
@@ -232,3 +233,79 @@ def test_a_price_that_was_paid_or_found_is_not_replaced_by_an_estimate(client):
     searcher = Searcher()
     price_check(f.case_id, f.store, top=50, searcher=searcher)
     assert not any("sofa" in a or "coffee table" in a for a in searcher.asked)
+
+
+class FakeNessieV2:
+    """Nessie v2: Bearer key, {"items": [...]} lists with a cursor, cents, purchases as transactions."""
+
+    def __init__(self):
+        self.rows = {"customers": [], "accounts": [], "merchants": []}
+        self.transactions, self.calls = [], []
+
+    def request(self, method, url, params=None, headers=None, json=None, timeout=None):
+        path = url.split("nessieisreal.com", 1)[1]
+        self.calls.append((method, path, dict(params or {})))
+        assert "key" not in (params or {})                  # v2 never accepts the key in the URL
+        if (headers or {}).get("Authorization") != "Bearer nsk_test":
+            return FakeResponse(401, {"title": "Unauthorized", "status": 401, "detail": "Invalid API key."})
+        parts = path.strip("/").split("/")
+        if method == "POST":
+            if parts[-1] == "purchases":
+                if json["amount_cents"] > 5_000_000:
+                    return FakeResponse(422, {"title": "Unprocessable Entity", "status": 422,
+                                              "detail": f"Account {parts[1]} has 5000000 cents available."})
+                made = {"id": f"txn_{len(self.transactions) + 1}", "kind": "purchase", "status": "pending",
+                        "payer_id": parts[1], "created_at": "2026-11-15T06:00:00Z", **json}
+                self.transactions.append(made)
+                return FakeResponse(200, made)
+            kind = parts[-1]
+            made = {"id": f"{kind[:4]}_{len(self.rows[kind]) + 1}", **json}
+            if kind == "accounts":
+                made["customer_id"] = parts[1]
+            self.rows[kind].append(made)
+            return FakeResponse(200, made)
+        if parts[-1] == "transactions":
+            mine = [t for t in self.transactions if t["payer_id"] == parts[1]]
+            other = {"id": "txn_fee", "kind": "fee", "status": "completed", "payer_id": parts[1], "amount_cents": 3500,
+                     "created_at": "2026-11-15T06:00:00Z", "description": "Annual fee"}
+            return FakeResponse(200, {"items": mine + [other]})
+        if parts[0] == "merchants" and len(parts) == 2:
+            found = next((m for m in self.rows["merchants"] if m["id"] == parts[1]), None)
+            return FakeResponse(200 if found else 404, found)
+        rows = self.rows["accounts"] if parts[-1] == "accounts" else self.rows[parts[-1]]
+        if len(parts) == 3:
+            rows = [a for a in rows if a["customer_id"] == parts[1]]
+        start = int(params.get("cursor") or 0)                  # pages of one, to exercise the cursor
+        page = {"items": rows[start:start + 1]}
+        if start + 1 < len(rows):
+            page["next_cursor"] = str(start + 1)
+        return FakeResponse(200, page)
+
+
+def test_a_v2_key_talks_to_the_new_api(monkeypatch):
+    monkeypatch.delenv("NESSIE_API_URL", raising=False)
+    nessie = FakeNessieV2()
+    client = bank.NessieClient(key="nsk_test", session=nessie)
+    assert client.v2 and client.base == "https://v2-prod-api.nessieisreal.com"
+    assert not bank.NessieClient(key="abc123", session=nessie).v2
+
+    f = Family().setup()
+    f.say(MOM, photos=[photo(640)])
+    f.wait()
+    made = bank.seed_demo(f.case_id, f.store, client, top=2)
+    card = nessie.rows["accounts"][0]
+    assert (card["type"], card["balance_cents"], card["credit_limit_cents"]) == ("Credit Card", 0, 10_000_000)
+    assert all(isinstance(t["amount_cents"], int) and "purchase_date" not in t for t in nessie.transactions)
+    nessie.rows["accounts"].append({"id": "acct_2", "customer_id": made["customer_id"], "type": "Checking"})
+
+    rows = bank.purchases(client)                               # both accounts, found through the cursor
+    assert [r["account"] for r in rows] == [made["account_id"]] * 2
+    assert rows[0]["amount"] == nessie.transactions[0]["amount_cents"] / 100 and rows[0]["date"] == "2026-11-15"
+    assert {r["merchant"] for r in rows} <= {"IKEA", "Target"} and all(r["description"] for r in rows)   # the fee is not a purchase
+    matches = bank.find_matches(f.case_id, f.store, client)
+    assert len(matches) == 2 and bank.apply_matches(f.store, f.case_id, matches) == 2
+
+    with pytest.raises(bank.BankError, match="rejected the key"):
+        bank.purchases(bank.NessieClient(key="nsk_wrong", session=nessie))
+    with pytest.raises(bank.BankError, match="5000000 cents available"):          # the bank's own words, not a stack trace
+        client.buy(made["account_id"], "merc_1", 60_000.0, "a house", "2024-01-01")

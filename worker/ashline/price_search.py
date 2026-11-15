@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 
 from . import config
 from .pricing import kept_price, money, nice
@@ -38,6 +39,13 @@ Give up to 4 matches, the closest match first. If you found nothing suitable, re
 Never invent a price or a link: every match must come from a search result."""
 
 
+WITH_PHOTO = """
+
+The photo above shows the item as it stood in the home. Use it to judge the style, size, material
+and quality, and prefer listings that look like the same kind of thing. If a brand or model is
+readable in the photo, search for that."""
+
+
 class ClaudeSearcher:
     def __init__(self, model: str | None = None, client=None):
         config.load_env()
@@ -51,9 +59,25 @@ class ClaudeSearcher:
             self._client = anthropic.Anthropic()
         return self._client
 
-    def search(self, description: str, brand: str | None = None) -> list[dict]:
-        """Closest matches first: [{title, price, retailer, url}]. Empty when nothing was found."""
-        messages = [{"role": "user", "content": PROMPT.format(description=description, brand=brand or "unknown")}]
+    def search(self, description: str, brand: str | None = None, image=None) -> list[dict]:
+        """Closest matches first: [{title, price, retailer, url}]. Empty when nothing was found.
+
+        `image` is an optional picture of the item itself (a PIL image): the model then looks for
+        listings that look like it, not merely ones with the same name.
+        """
+        text = PROMPT.format(description=description, brand=brand or "unknown")
+        content = text
+        if image is not None:
+            import base64
+            import io
+            small = image.convert("RGB")
+            small.thumbnail((768, 768))
+            buf = io.BytesIO()
+            small.save(buf, format="JPEG", quality=85)
+            content = [{"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
+                                                    "data": base64.standard_b64encode(buf.getvalue()).decode()}},
+                       {"type": "text", "text": text + WITH_PHOTO}]
+        messages = [{"role": "user", "content": content}]
         response = None
         for _ in range(MAX_RESUMES + 1):
             response = self.client.messages.create(model=self.model, max_tokens=16000, tools=[SEARCH_TOOL],
@@ -100,13 +124,13 @@ def get_searcher():
     return ClaudeSearcher()
 
 
-def find_price(description: str, brand: str | None = None, searcher=None) -> dict:
+def find_price(description: str, brand: str | None = None, searcher=None, image=None) -> dict:
     """{found, price, low, high, retailer, url, matches}. `price` is the closest match."""
     searcher = searcher or get_searcher()
     if searcher is None:
         return {"found": False, "reason": "Online price lookup is not set up (it needs ANTHROPIC_API_KEY)."}
     try:
-        matches = searcher.search(description, brand)
+        matches = searcher.search(description, brand, image=image) if image is not None else searcher.search(description, brand)
     except Exception as exc:
         return {"found": False, "reason": f"The search failed: {exc}"}
     if not matches:
@@ -116,8 +140,10 @@ def find_price(description: str, brand: str | None = None, searcher=None) -> dic
             "retailer": matches[0]["retailer"], "url": matches[0]["url"], "matches": matches}
 
 
-def apply_price(store: Store, case_id: str, item_id: int, found: dict, member_id: int | None = None) -> str:
-    """Put a price found online on an item, keeping the links as evidence. Can be undone."""
+def apply_price(store: Store, case_id: str, item_id: int, found: dict, member_id: int | None = None,
+                log: bool = True) -> str:
+    """Put a price found online on an item, keeping the links as evidence. Can be undone, unless
+    `log` is False (a lookup nobody asked for must not become the thing "undo" reverses)."""
     item = store.get_item(case_id, item_id)
     if not item:
         return "That item is not on the list."
@@ -136,8 +162,9 @@ def apply_price(store: Store, case_id: str, item_id: int, found: dict, member_id
     retailer = str(found.get("retailer") or "online retailer")[:60]
     refs = found.get("matches") or [{"title": item["label"], "price": price, "retailer": retailer,
                                      "url": str(found.get("url") or "")}]
-    store.log_event(case_id, "item.price", {"item_id": item_id, "before": {k: item.get(k) for k in (
-        "status", "label", "qty", "price_low", "price_mid", "price_high", "price_source")}}, member_id)
+    if log:
+        store.log_event(case_id, "item.price", {"item_id": item_id, "before": {k: item.get(k) for k in (
+            "status", "label", "qty", "price_low", "price_mid", "price_high", "price_source")}}, member_id)
     store.update_item(case_id, item_id, price_low=nice(low), price_mid=nice(price), price_high=nice(high),
                       price_source=f"web: {retailer}", price_ref=json.dumps(refs[:4]))
     span = f", range {money(nice(low))} to {money(nice(high))}" if nice(high) > nice(low) else ""
@@ -156,7 +183,7 @@ def price_check(case_id: str, store: Store | None = None, top: int = 20, searche
     checked = found = 0
     for item in items[:max(0, top)]:
         checked += 1
-        result = find_price(item["label"], item.get("brand_guess"), searcher)
+        result = find_price(item["label"], item.get("brand_guess"), searcher, image=item_picture(store, case_id, item))
         if result.get("found"):
             found += 1
             line = apply_price(store, case_id, item["item_id"], result)
@@ -165,3 +192,96 @@ def price_check(case_id: str, store: Store | None = None, top: int = 20, searche
         if report:
             report(line)
     return {"checked": checked, "found": found}
+
+
+# ------------------------------------------------- without being asked
+AUTO_TOP = 6                    # items looked up after each batch of new items, most valuable first
+AUTO_MIN = 150.0                # only items estimated at this much or more (for the whole quantity)
+_news_lock = threading.Lock()
+
+
+def item_picture(store: Store, case_id: str, item: dict):
+    """The crop of the photo that shows the item, or None when there is no photo of it."""
+    try:
+        bbox = json.loads(item["bbox"]) if isinstance(item.get("bbox"), str) else item.get("bbox")
+        photo = store.get_photo(case_id, item["photo_id"]) if item.get("photo_id") else None
+        if not photo or not bbox:
+            return None
+        from .annotate import crop_item
+        return crop_item(photo["path"], bbox)
+    except Exception:
+        return None
+
+
+def auto_enabled() -> bool:
+    return (config.env("ASHLINE_AUTO_PRICE") or "on").lower() not in ("off", "0", "no", "false")
+
+
+def auto_price(case_id: str, store: Store, item_ids: list[int] | None = None, searcher=None,
+               top: int | None = None, minimum: float | None = None, chat_id: str | None = None) -> list[dict]:
+    """Look up the bigger new items online without being asked, and record what was found.
+
+    Considers `item_ids` (or every line), leaves out prices the family set, paid or already
+    looked up, and anything estimated under `minimum`; takes the `top` most valuable. Lookups
+    run a few at a time. Each result is also kept as news for the chat to mention once.
+    Returns [{item_id, label, price, retailer, before}].
+    """
+    searcher = searcher or get_searcher()
+    if searcher is None:
+        return []
+    top = int(config.env("ASHLINE_AUTO_PRICE_TOP") or AUTO_TOP) if top is None else top
+    minimum = float(config.env("ASHLINE_AUTO_PRICE_MIN") or AUTO_MIN) if minimum is None else minimum
+    wanted = set(item_ids) if item_ids is not None else None
+    items = [i for i in store.get_items(case_id, canonical_only=True)
+             if i["status"] != "rejected" and not kept_price(i) and (wanted is None or i["item_id"] in wanted)
+             and (i.get("price_mid") or 0) * (i.get("qty") or 1) >= minimum]
+    items.sort(key=lambda i: -((i.get("price_mid") or 0) * (i.get("qty") or 1)))
+    items = items[:max(0, top)]
+    if not items:
+        return []
+    pictures = {i["item_id"]: item_picture(store, case_id, i) for i in items}
+
+    def look(item: dict) -> dict:
+        return find_price(item["label"], item.get("brand_guess"), searcher, image=pictures[item["item_id"]])
+
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        found = list(pool.map(look, items))
+    results = []
+    for item, result in zip(items, found):
+        if not result.get("found"):
+            continue
+        line = apply_price(store, case_id, item["item_id"], result, log=False)
+        if line.startswith("Recorded"):
+            results.append({"item_id": item["item_id"], "label": item["label"], "price": nice(result["price"]),
+                            "retailer": result.get("retailer") or "an online retailer", "before": item.get("price_mid"),
+                            "chat_id": chat_id})
+    if results:
+        add_news(case_id, results)
+    return results
+
+
+def _news_path(case_id: str):
+    return config.case_dir(case_id) / "price_news.json"
+
+
+def add_news(case_id: str, results: list[dict]) -> None:
+    with _news_lock:
+        path = _news_path(case_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        waiting = json.loads(path.read_text()) if path.exists() else []
+        path.write_text(json.dumps(waiting + results))
+
+
+def take_news(case_id: str) -> list[dict]:
+    """Looked-up prices not yet mentioned in the chat. Each is returned once."""
+    with _news_lock:
+        path = _news_path(case_id)
+        if not path.exists():
+            return []
+        try:
+            waiting = json.loads(path.read_text())
+        except ValueError:
+            waiting = []
+        path.unlink()
+        return waiting

@@ -476,3 +476,18 @@ def test_deadline_reminders_and_weekly_nudge(fam):
     assert fam.engine.tick(at("2027-01-02")) == []                                       # at most one a week
     fam.say(MOM, "pause")
     assert fam.engine.tick(at("2027-01-13")) == []                                       # 10 days left, but paused
+
+
+def test_short_answers_with_both_words_count():
+    from ashline.chat import yes_or_no
+    assert yes_or_no("1 same") == (True, False) and yes_or_no("2, different") == (False, True)
+    assert yes_or_no("yes same") == (True, False) and yes_or_no("not the same") == (False, True)
+    assert yes_or_no("same couch as the kitchen one") == (False, False)
+
+
+def test_the_same_photo_twice_adds_nothing(fam):
+    fam.say(MAYA, "", [photo(640)])
+    fam.wait()
+    before = len(fam.store.get_items(fam.case_id))
+    assert texts(fam.say(MAYA, "", [photo(640)])) == ["I already have that one (photo 1), so nothing new was added."]
+    assert fam.wait() == [] and len(fam.store.get_items(fam.case_id)) == before

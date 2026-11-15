@@ -147,6 +147,7 @@ class Engine:
                  public_url: str | None = None, number: str | None = None, batch_seconds: int | None = None):
         self.store = store or Store()
         self.detector, self.pricer, self.grouper = detector, pricer, grouper
+        self._prints: dict[str, tuple] = {}                  # photo path -> fingerprint, to spot repeats
         self.public_url = (public_url or config.env("ASHLINE_PUBLIC_URL") or "").rstrip("/")
         self.number = number or config.env("ASHLINE_NUMBER") or "this number"
         self.batch_seconds = batch_seconds if batch_seconds is not None else int(
@@ -384,10 +385,17 @@ class Engine:
         folder.mkdir(parents=True, exist_ok=True)
         saved = 0
         caption_room = self._caption_room(case_id, inbound.text)
+        repeats = []
+        known = self._fingerprints(case_id)
         for name, data in inbound.attachments:
             photo = normalize_photo(data)
             if photo is None:
                 continue                                    # not an image we can read: ignored quietly
+            print_ = (photo_fingerprint(photo["image"]), photo["image"].size)
+            twin = next((n for n, (f, size) in known if size == print_[1] and bin(f ^ print_[0]).count("1") <= 3), None)
+            if twin is not None:                            # the same photo again: nothing new in it
+                repeats.append(twin)
+                continue
             number = self.store.next_photo_number(case_id)
             photo_id = f"fam-{number}"
             path = folder / f"{photo_id}.jpg"
@@ -398,8 +406,14 @@ class Engine:
                 "room_label": caption_room,
                 "added_by": member.get("name") or inbound.sender_name or "family"}])
             burst["photos"].append(photo_id)
+            known.append((number, print_))
+            self._prints[str(path)] = print_
             saved += 1
         if not saved:
+            if repeats:
+                which = ", ".join(f"photo {n}" for n in sorted(set(repeats)) if n)
+                return [Outbound(inbound.chat_id, f"I already have that one ({which}), so nothing new was added."
+                                 if which else "I already have that one, so nothing new was added.")]
             return []
         burst["last_at"] = now.isoformat()
         out = []
@@ -460,6 +474,20 @@ class Engine:
         sent["last"] = now.isoformat()
         self.store.set_case(case["case_id"], reminders=json.dumps(sent))
         return [Outbound(owner["dm_chat"], text)]
+
+    def _fingerprints(self, case_id: str) -> list[tuple]:
+        """(photo number, (fingerprint, size)) of the family photos already in the case."""
+        out = []
+        for p in self.store.get_photos(case_id, source="photo"):
+            path = p.get("path")
+            if path not in self._prints:
+                try:
+                    with Image.open(path) as image:
+                        self._prints[path] = (photo_fingerprint(image), image.size)
+                except (OSError, TypeError):
+                    continue
+            out.append((p.get("number"), self._prints[path]))
+        return out
 
     def _caption_room(self, case_id: str, text: str) -> str | None:
         """The room a photo's caption names ('kitchen', 'this is the garage'), if any.
@@ -639,8 +667,7 @@ class Engine:
         questions = [q for q in self.store.get_questions(case_id, chat_id=inbound.chat_id)]
         if not questions:
             return None
-        yes = low in ("1", "same", "yes", "y", "yep", "yeah", "ok", "okay", "add it", "yes please")
-        no = low in ("2", "different", "no", "n", "nope", "not the same")
+        yes, no = yes_or_no(low)
         if not (yes or no):
             return None
         kinds = {q["kind"] for q in questions}
@@ -961,6 +988,34 @@ class _RoomAware:
             return self.detector.detect(path, room_hint, rooms=self.rooms)
         except TypeError:                                   # a detector without room support
             return self.detector.detect(path, room_hint)
+
+
+YES_WORDS = {"1", "same", "yes", "y", "yep", "yeah", "ok", "okay", "yup", "sure"}
+NO_WORDS = {"2", "different", "no", "n", "nope", "nah", "separate"}
+FILLER_WORDS = {"it's", "its", "it", "the", "is", "a", "they're", "theyre", "are", "please", "add", "one", "ones"}
+
+
+def yes_or_no(low: str) -> tuple[bool, bool]:
+    """A short reply to a yes/no or 'same item?' question: '1', 'same', '1 same', '2, different', 'not the same'."""
+    tokens = re.findall(r"[a-z0-9']+", low)
+    if not tokens or len(tokens) > 4:
+        return False, False
+    if "not" in tokens:
+        return False, "same" in tokens and all(t in FILLER_WORDS | {"not", "same"} for t in tokens)
+    yes = all(t in YES_WORDS | FILLER_WORDS for t in tokens) and any(t in YES_WORDS for t in tokens)
+    no = all(t in NO_WORDS | FILLER_WORDS for t in tokens) and any(t in NO_WORDS for t in tokens)
+    return yes, no
+
+
+def photo_fingerprint(image) -> int:
+    """A 64-bit difference hash: the same photo sent twice gets (nearly) the same number."""
+    small = image.convert("L").resize((9, 8))
+    px = list(small.tobytes())
+    bits = 0
+    for row in range(8):
+        for col in range(8):
+            bits = (bits << 1) | (px[row * 9 + col] > px[row * 9 + col + 1])
+    return bits
 
 
 def normalize_photo(data: bytes) -> dict | None:

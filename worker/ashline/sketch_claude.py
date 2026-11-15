@@ -77,12 +77,20 @@ Draw the plan as rectangles seen from above, x to the right and y down, in metre
 - `width_m` and `depth_m`: your estimate of the room's size from what the photos show (floor
   boards, door widths of about 0.8 m, beds about 2 m long and counters about 0.6 m deep help).
 - `x_m`, `y_m`: the room's top-left corner. Rooms must not overlap. Rooms that open onto each
-  other, or that the camera walked between, share a wall. Start at 0, 0.
+  other, or that the camera walked between, share a wall. Start at 0, 0. Parts of one open space
+  (a living room open to a kitchen) are separate rectangles that share an imaginary wall. The list
+  may leave rooms out (a bathroom, an entry), so gaps in the outline are fine.
 - For every item give `u` and `v`, its position inside its own room's rectangle: u from 0 at the
   left wall to 1 at the right wall, v from 0 at the top wall to 1 at the bottom wall. Keep it
   consistent with where you put the walls and neighbouring rooms: an item beside the doorway to
   the kitchen goes on the wall shared with the kitchen. Things against a wall get a value near
   0 or 1; things in the middle of the floor do not.
+- An item is filed under the room its photo was taken in. If it really stands in the room next
+  door (seen through a doorway), put it on the wall of its filed room nearest to where it stands.
+- Two lines that look like the same object seen twice get the same position. Things on a wall or
+  on top of furniture go where they are when seen from above.
+- An item from a photo not shown has no picture here: place it from its description, the room
+  and the photos taken around it.
 
 This is a sketch to help a family remember where things stood, so a sensible guess is better
 than leaving something out."""
@@ -101,6 +109,26 @@ def chosen_photos(photos: list[dict]) -> list[dict]:
     return [ordered[int(n * step)] for n in range(MAX_PHOTOS)]
 
 
+def video_note(photos: list[dict]) -> str:
+    """Which of the photos sent are stills of one walk-through video, so its order can be trusted."""
+    runs: list[list] = []                                # [clip, first, last]
+    for n, photo in enumerate(photos, 1):
+        clip = photo.get("batch_id")
+        if runs and runs[-1][0] == clip:
+            runs[-1][2] = n
+        else:
+            runs.append([clip, n, n])
+    videos = [(first, last) for clip, first, last in runs if clip]
+    if not videos:
+        return ""
+    if len(runs) == 1:
+        return "They are stills from one video of someone walking through the home, so the order follows the walk. "
+    spans = ", ".join(f"photos {a} to {b}" if a != b else f"photo {a}" for a, b in videos)
+    return (f"Stills from a video of someone walking through the home: {spans} (each span is one video, in the "
+            "order of the walk). Between two videos, or between separate photos, the camera may have jumped "
+            "to another part of the home. ")
+
+
 def sketch_request(case_id: str, store) -> dict | None:
     """What the model is asked: {prompt, photos, rooms, ids, digest}. None when there is nothing to draw."""
     lines = layout._lines(store, case_id)
@@ -108,20 +136,29 @@ def sketch_request(case_id: str, store) -> dict | None:
     photos = chosen_photos(store.get_photos(case_id, source="photo"))
     if not rooms or not photos:
         return None
-    number = {p["photo_id"]: p.get("number") for p in store.get_photos(case_id, source="photo")}
+    number = {p["photo_id"]: p.get("number") or 0 for p in store.get_photos(case_id, source="photo")}
     shown = {p["photo_id"]: n for n, p in enumerate(photos, 1)}
+    order = [(p.get("number") or 0, n) for n, p in enumerate(photos, 1)]
+
+    def near(photo_id: str) -> str:
+        """Where a photo that was not sent falls among the ones that were."""
+        taken = number.get(photo_id, 0)
+        before = [n for at, n in order if at < taken]
+        after = [n for at, n in order if at > taken]
+        if before and after:
+            return f"a photo not shown, taken between photo {before[-1]} and photo {after[0]}"
+        return f"a photo not shown, taken {'after photo ' + str(before[-1]) if before else 'before photo 1'}"
+
     rows = []
     for item in lines:
         room = tidy_room(item.get("room_label"))
         if not room:
             continue
         seen = shown.get(item.get("photo_id"))
-        where = f"photo {seen}" if seen else (f"a photo not shown (number {number.get(item.get('photo_id'))})"
-                                              if item.get("photo_id") else "from memory, no photo")
+        where = f"photo {seen}" if seen else (near(item["photo_id"]) if item.get("photo_id")
+                                              else "from memory, no photo")
         rows.append(f"{item['item_id']} | {room} | {where} | {item['label']}")
-    clips = {p.get("batch_id") for p in photos if p.get("batch_id")}
-    video = ("They are stills from a video of someone walking through the home, so the order follows the walk. "
-             if clips else "")
+    video = video_note(photos)
     prompt = PROMPT.format(count=len(photos), video=video, rooms="\n".join(f"- {r}" for r in rooms),
                            items="\n".join(rows) or "(none yet)")
     digest = hashlib.sha256((prompt + "|".join(p["photo_id"] for p in photos)).encode()).hexdigest()[:16]

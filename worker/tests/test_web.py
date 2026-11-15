@@ -48,15 +48,53 @@ def case(tmp_path):
 def test_owner_page_shows_meter_items_and_export(case):
     client, _, ids = case
     html = client.get("/p/owner-token").text
-    assert "The Example home <span class=\"count\">3 items</span>" in html and "2 family members contributing" in html
+    assert "<h1>The Example home</h1>" in html and '<span class="count">3 items</span>' in html
+    assert "Mom and Maya are on this list" in html                              # the members, by name
     assert "$1,800" in html and "documented · 2 items" in html                 # no coverage limit yet
     assert "What is the contents coverage limit" in html                        # asked, with a skip
     assert "Blue velvet sofa" in html and "Table saw" in html and f'data-removed="1" hidden data-id="{ids['gone']}"' in html
     assert "Removed<span>1</span>" in html                                      # only under the Removed tab
-    assert f'/p/owner-token/crop/{ids["sofa"]}.jpg' in html and "from memory" in html
+    assert f'/p/owner-token/crop/{ids["sofa"]}.jpg' in html and '<span class="tag memory">From memory</span>' in html
     assert "2 × $54–$135" in html                                               # two lamps, priced per unit
     assert "View PDF for insurer" in html and "noindex" in html
     assert html.count('class="item suggested"') == 1 and html.count('class="item confirmed"') == 2
+
+
+def test_page_data_has_room_rows_names_and_a_small_plan(case):
+    from ashline.web import page_data
+    _, store, ids = case
+    data = page_data("fam1", store, "owner")
+    assert data["room_rows"] == [{"name": "Living room", "count": 2, "waiting": 1},   # the lamp waits for an OK
+                                 {"name": "Garage", "count": 1, "waiting": 0}]
+    assert data["waiting"] == 1 and data["member_names"] == ["Mom", "Maya"]
+    assert data["counts"] == {"backed": 1, "memory": 1, "pending": 1}                 # sofa by photo, saw from memory
+    plan = data["plan"]
+    named = {r["name"] for r in plan["rooms"] if r["name"]}
+    assert named <= {"Living room", "Garage"} and named and len(plan["box"].split()) == 4
+    assert all(len(r["points"].split()) >= 3 for r in plan["rooms"])
+    sofa = next(i for i in data["items"] if i["id"] == ids["sofa"])
+    assert sofa["shot_from"] == "Family photo" and sofa["proof"] == ""
+
+
+def test_owner_page_draws_the_small_plan_and_filters(case):
+    client, _, ids = case
+    html = client.get("/p/owner-token").text
+    assert 'id="mini-plan"' in html and 'data-room="Living room" tabindex="0"' in html
+    assert 'href="/p/owner-token/plan">Open the full plan' in html and "See where things were" not in html
+    assert '<em>1 to check</em>' in html and 'data-status="suggested"' in html
+    where = client.get(f"/p/owner-token/item/{ids['sofa']}.json").json()["where"]
+    assert where is None or set(where) == {"room_id", "x", "y"}
+
+
+def test_page_renders_with_no_items_and_no_plan(case, monkeypatch):
+    client, store, _ = case
+    store.set_case("empty1", name="An empty home", owner_token="empty-token", member_token="empty-member")
+    html = client.get("/p/empty-token").text
+    assert "Nothing here yet" in html and 'id="mini-plan"' not in html and "All rooms<span>0</span>" in html
+    from ashline import layout
+    monkeypatch.setattr(layout, "build", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("no plan")))
+    html = client.get("/p/owner-token").text
+    assert "Blue velvet sofa" in html and 'id="mini-plan"' not in html and "Where things were" in html
 
 
 def test_member_page_has_no_export_or_owner_questions(case):

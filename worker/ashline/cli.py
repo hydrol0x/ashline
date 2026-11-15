@@ -170,7 +170,10 @@ def _run(args, parser) -> None:
         searcher = get_searcher()
         if searcher is not None and args.verbose:
             searcher.trace = print                         # what was looked for, found, kept and dropped
-        print(json.dumps(price_check(args.case, top=args.top, searcher=searcher, report=print), indent=1))
+        try:
+            print(json.dumps(price_check(args.case, top=args.top, searcher=searcher, report=print), indent=1))
+        except KeyboardInterrupt:
+            parser.exit(130, "\nStopped. Prices recorded so far are kept.\n")
     elif args.cmd == "photon":
         from .bridge_photon import PhotonBridge
         PhotonBridge().run()

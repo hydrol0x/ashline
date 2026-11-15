@@ -287,7 +287,11 @@ label: if the label says "sectional" and the photo shows a 3-seat sofa, it is a 
 - is_set and set_count: true with the count only when the line itself is a set (a set of 6 glasses);
   one chair is not a set. set_count is 1 when it is not a set.
 - cannot_see: what you cannot see that matters for the price (a bed frame hidden by bedding), or ""
-- enough_to_price: false when the part that sets the price cannot be seen, so a search would only guess
+- enough_to_price: true whenever you can tell what kind of thing it is, even from a blurry or partial
+  view. When the size or the details cannot be seen, assume the most common size and an ordinary model
+  for a home, put that size in size_class, and say what you assumed in cannot_see. False only when you
+  cannot tell what the thing is, or when the thing the label names is completely hidden (a bed of which
+  only the bedding shows).
 - queries: 2 or 3 searches a shopper would type, short: type + size + material + color, for example
   "black metal frame dining chair wood seat" or "gray shag area rug 5x7". No long feature lists. Add the
   brand only when it was read."""
@@ -299,7 +303,7 @@ What it is: {spec}
 Search with these queries (adjust them if they find nothing useful):
 {queries}
 
-Return up to 8 listings for new items from US retailers. For each give the title as listed, the price
+Return 5 to 8 listings for new items, from several different US retailers when you can. For each give the title as listed, the price
 as listed now in US dollars (not the "was" price), the retailer, the link, and `units`: the pack size,
 how many items the listing sells (1 for a single item, 2 for a set of 2 chairs). Copy prices and links
 exactly from the results; never invent one. Skip used, refurbished, rental, parts and accessories.
@@ -538,11 +542,27 @@ def price_check(case_id: str, store: Store | None = None, top: int = 20, searche
              if i["status"] != "rejected" and not kept_price(i)]
     items.sort(key=lambda i: -((i.get("price_mid") or 0) * (i.get("qty") or 1)))
     checked = found = 0
-    for item in items[:max(0, top)]:
+    items = items[:max(0, top)]
+    watched = bool(getattr(searcher, "trace", None))
+    pictures = {i["item_id"]: item_picture(store, case_id, i) for i in items}
+
+    def look(item: dict) -> dict:
+        try:
+            return find_price(item["label"], item.get("brand_guess"), searcher, image=pictures[item["item_id"]])
+        except Exception as exc:                            # one bad item must not end the run
+            return {"found": False, "reason": f"The lookup stopped: {type(exc).__name__}: {str(exc)[:200]}"}
+
+    if watched:                                             # one at a time, so the steps read in order
+        results = None
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=AUTO_AT_ONCE) as pool:
+            results = list(pool.map(look, items))
+    for n, item in enumerate(items):
         checked += 1
-        if report and getattr(searcher, "trace", None):
+        if report and watched:
             report(f"{item['label']} (estimate {money(item.get('price_mid'))})")
-        result = find_price(item["label"], item.get("brand_guess"), searcher, image=item_picture(store, case_id, item))
+        result = results[n] if results is not None else look(item)
         if result.get("found"):
             found += 1
             line = apply_price(store, case_id, item["item_id"], result)

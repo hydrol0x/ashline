@@ -271,3 +271,63 @@ def test_asset_urls_carry_a_version_and_errors_are_not_cached(case):
     assert f"/static/fonts/urbanist-latin-500-normal.woff2?v={v}" in css and f"/static/img/swoosh.jpg?v={v}" in css
     missing = client.get("/static/nope.css")
     assert missing.status_code == 404 and missing.headers["cache-control"] == "no-store"
+
+
+def test_coverage_limit_reads_k_and_million_and_refuses_what_it_cannot_read(case):
+    client, store, _ = case
+    for typed, want in (("400k", 400_000), ("$1.5 million", 1_500_000), ("120,000", 120_000)):
+        assert client.post("/p/owner-token/coverage", json={"limit": typed}).status_code == 200
+        assert store.get_case("fam1")["coverage_limit"] == want
+    for typed in ("abc", "0", "-500", "nan", "inf", "2000000000", "1" * 400):
+        res = client.post("/p/owner-token/coverage", json={"limit": typed})
+        assert res.status_code == 400, typed
+        assert "could not read" in res.json()["detail"]
+    assert store.get_case("fam1")["coverage_limit"] == 120_000                  # left as it was
+    for day in ("2026-13-45", "soon"):
+        assert client.post("/p/owner-token/coverage", json={"limit": "100k", "loss_date": day}).status_code == 400
+    assert store.get_case("fam1")["coverage_limit"] == 120_000
+
+
+def test_bodies_that_are_not_a_json_object_are_refused(case):
+    client, _, ids = case
+    for url in (f"/p/owner-token/item/{ids['sofa']}", "/p/owner-token/coverage"):
+        for body in (b"not json", b"[1,2]", b'"x"'):
+            assert client.post(url, content=body, headers={"content-type": "application/json"}).status_code == 400
+
+
+def test_a_huge_item_id_is_not_found(case):
+    client, _, _ = case
+    huge = "1" * 23
+    assert client.post(f"/p/owner-token/item/{huge}", json={"action": "confirm"}).status_code == 404
+    assert client.get(f"/p/owner-token/item/{huge}.json").status_code == 404
+
+
+def test_prices_and_quantities_out_of_range_are_refused(case):
+    client, store, ids = case
+    url = f"/p/owner-token/item/{ids['lamp']}"
+    for typed in ("1" * 400, "-50", "0", "0.5", "20000000", "abc"):
+        assert client.post(url, json={"action": "price", "value": typed}).status_code == 400, typed
+    assert store.get_item("fam1", ids["lamp"])["price_mid"] == 90
+    assert client.post(url, json={"action": "price", "value": "$10 million"}).status_code == 200
+    for typed in ("-5", "0", "1e400", "1000", "2.5", "", "three"):
+        assert client.post(url, json={"action": "qty", "value": typed}).status_code == 400, typed
+    assert store.get_item("fam1", ids["lamp"])["qty"] == 2
+    assert client.post(url, json={"action": "qty", "value": 7}).status_code == 200
+    assert store.get_item("fam1", ids["lamp"])["qty"] == 7
+    assert client.get("/p/owner-token").status_code == 200
+
+
+def test_a_price_set_by_hand_keeps_the_receipt_as_proof(case):
+    from ashline.meter import meter
+    from ashline.pricing import record_price
+    client, store, ids = case
+    saw = ids["saw"]                                                            # from memory only
+    record_price(store, "fam1", saw, "paid", {"amount": 540, "each": 540, "merchant": "Home Depot", "bank_id": "b1"})
+    assert meter("fam1", store)["memory"] == 0
+    assert client.post(f"/p/owner-token/item/{saw}", json={"action": "price", "value": "700"}).status_code == 200
+    assert store.get_item("fam1", saw)["price_source"] == "set by family"
+    m = meter("fam1", store)
+    assert m["memory"] == 0 and m["backed"] == 1200 + 700
+    detail = client.get(f"/p/owner-token/item/{saw}.json").json()
+    assert detail["needs_proof"] is False and detail["badges"]["receipt"] == 1
+    assert "Card record" in client.get("/p/owner-token").text

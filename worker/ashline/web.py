@@ -18,9 +18,10 @@ import hmac
 import io
 import ipaddress
 import json
+import math
 import re
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -61,12 +62,35 @@ def _ago(stamp: str | None, now: datetime | None = None) -> str:
 
 
 def parse_price(value) -> float | None:
-    """'$450', '1,200', '1.2k', '450 dollars' -> a number of dollars; None if there is no number."""
+    """'$450', '1,200', '1.2k', '$1.5 million' -> a number of dollars; None if there is no number."""
     text = str(value or "").lower().replace(",", "").strip()
-    match = re.search(r"(\d+(?:\.\d+)?)\s*(k)?", text)
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(?:(k|thousand|million|mm|m)(?![a-z]))?", text)
     if not match:
         return None
-    return float(match.group(1)) * (1000 if match.group(2) else 1)
+    unit = match.group(2) or ""
+    return float(match.group(1)) * (1000 if unit in ("k", "thousand") else 1_000_000 if unit else 1)
+
+
+def read_amount(value, low: float, high: float) -> float | None:
+    """A typed dollar amount from low to high, or None. A minus sign is refused, not dropped."""
+    text = str(value if value is not None else "")
+    if re.search(r"-\s*\$?\s*\d", text):
+        return None
+    amount = parse_price(text)
+    if amount is None or not math.isfinite(amount) or not low <= amount <= high:
+        return None
+    return amount
+
+
+async def json_body(request: Request) -> dict:
+    """The request's JSON object; a 400 when the body is not one."""
+    try:
+        body = await request.json()
+    except ValueError:
+        body = None
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail="Something went wrong sending that. Try again.")
+    return body
 
 
 def _title(label: str) -> str:
@@ -82,7 +106,8 @@ def item_view(item: dict, sightings: list[dict], case: dict | None = None) -> di
     price = money_range(low, high) if mid else ""
     contributors = sorted({("3D scan" if s["added_by"] == "scan" else s["added_by"])
                            for s in sightings if s.get("added_by")})
-    bank = int(in_use(item) == "paid")                      # a card purchase or a receipt is proof of purchase
+    paid = price_sources(item).get("paid") or {}
+    bank = int(bool(paid.get("amount")))                     # a card purchase or a receipt is proof, whichever price is in use
     return {
         "id": item["item_id"],
         "title": _title(item["label"]),
@@ -235,7 +260,9 @@ def page_data(case_id: str, store: Store, role: str) -> dict:
         view = item_view(row, by_canonical[row["item_id"]], case)
         view["shot_from"] = {"scan": "3D scan", "photo": "Family photo", "aerial": "Aerial image"}.get(
             row.get("source"), "") if view["has_photo"] else ""            # where the photo on the card came from
-        view["proof"] = (("Card record" if (row.get("price_source") or "").startswith("bank record") else "Receipt")
+        paid = price_sources(row).get("paid") or {}
+        view["proof"] = (("Card record" if paid.get("bank_id") or (row.get("price_source") or "").startswith("bank record")
+                          and not (paid.get("receipt") or paid.get("order")) else "Receipt")
                          if view["badges"]["receipt"] else "")
         (removed if row["status"] == "rejected" else items).append(view)
     items.sort(key=lambda i: -i["value"])
@@ -294,7 +321,10 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
         raise HTTPException(status_code=404, detail="This link is not valid.")
 
     def owned_item(store: Store, case: dict, item_id: int) -> dict:
-        item = store.get_item(case["case_id"], item_id)
+        try:
+            item = store.get_item(case["case_id"], item_id)
+        except OverflowError:                             # an id too big for the database is not an item
+            item = None
         if not item:
             raise HTTPException(status_code=404)
         return item
@@ -441,7 +471,7 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
         if role != "owner":
             raise HTTPException(status_code=403, detail="Only the case owner can change items.")
         item = owned_item(store, case, item_id)
-        body = await request.json()
+        body = await json_body(request)
         action, case_id = body.get("action"), case["case_id"]
         before = {k: item.get(k) for k in ("status", "label", "qty", "price_low", "price_mid", "price_high",
                                            "price_source", "price_ref", "cause")}
@@ -453,14 +483,14 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
         elif action == "rename" and str(body.get("value") or "").strip():
             store.update_item(case_id, item_id, label=str(body["value"]).strip()[:120])
         elif action == "qty":
-            digits = re.sub(r"[^\d]", "", str(body.get("value") or ""))
-            if not digits:
-                raise HTTPException(status_code=400, detail="Give a number of items.")
-            store.update_item(case_id, item_id, qty=max(1, min(999, int(digits))))
+            typed = str(body.get("value") if body.get("value") is not None else "").strip()
+            if not re.fullmatch(r"\d{1,3}", typed) or not 1 <= int(typed) <= 999:
+                raise HTTPException(status_code=400, detail="Give a whole number from 1 to 999.")
+            store.update_item(case_id, item_id, qty=int(typed))
         elif action == "price":
-            value = parse_price(body.get("value"))
-            if not value or value <= 0:
-                raise HTTPException(status_code=400, detail="Give a price above zero.")
+            value = read_amount(body.get("value"), 1, 10_000_000)
+            if value is None:
+                raise HTTPException(status_code=400, detail="Give a price from $1 to $10 million.")
             store.update_item(case_id, item_id, price_low=value, price_mid=value, price_high=value,
                               price_source="set by family")
         else:
@@ -473,16 +503,22 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
         store, case, role = resolve(token)
         if role != "owner":
             raise HTTPException(status_code=403, detail="Only the case owner can set this.")
-        body = await request.json()
+        body = await json_body(request)
         if body.get("skip"):
             store.set_case(case["case_id"], coverage_skipped=1)
         else:
-            limit = float(str(body.get("limit") or "0").replace(",", "").replace("$", "") or 0)
-            if limit <= 0:
-                raise HTTPException(status_code=400, detail="Give the contents coverage limit in dollars.")
+            limit = read_amount(body.get("limit"), 1, 999_999_999)
+            if limit is None:
+                raise HTTPException(status_code=400, detail="We could not read that. Try a number like 120000 or 120k.")
+            loss_date = str(body.get("loss_date") or "")[:10]
+            if loss_date:
+                try:
+                    date.fromisoformat(loss_date)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="We could not read that date.")
             store.set_case(case["case_id"], coverage_limit=limit, coverage_skipped=0)
-            if body.get("loss_date"):
-                store.set_case(case["case_id"], loss_date=str(body["loss_date"])[:10])
+            if loss_date:
+                store.set_case(case["case_id"], loss_date=loss_date)
         return {"ok": True}
 
     def preview_context(token: str, store: Store, case: dict) -> dict:

@@ -405,9 +405,10 @@
         <div class="ask-row" id="ask-row"><span>Coverage limit not set</span><button class="link" type="button" id="add-limit">Add it</button></div>
         <form id="coverage" hidden>
           <p>What is the contents coverage limit on the policy? It shows how much there is left to document. You can skip this.</p>
-          <input type="text" name="limit" inputmode="numeric" placeholder="e.g. 400,000" aria-label="Contents coverage limit in dollars">
+          <input type="text" name="limit" inputmode="numeric" placeholder="e.g. 400,000" aria-label="Contents coverage limit in dollars" aria-describedby="coverage-err">
           <button class="btn" type="submit">Save</button>
           <button class="btn quiet" type="button" id="skip">Skip</button>
+          <p class="error" id="coverage-err" role="alert" hidden></p>
         </form>
       </div>
       {% endif %}
@@ -600,7 +601,12 @@
 
   function post(path, body) {
     return fetch('/p/' + token + path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body) }).then(function (r) { if (!r.ok) throw new Error('failed'); return r.json(); });
+      body: JSON.stringify(body) }).then(function (r) {
+      if (r.ok) return r.json();
+      return r.json().catch(function () { return {}; }).then(function (b) {   // keep the server's short message
+        var e = new Error('failed'); e.status = r.status; e.detail = typeof b.detail === 'string' ? b.detail : ''; throw e;
+      });
+    });
   }
   function el(tag, text, cls) { var e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; }
 
@@ -899,9 +905,9 @@
             dirty++; delete cache[id];
             flash = { rename: '✓ Name saved', qty: '✓ Quantity saved', price: '✓ Price saved' }[action] || '✓ Saved';
             open(id);
-          }).catch(function () {
+          }).catch(function (e) {
             save.disabled = false; save.textContent = 'Save';
-            msg.textContent = 'That didn’t save. Check the value and try again.'; msg.hidden = false;
+            msg.textContent = (e.status === 400 && e.detail) || 'That didn’t save. Check the value and try again.'; msg.hidden = false;
           });
         };
         main.hidden = true; row.hidden = true; editor.hidden = false; input.focus(); input.select();
@@ -985,7 +991,11 @@
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       if (!/\d/.test(form.limit.value)) { form.limit.focus(); return; }
-      post('/coverage', { limit: form.limit.value }).then(function () { location.reload(); });
+      var err = document.getElementById('coverage-err'); err.hidden = true;
+      post('/coverage', { limit: form.limit.value }).then(function () { location.reload(); }).catch(function (e) {
+        err.textContent = (e.status === 400 && e.detail) || 'That didn’t save. Check your connection and try again.';
+        err.hidden = false; form.limit.focus();
+      });
     });
     document.getElementById('skip').addEventListener('click', function () { post('/coverage', { skip: true }).then(function () { location.reload(); }); });
   }

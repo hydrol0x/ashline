@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from .pricing import money
+from .pricing import money, price_sources
 from .store import Store
 
 ADVANCE_SHARE = 0.60
@@ -39,7 +39,7 @@ def meter(case_id: str, store: Store | None = None, today: date | None = None) -
     confirmed = [i for i in items if i["status"] == "confirmed"]
     suggested = [i for i in items if i["status"] == "suggested"]
     def proven(item: dict) -> bool:                      # a photo, scan or receipt, or a matching card purchase
-        return item["source"] not in MEMORY_SOURCES or (item.get("price_source") or "").startswith(("bank record", "receipt:"))
+        return item["source"] not in MEMORY_SOURCES or bool((price_sources(item).get("paid") or {}).get("amount"))
     backed = [i for i in confirmed if proven(i)]
     memory = [i for i in confirmed if not proven(i)]
 

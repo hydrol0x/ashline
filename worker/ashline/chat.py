@@ -1545,7 +1545,7 @@ class Engine:
         more = f"\n…and {len(fresh) - 5} more" if len(fresh) > 5 else ""
         text = (room_note + f"{len(fresh)} new item{'s' if len(fresh) != 1 else ''}"
                 + (f" from {_join(people)}" if people else "") + (f", about {money(total)}" if total else "")
-                + f".\n\n{top}{more}\n\nReply OK to add them all, or tell me what's wrong (\"remove 4\").\n"
+                + f".\n\n{top}{more}\n\nReply OK to add them all, or tell me what's wrong (\"remove {min(4, len(fresh))}\").\n"
                 + f"See them: {self.link(case, member)}")
         return [Outbound(chat_id, text)]
 
@@ -1558,6 +1558,15 @@ class Engine:
         chat_id = owner.get("dm_chat") or owner["phone"]
         if not self.store.get_chat(chat_id):
             self.store.set_chat(chat_id, case["case_id"], False)
+        waiting = self.store.get_items(case["case_id"], status="suggested", canonical_only=True)
+        if waiting and all(i.get("reviewed") for i in waiting):    # nothing new since the last review
+            last = case.get("last_review_at") or ""
+            if last and datetime.fromisoformat(last) > now - timedelta(days=7):
+                return []                                   # the same list again would only nag
+            self.store.set_case(case["case_id"], last_review_at=now.isoformat())
+            count = len(waiting)
+            return [Outbound(chat_id, f"{count} thing{'s are' if count != 1 else ' is'} still waiting for your OK. "
+                                      "No rush. Say review whenever you're ready.")]
         return self._review(case, chat_id, owner, now) or []
 
     # ------------------------------------------------- memory "call" by text

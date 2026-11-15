@@ -251,7 +251,7 @@ def test_review_ok_and_export(fam):
     out = fam.say(MOM, "review")
     assert out[0].text.startswith("3 new items from Maya, about $980.\n\n1. Blue velvet sofa · $290–$700\n"
                                   "2. Oak coffee table · $290–$700\n3. Brass floor lamp · $50–$130\n\n"
-                                  'Reply OK to add them all, or tell me what\'s wrong ("remove 4").\nSee them: ')
+                                  'Reply OK to add them all, or tell me what\'s wrong ("remove 3").\nSee them: ')
     assert texts(fam.say(MOM, "remove 3")) == ["Removed the brass floor lamp. Say undo if that was a mistake."]
     assert texts(fam.say(MOM, "OK")) == ["Added 2 items. 2 items documented so far, about $900."]
     assert [i["status"] for i in fam.store.get_items(fam.case_id, canonical_only=True)].count("confirmed") == 2
@@ -272,7 +272,15 @@ def test_daily_review_goes_to_the_owner_once(fam):
     out = fam.engine.tick(fam.now)
     assert len(out) == 1 and out[0].chat_id == MOM and out[0].text.startswith("3 new items from Maya")
     assert fam.engine.tick(fam.now + timedelta(minutes=5)) == []                     # once a day
-    assert fam.engine.tick(fam.now + timedelta(days=1)) != []                        # unanswered: rolls into tomorrow
+    for day in range(1, 7):                                                          # nothing new: not the same list again
+        assert fam.engine.tick(fam.now + timedelta(days=day)) == []
+    nudge = texts(fam.engine.tick(fam.now + timedelta(days=7)))
+    assert nudge == ["3 things are still waiting for your OK. No rush. Say review whenever you're ready."]
+    assert fam.engine.tick(fam.now + timedelta(days=8)) == []                        # at most one a week
+    lamp = next(i for i in fam.store.get_items(fam.case_id, canonical_only=True) if "lamp" in i["label"])
+    fam.store.update_item(fam.case_id, lamp["item_id"], reviewed=0)                 # as if it had just come in
+    fresh = fam.engine.tick(fam.now + timedelta(days=9))                             # something new: the review comes again
+    assert len(fresh) == 1 and fresh[0].text.startswith("1 new item from Maya") and '("remove 1")' in fresh[0].text
     fam.say(MOM, "pause")
     fam.store.set_case(fam.case_id, last_review_at=None)
     assert fam.engine.tick(fam.now + timedelta(days=2)) == []                        # paused: nothing

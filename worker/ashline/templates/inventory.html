@@ -136,7 +136,7 @@
 <main>
   <div class="masthead"><a class="brand" href="/"><img src="/static/img/logo.png?v={{ v }}" alt=""><span>Ashline</span></a><small>Private to your family</small></div>
   <h1>{{ name }} <span class="count">{{ items|length }} item{{ '' if items|length == 1 else 's' }}</span></h1>
-  <p class="sub">Updated {{ updated }}{% if members %} · {{ members }} family member{{ '' if members == 1 else 's' }} contributing{% endif %} · <a href="/p/{{ token }}/plan" style="color: var(--accent)">See where things were</a></p>
+  <p class="sub">Updated {{ updated }}{% if members %} · {{ members }} family member{{ '' if members == 1 else 's' }} contributing{% endif %} · <a href="/p/{{ token }}/plan" style="color: var(--red); font-weight: 600">See where things were</a></p>
 
   <section class="meter" aria-label="Progress">
     {% if meter.target %}
@@ -442,7 +442,7 @@
     (d.price_evidence || []).forEach(function (e) {                     // where a looked-up price came from
       var line = el('p', '', 'muted small');
       if (e.url) { var a = document.createElement('a'); a.href = e.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
-                   a.textContent = e.text; a.style.color = 'var(--accent)'; line.appendChild(a); }
+                   a.textContent = e.text; a.style.color = 'var(--red)'; line.appendChild(a); }
       else line.textContent = e.text;
       sheet.appendChild(line);
     });

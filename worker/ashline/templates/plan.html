@@ -15,8 +15,10 @@
   /* The brand's colours and type, in the shapes of the family's mockups: soft cards, pills, dashed
      outlines for anything rough or waiting, a count in a circle per room, haloed dots. */
   :root { --room: #F5F5F3; --room-on: #FBE4DF; --wall: #2B2927; --card-line: #E3E0DB; --r: 18px; }
-  main { max-width: 1200px; margin: 0 auto; padding: 0 18px 60px; }
-  .masthead { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--rule); margin-bottom: 18px; }
+  /* The same width and edges as the list, so nothing jumps when the family goes from one to the other. */
+  main { max-width: 1480px; margin: 0 auto; padding: 0 18px 60px; }
+  @media (min-width: 760px) { main { padding: 0 24px 48px; } }
+  .masthead { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--rule); margin-bottom: 20px; }
   .masthead .brand img { height: 38px; }
   .masthead .brand span { font-size: 23px; }
   .masthead small { color: var(--muted); font-size: 13px; }
@@ -38,6 +40,11 @@
     .chips { margin: 0 -18px; padding: 2px 18px 4px; width: calc(100% + 36px); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
     .chips::-webkit-scrollbar { display: none; }
     .chip { flex: none; min-height: 40px; }
+  }
+  @media (min-width: 760px) and (max-width: 899px) {
+    .chips { margin: 0 -24px; padding: 2px 24px 4px; width: calc(100% + 48px); }
+  }
+  @media (max-width: 899px) {
     .canvas svg { min-height: 240px; }
     .under .why { display: none; }                 /* the pill by the title already says it */
     .canvas .tip.thing { display: none; }                 /* the thing's card opens right under the plan */
@@ -47,7 +54,7 @@
   }
 
   .layout { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
-  @media (min-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr) 350px; align-items: start; } }
+  @media (min-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr) 380px; align-items: start; } }
   .card { background: var(--paper); border: 1.5px solid var(--card-line); border-radius: var(--r); }
   .canvas { position: relative; overflow: hidden; padding: 6px; }
   .canvas svg { display: block; width: 100%; min-height: 280px; max-height: 68vh; touch-action: none; cursor: grab; }

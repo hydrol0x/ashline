@@ -173,3 +173,18 @@ def test_room_names_typed_differently_are_one_room():
     from ashline.rooms import tidy_room
     assert {tidy_room(r) for r in ("just basement", "Basement", "basement", "the Basement.")} == {"Basement"}
     assert tidy_room("") is None and tidy_room(None) is None
+
+
+
+def test_landing_page_shows_the_number(monkeypatch):
+    from fastapi.testclient import TestClient
+    from ashline.web import create_app
+    monkeypatch.setenv("ASHLINE_NUMBER", "+16285550100")
+    page = TestClient(create_app()).get("/")
+    assert page.status_code == 200 and "(628) 555-0100" in page.text and 'href="sms:+16285550100&body=hi"' in page.text
+
+
+def test_prices_typed_with_symbols():
+    from ashline.web import parse_price
+    assert parse_price("$450") == 450 and parse_price("1,200") == 1200 and parse_price("1.2k") == 1200
+    assert parse_price("about 80 dollars") == 80 and parse_price("no idea") is None

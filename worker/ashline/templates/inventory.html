@@ -6,6 +6,7 @@
 <meta name="robots" content="noindex, nofollow">
 <title>{{ name }} · Ashline</title>
 <style>
+  [hidden] { display: none !important; }
   :root {
     --bg: #FAF7F2; --card: #FFFFFF; --ink: #2A2826; --muted: #7C766D; --line: #E8E1D6;
     --accent: #1F6F6B; --accent-soft: #9CC5C0; --pending: #DCD5C9;
@@ -90,6 +91,20 @@
   .sheet .muted { color: var(--muted); }
   .sheet .row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
   .sheet .row .btn { flex: 1 1 auto; }
+  .editor { margin-top: 14px; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); }
+  .editor-label { display: block; font-weight: 600; font-size: 14.5px; }
+  .editor-hint { color: var(--muted); font-size: 12.5px; margin: 4px 0 0 !important; }
+  .editor-field { display: flex; align-items: center; margin-top: 10px; background: #fff; border: 1px solid var(--line);
+                  border-radius: 12px; padding: 0 12px; transition: border-color .15s, box-shadow .15s; }
+  .editor-field:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(31, 111, 107, .15); }
+  .editor-field .prefix { color: var(--muted); margin-right: 4px; font-size: 16px; }
+  .editor-field input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; padding: 12px 0; font-size: 16px; }
+  .editor-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+  .editor-buttons .btn { min-width: 96px; }
+  .btn:disabled { opacity: .6; cursor: default; }
+  .tools select { appearance: none; -webkit-appearance: none; padding-right: 26px;
+                  background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
+                  background-position: calc(100% - 13px) 50%, calc(100% - 8px) 50%; background-size: 5px 5px; background-repeat: no-repeat; cursor: pointer; }
   .close { position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border-radius: 16px; border: 0; background: rgba(0,0,0,.45); color: #fff; font-size: 16px; cursor: pointer; z-index: 2; }
 </style>
 </head>
@@ -134,7 +149,13 @@
   <div class="tools">
     <span id="shown">{{ items|length }} shown</span>
     <label>Sort <select id="sort" aria-label="Sort items">
-      <option value="value">Highest value</option><option value="proof">Needs proof</option><option value="new">Newest</option>
+      <option value="value">Highest value</option>
+      <option value="low">Lowest value</option>
+      <option value="review">Waiting for your OK first</option>
+      <option value="proof">No photo yet first</option>
+      <option value="new">Newest first</option>
+      <option value="old">Oldest first</option>
+      <option value="name">Name A–Z</option>
     </select></label>
   </div>
 
@@ -142,7 +163,8 @@
   <div class="grid" id="grid">
     {% for i in items %}
     <button class="item {{ i.status }}" data-id="{{ i.id }}" data-room="{{ i.room }}" data-value="{{ i.value }}"
-            data-proof="{{ 1 if i.needs_proof else 0 }}" data-new="{{ i.created }}">
+            data-proof="{{ 1 if i.needs_proof else 0 }}" data-review="{{ 1 if i.status == 'suggested' else 0 }}"
+            data-new="{{ i.created }}" data-name="{{ i.title|lower }}">
       <div class="shot">
         {% if i.has_photo %}<img loading="lazy" src="/p/{{ token }}/crop/{{ i.id }}.jpg" alt="">
         {% else %}<span class="mem">from memory</span>{% endif %}
@@ -183,28 +205,34 @@
 (function () {
   var token = {{ token|tojson }}, grid = document.getElementById('grid');
   var chips = [].slice.call(document.querySelectorAll('.chip')), room = '';
+  var sortBox = document.getElementById('sort');
+  try { var saved = localStorage.getItem('ashline-sort'); if (saved && sortBox.querySelector('option[value="' + saved + '"]')) sortBox.value = saved; } catch (e) {}
+  function num(c, k) { return parseFloat(c.dataset[k]) || 0; }
+  function byValue(a, b) { return num(b, 'value') - num(a, 'value'); }
+  function byName(a, b) { return (a.dataset.name || '').localeCompare(b.dataset.name || ''); }
+  function byNew(a, b) { return (b.dataset.new || '').localeCompare(a.dataset.new || '') || (num(b, 'id') - num(a, 'id')); }
+  var ORDER = {
+    value: function (a, b) { return byValue(a, b) || byName(a, b); },
+    low: function (a, b) { return -byValue(a, b) || byName(a, b); },
+    review: function (a, b) { return (num(b, 'review') - num(a, 'review')) || byValue(a, b) || byName(a, b); },
+    proof: function (a, b) { return (num(b, 'proof') - num(a, 'proof')) || byValue(a, b) || byName(a, b); },
+    'new': function (a, b) { return byNew(a, b) || byName(a, b); },
+    old: function (a, b) { return -byNew(a, b) || byName(a, b); },
+    name: function (a, b) { return byName(a, b) || byValue(a, b); }
+  };
   function apply() {
     if (!grid) return;
-    var cards = [].slice.call(grid.children), mode = document.getElementById('sort').value, shown = 0;
-    cards.sort(function (a, b) {
-      if (mode === 'proof') return (b.dataset.proof - a.dataset.proof) || (b.dataset.value - a.dataset.value);
-      if (mode === 'new') return b.dataset.new < a.dataset.new ? -1 : b.dataset.new > a.dataset.new ? 1 : 0;
-      return b.dataset.value - a.dataset.value;
-    });
+    var cards = [].slice.call(grid.children), mode = sortBox.value, shown = 0;
+    cards.sort(ORDER[mode] || ORDER.value);
     cards.forEach(function (c) {
       var ok = !room || c.dataset.room === room;
       c.hidden = !ok; if (ok) shown++; grid.appendChild(c);
     });
     document.getElementById('shown').textContent = shown + ' shown';
+    try { localStorage.setItem('ashline-sort', mode); } catch (e) {}
   }
-  chips.forEach(function (chip) {
-    chip.addEventListener('click', function () {
-      room = chip.dataset.room;
-      chips.forEach(function (c) { c.setAttribute('aria-pressed', c === chip ? 'true' : 'false'); });
-      apply();
-    });
-  });
-  document.getElementById('sort').addEventListener('change', apply);
+  sortBox.addEventListener('change', apply);
+  apply();
 
   function post(path, body) {
     return fetch('/p/' + token + path, { method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -230,18 +258,48 @@
       sheet.appendChild(el('p', d.price_basis, 'muted'));
       if (d.sightings.length > 1) sheet.appendChild(el('p', 'Seen ' + d.sightings.length + ' times. Swipe the photo to see each one.', 'muted'));
       if (d.editable) {
-        var row = el('div', null, 'row');
-        function act(label, body, quiet) {
+        var row = el('div', null, 'row'), editor = el('form', null, 'editor');
+        editor.hidden = true;
+        function send(body, btn) {
+          if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
+          return post('/item/' + id, body).then(function () { location.reload(); })
+            .catch(function () { if (btn) { btn.disabled = false; btn.textContent = 'Try again'; } });
+        }
+        function edit(title, hint, value, kind, action) {
+          editor.innerHTML = '';
+          var label = el('label', title, 'editor-label'), input = el('input');
+          input.type = 'text'; input.value = value == null ? '' : value; input.required = true;
+          if (kind === 'qty') { input.inputMode = 'numeric'; input.pattern = '[0-9]*'; }
+          if (kind === 'money') { input.inputMode = 'decimal'; input.placeholder = 'e.g. 450'; }
+          var wrap = el('div', null, 'editor-field' + (kind === 'money' ? ' money' : ''));
+          if (kind === 'money') wrap.appendChild(el('span', '$', 'prefix'));
+          wrap.appendChild(input);
+          var buttons = el('div', null, 'editor-buttons'), save = el('button', 'Save', 'btn'), cancel = el('button', 'Cancel', 'btn quiet');
+          save.type = 'submit'; cancel.type = 'button';
+          cancel.addEventListener('click', function () { editor.hidden = true; row.hidden = false; });
+          buttons.appendChild(cancel); buttons.appendChild(save);
+          editor.appendChild(label); if (hint) editor.appendChild(el('p', hint, 'editor-hint'));
+          editor.appendChild(wrap); editor.appendChild(buttons);
+          editor.onsubmit = function (e) {
+            e.preventDefault();
+            var v = input.value.trim();
+            if (!v) { input.focus(); return; }
+            send({ action: action, value: v }, save);
+          };
+          row.hidden = true; editor.hidden = false; input.focus(); input.select();
+        }
+        function act(label, onClick, quiet) {
           var b = el('button', label, 'btn' + (quiet ? ' quiet' : ''));
-          b.addEventListener('click', function () { post('/item/' + id, body()).then(function () { location.reload(); }); });
+          b.type = 'button';
+          b.addEventListener('click', function () { onClick(b); });
           row.appendChild(b);
         }
-        if (d.status === 'suggested') act('Yes, this was ours', function () { return { action: 'confirm' }; });
-        act('Fix name', function () { return { action: 'rename', value: prompt('What is it?', d.label) || d.label }; }, true);
-        act('Quantity', function () { return { action: 'qty', value: prompt('How many?', d.qty) || d.qty }; }, true);
-        act('Set price', function () { return { action: 'price', value: prompt('What does one cost to buy new, in dollars?', d.price_mid || '') }; }, true);
-        act('Remove', function () { return { action: 'remove' }; }, true);
-        sheet.appendChild(row);
+        if (d.status === 'suggested') act('Yes, this was ours', function (b) { send({ action: 'confirm' }, b); });
+        act('Fix name', function () { edit('What is it?', 'Be as specific as you can, e.g. "Pottery Barn arc floor lamp".', d.label, 'text', 'rename'); }, true);
+        act('Quantity', function () { edit('How many were there?', null, d.qty, 'qty', 'qty'); }, true);
+        act('Set price', function () { edit('What does one cost to buy new?', 'Your number replaces the estimate and is marked as set by the family.', d.price_mid ? Math.round(d.price_mid) : '', 'money', 'price'); }, true);
+        act('Remove', function (b) { send({ action: 'remove' }, b); }, true);
+        sheet.appendChild(row); sheet.appendChild(editor);
       }
       dialog.showModal();
     });

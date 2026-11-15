@@ -15,6 +15,7 @@ import asyncio
 import base64
 import hashlib
 import io
+import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -54,6 +55,15 @@ def _ago(stamp: str | None, now: datetime | None = None) -> str:
         return f"{hours} hour{'s' if hours != 1 else ''} ago"
     days = int(seconds // 86400)
     return f"{days} day{'s' if days != 1 else ''} ago"
+
+
+def parse_price(value) -> float | None:
+    """'$450', '1,200', '1.2k', '450 dollars' -> a number of dollars; None if there is no number."""
+    text = str(value or "").lower().replace(",", "").strip()
+    match = re.search(r"(\d+(?:\.\d+)?)\s*(k)?", text)
+    if not match:
+        return None
+    return float(match.group(1)) * (1000 if match.group(2) else 1)
 
 
 def _title(label: str) -> str:
@@ -145,6 +155,16 @@ def create_app(store_factory=Store) -> FastAPI:
             raise HTTPException(status_code=404)
         return item
 
+    @app.get("/", response_class=HTMLResponse)
+    def landing():
+        number = (config.env("ASHLINE_NUMBER") or "").strip()
+        digits = re.sub(r"[^\d+]", "", number)
+        shown = number
+        match = re.fullmatch(r"\+?1?(\d{3})(\d{3})(\d{4})", digits)
+        if match:
+            shown = f"({match.group(1)}) {match.group(2)}-{match.group(3)}"
+        return TEMPLATES.get_template("landing.html").render(number=digits, number_display=shown)
+
     @app.get("/healthz")
     def healthz():
         return {"ok": True}
@@ -221,10 +241,13 @@ def create_app(store_factory=Store) -> FastAPI:
         elif action == "rename" and str(body.get("value") or "").strip():
             store.update_item(case_id, item_id, label=str(body["value"]).strip()[:120])
         elif action == "qty":
-            store.update_item(case_id, item_id, qty=max(1, min(999, int(body.get("value") or 1))))
+            digits = re.sub(r"[^\d]", "", str(body.get("value") or ""))
+            if not digits:
+                raise HTTPException(status_code=400, detail="Give a number of items.")
+            store.update_item(case_id, item_id, qty=max(1, min(999, int(digits))))
         elif action == "price":
-            value = float(body.get("value") or 0)
-            if value <= 0:
+            value = parse_price(body.get("value"))
+            if not value or value <= 0:
                 raise HTTPException(status_code=400, detail="Give a price above zero.")
             store.update_item(case_id, item_id, price_low=value, price_mid=value, price_high=value,
                               price_source="set by family")

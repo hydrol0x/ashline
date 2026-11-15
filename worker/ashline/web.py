@@ -244,7 +244,7 @@ def page_data(case_id: str, store: Store, role: str) -> dict:
     }
 
 
-def create_app(store_factory=Store) -> FastAPI:
+def create_app(store_factory=Store, lookup=None) -> FastAPI:
     app = FastAPI(title="Ashline", docs_url=None, redoc_url=None)
 
     def resolve(token: str) -> tuple[Store, dict, str]:
@@ -271,6 +271,38 @@ def create_app(store_factory=Store) -> FastAPI:
         if match:
             shown = f"({match.group(1)}) {match.group(2)}-{match.group(3)}"
         return TEMPLATES.get_template("landing.html").render(number=digits, number_display=shown)
+
+    def check_view(address: str) -> dict:
+        """What /check shows for an address: only plain facts, never a scan id, listing id or coordinate."""
+        from .costar.index import home_lookup
+        from .costar.vexcel import in_geofence
+        try:
+            res = (lookup or home_lookup)(address=address)
+        except Exception:                            # the index could not be fetched or read
+            return {"state": "error"}
+        if res.get("needs_unit"):
+            street, _, rest = address.partition(",")  # the unit goes on the street line, where the parser looks
+            units = [{"unit": u, "address": f"{street.strip()} Unit {u}" + (f",{rest}" if rest else "")}
+                     for u in res.get("units") or []]
+            return {"state": "unit", "units": units}
+        if not res.get("found"):
+            return {"state": "none"}
+        captured = ""
+        match = re.match(r"(\d{4})-(\d{2})", str(res.get("original_created") or ""))
+        if match and 1 <= int(match.group(2)) <= 12:
+            captured = datetime(int(match.group(1)), int(match.group(2)), 1).strftime("%B %Y")
+        lat, lon = res.get("lat"), res.get("lon")
+        aerial = None if lat is None or lon is None else bool(in_geofence(lat, lon))
+        return {"state": "found", "captured": captured, "rooms": res.get("room_count"),
+                "floors": res.get("floor_count"), "aerial": aerial}
+
+    @app.get("/check", response_class=HTMLResponse)
+    def check(address: str = ""):
+        """Is there a 3D scan of this home from before? A form, and the answer on the same page."""
+        address = address.strip()[:200]
+        number = re.sub(r"[^\d+]", "", (config.env("ASHLINE_NUMBER") or "").strip())
+        result = check_view(address) if address else None
+        return TEMPLATES.get_template("check.html").render(address=address, result=result, number=number)
 
     @app.get("/healthz")
     def healthz():

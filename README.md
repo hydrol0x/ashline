@@ -166,6 +166,9 @@ Prices are replacement-cost estimates with a range (`pricing.py`). The range com
 `eval/calibration.json` once that has been measured; until then it is labelled a rough allowance
 and no coverage is claimed.
 
+`/check` is a public page where anyone can type an address and see whether a 3D scan of that home
+from before the disaster is on file (rooms, floors, capture month, aerial coverage), with no internal ids shown.
+
 ## Tools
 
 | Tool | Module | What it does |

@@ -70,7 +70,7 @@ def test_claude_groups_them_and_the_count_stays_what_one_panorama_saw():
     assert call["output_config"]["format"] == {"type": "json_schema", "schema": GROUPS_SCHEMA}
     prompt = call["messages"][0]["content"]
     assert isinstance(prompt, str)                 # text only: no image is sent
-    assert "(Living Room), from 3 360-degree panoramas" in prompt
+    assert "(Living Room), from 3 photos or panoramas" in prompt
     assert "0 | A | furniture | cream swivel bar stool with walnut frame" in prompt
     assert "7 | B | toys | Totoro plush toy" in prompt
 

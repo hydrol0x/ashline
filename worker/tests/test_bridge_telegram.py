@@ -334,3 +334,25 @@ def test_a_failed_edit_or_answer_does_not_stop_the_bridge(tg, heard, monkeypatch
     api.message("how much so far")
     bridge.poll()                                                                # answering and editing fail too
     assert [i.text for i in heard] == ["2", "how much so far"]
+
+
+def test_two_homes_stay_separate_when_someone_belongs_to_both(tg):
+    bridge, api = tg
+    for text in ("hi", "The Rivera home", "skip", "living room"):          # Tim sets up his home 1:1
+        api.message(text, chat=1, user=1, name="Tim")
+        bridge.poll()
+    for text in ("hi", "The Ryabinky home", "skip", "kitchen"):            # Jacob sets up his own, 1:1
+        api.message(text, chat=2, user=2, name="Jacob")
+        bridge.poll()
+    tim, jacob = case_named("The Rivera home")["case_id"], case_named("The Ryabinky home")["case_id"]
+    api.message(None, chat=-77, kind="group", user=1, group_chat_created=True)   # Tim's family group
+    bridge.poll()
+    api.message("grandma's sofa", chat=-77, kind="group", user=2, name="Jacob", photo=True)   # Jacob posts there
+    bridge.poll()
+    bridge.send(bridge.engine.tick(owns=lambda c: c.startswith("tg:")))
+    store = Store()
+    assert store.get_photos(tim) and not store.get_photos(jacob)            # the group's photo is on Tim's list
+    api.message(None, chat=2, user=2, name="Jacob", photo=True)             # Jacob's own 1:1 photo
+    bridge.poll()
+    bridge.send(bridge.engine.tick(owns=lambda c: c.startswith("tg:")))
+    assert len(store.get_photos(jacob)) == 1 and len(store.get_photos(tim)) == 1   # and his own stays his

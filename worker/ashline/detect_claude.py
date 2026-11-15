@@ -82,7 +82,9 @@ List at most 30 items. Give each physical object its own entry with its own box:
 are two entries, four bar stools are four entries, even when they look identical or overlap. Do not
 split ONE object into several entries: a sofa partly hidden or cut off by the frame is one entry with
 one box around all of it. Skip what people are wearing (clothes, earbuds, watches, glasses) and what they
-hold in their hands; list furniture, electronics and other belongings of the home.
+hold in their hands; list furniture, electronics and other belongings of the home. Skip food, drinks and
+dishes in use: on a set table or a busy counter, list the table, the chairs and the appliances, not the
+plates and bowls. When there are more than 30 things, keep the 30 most valuable.
 `box` is the item's bounding box as [x0, y0, x1, y1] on a 0-1000 grid: origin top-left, x to the
 right, y down. An empty list is the right answer for a photo with no personal property in it."""
 
@@ -116,6 +118,14 @@ class ClaudeDetector:
         self.max_side = max_side
         self.client = client or anthropic.Anthropic()
 
+    def detect_short(self, path, room_hint=None, rooms=None) -> list[dict]:
+        """The same request, asking for the 15 most valuable things only."""
+        self._limit = 15
+        try:
+            return self.detect(path, room_hint, rooms)
+        finally:
+            self._limit = 30
+
     def detect(self, path: str | Path, room_hint: str | None = None, rooms: list[str] | None = None) -> list[dict]:
         """Items in one photo. For a family photo with no known room, pass the home's room names
         in `rooms`: the model says which one the photo shows and each item carries it as "room"."""
@@ -145,7 +155,7 @@ class ClaudeDetector:
             messages=[{"role": "user", "content": [
                 {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg",
                                              "data": base64.standard_b64encode(buf.getvalue()).decode("utf-8")}},
-                {"type": "text", "text": task + INSTRUCTIONS + ask_room},
+                {"type": "text", "text": task + INSTRUCTIONS.replace("30", str(getattr(self, "_limit", 30))) + ask_room},
             ]}],
         )
         try:
@@ -171,6 +181,13 @@ class ClaudeDetector:
             category = getattr(response.stop_details, "category", None) if response.stop_details else None
             raise DetectionError(f"Claude declined this photo (category: {category}).")
         if response.stop_reason == "max_tokens":
+            if not getattr(self, "_retrying", False):      # a very busy photo: one quicker, shorter pass
+                self._retrying, effort = True, self.effort
+                try:
+                    self.effort = "low"
+                    return self.detect_short(path, room_hint, rooms)
+                finally:
+                    self._retrying, self.effort = False, effort
             raise DetectionError("The item list was cut off at max_tokens.")
         text = next((block.text for block in response.content if block.type == "text"), "")
         try:

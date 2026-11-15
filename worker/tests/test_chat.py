@@ -670,3 +670,45 @@ def test_setup_question_never_blocks_a_family_that_moves_on(fam):
     assert "$" in out[0].text or "items" in out[0].text            # answered as a normal command
     assert fam.store.get_member(MOM)["state"].get("step") != "disaster"     # the question was dropped
     assert fam.store.get_case(fam.case_id).get("disaster") is None # still the fire flow
+
+
+def test_one_unreadable_photo_does_not_stop_the_others_and_is_retried(fam):
+    from ashline import detect as detect_mod
+    real = fam.detector.detect
+    calls = {"bad": 0}
+
+    def flaky(path, room_hint=None, rooms=None):
+        if Image.open(path).width == 680:
+            calls["bad"] += 1
+            if calls["bad"] == 1:
+                raise detect_mod.DetectionError("The item list was cut off at max_tokens.")
+            return [{"label": "walnut dresser", "category": "furniture", "confidence": 0.8, "bbox": [10, 10, 300, 300]}]
+        return real(path, room_hint, rooms)
+    fam.detector.detect = flaky
+    fam.say(MAYA, "", [photo(640), photo(680)])
+    out = fam.wait()
+    text = "\n".join(o.text for o in out)
+    assert "Blue velvet sofa" in text or "blue velvet sofa" in text.lower()      # the good photo was read
+    assert "couldn't read one of the photos" in text and "max_tokens" not in text  # plain words, no internals
+    fam.say(MAYA, "", [photo(656)])                                               # the next burst retries it
+    fam.wait()
+    labels = [i["label"] for i in fam.store.get_items(fam.case_id)]
+    assert "walnut dresser" in labels and calls["bad"] == 2
+
+
+def test_claude_detector_retries_a_cut_off_reply_with_a_shorter_list(tmp_path):
+    from types import SimpleNamespace as NS
+    from ashline.detect_claude import ClaudeDetector
+    replies = [NS(stop_reason="max_tokens", content=[], stop_details=None),
+               NS(stop_reason="end_turn", stop_details=None,
+                  content=[NS(type="text", text='{"items": [{"label": "sofa", "category": "furniture", "confidence": 0.9, "box": [0, 0, 500, 500]}]}')])]
+    asked = []
+    client = NS(messages=NS(create=lambda **kw: (asked.append(kw), replies.pop(0))[1]))
+    det = ClaudeDetector(model="claude-sonnet-test", client=client) if "client" in ClaudeDetector.__init__.__code__.co_varnames else None
+    if det is None:
+        pytest.skip("detector takes no client")
+    path = tmp_path / "p.jpg"
+    Image.new("RGB", (640, 480)).save(path)
+    items = det.detect(path)
+    assert [i["label"] for i in items] == ["sofa"]
+    assert "at most 15 items" in asked[1]["messages"][0]["content"][1]["text"] and asked[1]["output_config"]["effort"] == "low"

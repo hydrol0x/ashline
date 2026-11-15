@@ -212,10 +212,24 @@ class Engine:
         return f"{qty}{item['label']}" + (f" · {price}" if price else "")
 
     # ---------------------------------------------------------- entry point
+    def _member_for(self, inbound: Inbound) -> dict | None:
+        """Who is writing, in the home this chat belongs to.
+
+        The chat decides, not the person: someone can belong to two homes (their own, and a relative's
+        group they joined). A message in a group goes to that group's home; a 1:1 message goes to the
+        home that 1:1 chat is linked to. Only a chat that isn't linked yet falls back to the person's
+        most recent membership."""
+        chat = self.store.get_chat(inbound.chat_id)
+        if chat and chat.get("case_id"):
+            mine = self.store.get_member(inbound.sender, chat["case_id"])
+            if mine or inbound.is_group:
+                return mine                                # None in a group: they're added below as new
+        return self.store.get_member(inbound.sender)
+
     def handle(self, inbound: Inbound) -> list[Outbound]:
         now = _now(inbound.now)
         text = (inbound.text or "").strip()
-        member = self.store.get_member(inbound.sender)
+        member = self._member_for(inbound)
 
         code = CODE.search(text)
         if code:
@@ -950,9 +964,24 @@ class Engine:
         return None
 
     def _digest(self, case: dict, chat_id: str, burst: dict, now: datetime) -> list[Outbound]:
+        """Read a burst of photos and reply once. A photo that can't be read is kept and retried with the
+        next burst; it never stops the others."""
+        self._unread = 0
+        out = self._read_burst(case, chat_id, burst, now)
+        if self._unread:
+            n = self._unread
+            note = (f"I couldn't read {'one of the photos' if n == 1 else f'{n} of the photos'} just now. "
+                    f"I've kept {'it' if n == 1 else 'them'} and will try again with the next photos you send.")
+            out = out + [Outbound(chat_id, note)] if out else [Outbound(chat_id, note)]
+        return out
+
+    def _read_burst(self, case: dict, chat_id: str, burst: dict, now: datetime) -> list[Outbound]:
         case_id = case["case_id"]
         photos = [self.store.get_photo(case_id, pid) for pid in burst["photos"]]
         photos = [p for p in photos if p]
+        earlier = [p for p in self.store.get_photos(case_id)        # photos that failed last time get another go
+                   if p.get("status") == "failed" and p["photo_id"] not in burst["photos"]]
+        photos += earlier[:5]
         rooms = self._room_names(case_id)
         sender = next((m for m in self.store.get_members(case_id) if m["member_id"] == burst["member_id"]), None)
         who = (sender or {}).get("name") or "you"
@@ -963,9 +992,10 @@ class Engine:
             try:
                 items = detect_cached(case_id, photo, None, get_detector=lambda: _RoomAware(get_detector(), rooms))
             except detect_mod.DetectionError as exc:
+                print(f"ashline: could not read photo {photo['photo_id']}: {exc}")
                 self.store.set_photo(case_id, photo["photo_id"], status="failed")
-                return [Outbound(chat_id, f"I couldn't look through those just now ({exc}). I've kept them and will "
-                                          "try again when you send the next one.")]
+                self._unread += 1
+                continue
             # A room the family named with the photo wins over the detector's guess, so a chair in the
             # bedroom is never merged with the one in the kitchen.
             separate = any("photo_room" in i for i in items)        # the detector says where the photo was taken
@@ -982,6 +1012,8 @@ class Engine:
             found += len(items)
 
         if not found:
+            if self._unread:
+                return []                                  # the note about unread photos says it all
             return [Outbound(chat_id, "Couldn't make out items in this one, that's fine." if len(photos) == 1
                              else "Couldn't make out items in those, that's fine.")]
 

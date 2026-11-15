@@ -135,7 +135,9 @@ class TelegramBridge:
             return []
         chat_id = f"{TELEGRAM_PREFIX}{message['chat']['id']}"
         store = self.engine.store
-        member = store.get_member(f"{TELEGRAM_PREFIX}{(message.get('from') or {}).get('id')}")
+        who = f"{TELEGRAM_PREFIX}{(message.get('from') or {}).get('id')}"
+        dm = store.get_chat(f"{TELEGRAM_PREFIX}{(message.get('from') or {}).get('id')}")   # their 1:1 chat's home
+        member = (store.get_member(who, dm["case_id"]) if dm and dm.get("case_id") else None) or store.get_member(who)
         case = store.get_case(member["case_id"]) if member and member.get("case_id") else None
         if not case:
             return [Outbound(chat_id, f"Hi, I'm Ashline. To start, message me directly ({self.engine.telegram_handle}) "

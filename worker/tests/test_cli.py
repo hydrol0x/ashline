@@ -120,3 +120,14 @@ def test_chat_simulator_and_page_links(offline, capsys, monkeypatch, tmp_path):
     cli.main(["page", "--case", case_id])
     out = capsys.readouterr().out
     assert out.startswith("owner:  http://127.0.0.1:8000/p/") and "family: http://127.0.0.1:8000/p/" in out
+
+
+def test_simulator_shows_the_buttons_a_question_has(monkeypatch):
+    from ashline.chat import Engine, Outbound
+    monkeypatch.setattr(Engine, "handle", lambda self, inbound: [
+        Outbound(inbound.chat_id, "Same sofa? 1 = same, 2 = different.", choices=[("Same", "1"), ("Different", "2")]),
+        Outbound(inbound.chat_id, "Thanks.")])
+    said = []
+    cli.simulate("+15550001", "Mom", "https://ashline.example", lines=["hi"], out=said.append)
+    assert said == ["Ashline → +15550001: Same sofa? 1 = same, 2 = different.", "          [Same] [Different]",
+                    "Ashline → +15550001: Thanks."]

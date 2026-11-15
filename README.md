@@ -83,6 +83,10 @@ owner, one room at a time when a lot is waiting; and a memory conversation by te
 it answers photos, messages addressed to it, replies to its own question and command words, and
 otherwise says nothing.
 
+On Telegram the two-answer questions (same item?, use what you paid?, add the thing you mentioned?) come
+with buttons: a tap counts as typing the answer, and only a chat's newest question keeps them. Elsewhere
+the words are unchanged. Written from the Bot API documentation; not yet run against a live bot.
+
 If the address has a 3D scan, onboarding offers to start from it and asks when the fire was, so the
 aerial photo comes from before it.
 

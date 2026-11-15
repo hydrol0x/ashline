@@ -282,6 +282,8 @@ def simulate(phone: str, name: str | None, url: str | None, lines=None, out=prin
             out(f"Ashline → {m.chat_id}: {m.text}")
             for path in ([m.image] if m.image else []) + list(m.files):
                 out(f"          [attached: {path}]")
+            if m.choices:
+                out("          " + " ".join(f"[{label}]" for label, _ in m.choices))
 
     for line in (lines if lines is not None else sys.stdin):
         line = line.strip()

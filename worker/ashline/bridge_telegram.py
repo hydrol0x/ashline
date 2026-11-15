@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import re
+import secrets
 import time
 from pathlib import Path
 
@@ -37,6 +38,7 @@ TEXT_LIMIT = 4096                # Telegram's maximum message length
 CAPTION_LIMIT = 1024
 COMMANDS = {"start": "hi", "help": "help", "list": "list", "total": "how much so far", "review": "review",
             "export": "export", "undo": "undo", "pause": "pause"}
+MOVED_ON = "That question has moved on."      # a button pressed under a question that is no longer the newest
 
 
 def owns(chat_id: str) -> bool:
@@ -67,6 +69,8 @@ class TelegramBridge:
         self.state_path = config.data_dir() / "telegram_state.json"
         self.state = json.loads(self.state_path.read_text()) if self.state_path.exists() else {}
         self.state.setdefault("offset", 0)
+        self.state.setdefault("buttons", {})            # button token -> [chat id, reply text, message id]
+        self.state.setdefault("live", {})               # chat id -> message id of its one question with buttons
         self.bot_id: int | None = None
         self.username: str = ""
 
@@ -92,10 +96,15 @@ class TelegramBridge:
     # ------------------------------------------------------------- receive
     def poll(self) -> int:
         updates = self.call("getUpdates", http_timeout=POLL_TIMEOUT + 10, **{
-            "offset": self.state["offset"], "allowed_updates": ["message"], "timeout": POLL_TIMEOUT})
+            "offset": self.state["offset"], "allowed_updates": ["message", "callback_query"], "timeout": POLL_TIMEOUT})
         handled = 0
         for update in updates:
             self.state["offset"] = update["update_id"] + 1
+            if update.get("callback_query"):
+                inbound = self.pressed(update["callback_query"])
+                if inbound is not None:
+                    self.send(self.engine.handle(inbound))
+                    handled += 1
             message = update.get("message")
             if message:
                 self.migrate(message)
@@ -184,6 +193,39 @@ class TelegramBridge:
             return f"Ashline {text}"                      # a reply to one of the bot's messages is addressed to it
         return text
 
+    def pressed(self, query: dict) -> Inbound | None:
+        """A button under one of Ashline's questions: the same as typing its reply text."""
+        entry = self.state["buttons"].get(query.get("data") or "")
+        shown = query.get("message") or {}
+        live = bool(entry) and self.state["live"].get(entry[0]) == entry[2] and shown.get("message_id", entry[2]) == entry[2]
+        self.quietly("answerCallbackQuery", callback_query_id=query["id"], **({} if live else {"text": MOVED_ON}))
+        sender = query.get("from") or {}
+        if not live or sender.get("is_bot"):
+            return None
+        chat_id, reply, _ = entry
+        self.retire(chat_id)
+        self._save()
+        kind = (shown.get("chat") or {}).get("type")
+        is_group = kind in ("group", "supergroup") if kind else int(chat_id) < 0   # group chat ids are negative
+        name = " ".join(x for x in (sender.get("first_name"), sender.get("last_name")) if x) or sender.get("username")
+        return Inbound(chat_id=f"{TELEGRAM_PREFIX}{chat_id}", sender=f"{TELEGRAM_PREFIX}{sender.get('id')}",
+                       text=f"Ashline {reply}" if is_group else reply, is_group=is_group, sender_name=name)
+
+    def retire(self, chat_id: str) -> None:
+        """Take the buttons off the chat's live question, so only the newest one can be answered by tapping."""
+        message_id = self.state["live"].pop(chat_id, None)
+        self.state["buttons"] = {t: e for t, e in self.state["buttons"].items() if e[0] != chat_id}
+        if message_id is not None:
+            self.quietly("editMessageReplyMarkup", chat_id=chat_id, message_id=message_id,
+                         reply_markup={"inline_keyboard": []})
+
+    def quietly(self, method: str, **params) -> None:
+        """Answering a press or editing old buttons may fail (network, message too old): carry on."""
+        try:
+            self.call(method, **params)
+        except Exception as exc:
+            print(f"telegram: {method} failed: {exc}")
+
     def download(self, file_id: str, tries: int = 3) -> bytes | None:
         for attempt in range(1, tries + 1):
             try:
@@ -206,18 +248,34 @@ class TelegramBridge:
             if not owns(message.chat_id):
                 continue                                  # the iMessage bridge sends those
             chat_id = message.chat_id[len(TELEGRAM_PREFIX):]
+            tokens = {secrets.token_urlsafe(6): reply for _, reply in message.choices}   # 8 characters, under the 64-byte limit
+            markup = {"inline_keyboard": [[{"text": label, "callback_data": token}
+                                           for (label, _), token in zip(message.choices, tokens)]]}
+            parts = split_text(message.text) if message.text else []
+            last = "sendMessage" if parts else "sendDocument" if message.files else "sendPhoto"
+            buttons = {"reply_markup": markup} if tokens else {}
+            uploaded = {"reply_markup": json.dumps(markup)} if tokens else {}   # a multipart upload needs it as JSON text
+            sent = None
             try:
                 if message.image:
                     with open(message.image, "rb") as f:
-                        self.call("sendPhoto", http_timeout=60, files={"photo": (Path(message.image).name, f)}, chat_id=chat_id)
-                for path in message.files:
+                        sent = self.call("sendPhoto", http_timeout=60, files={"photo": (Path(message.image).name, f)}, chat_id=chat_id,
+                                         **(uploaded if last == "sendPhoto" else {}))
+                for n, path in enumerate(message.files, 1):
                     with open(path, "rb") as f:
-                        self.call("sendDocument", http_timeout=60, files={"document": (Path(path).name, f)}, chat_id=chat_id)
-                if message.text:
-                    for part in split_text(message.text):
-                        self.call("sendMessage", chat_id=chat_id, text=part, link_preview_options={"is_disabled": True})
+                        sent = self.call("sendDocument", http_timeout=60, files={"document": (Path(path).name, f)}, chat_id=chat_id,
+                                         **(uploaded if last == "sendDocument" and n == len(message.files) else {}))
+                for n, part in enumerate(parts, 1):
+                    sent = self.call("sendMessage", chat_id=chat_id, text=part, link_preview_options={"is_disabled": True},
+                                     **(buttons if n == len(parts) else {}))
             except Exception as exc:
                 print(f"telegram: could not send to {message.chat_id}: {exc}")
+                continue
+            if tokens and isinstance(sent, dict) and sent.get("message_id") is not None:
+                self.retire(chat_id)                      # only the newest question in a chat keeps its buttons
+                self.state["live"][chat_id] = sent["message_id"]
+                self.state["buttons"].update({t: [chat_id, reply, sent["message_id"]] for t, reply in tokens.items()})
+                self._save()
 
     # ---------------------------------------------------------------- loop
     def run(self) -> None:

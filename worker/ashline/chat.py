@@ -91,6 +91,7 @@ class Outbound:
     text: str
     image: str | None = None                      # path of an image to attach
     files: list = field(default_factory=list)     # paths of files to attach
+    choices: list = field(default_factory=list)   # (label, reply_text) pairs; a bridge may show them as buttons
 
 
 def _now(value: datetime | None = None) -> datetime:
@@ -677,7 +678,7 @@ class Engine:
             text += " None of it matches something on your list, and nothing on it looks like a belonging to add."
         if unread:
             text += f"\n\nI couldn't read {unread} of the files."
-        return [Outbound(chat_id, text)]
+        return [Outbound(chat_id, text, choices=[("Use these prices", "yes"), ("Keep as is", "no")] if matches else [])]
 
     def _receipt_add(self, case: dict, chat_id: str, member: dict, lines: list) -> list[Outbound]:
         """Put receipt lines that are not on the list yet onto it, as suggestions priced at what was paid."""
@@ -727,7 +728,7 @@ class Engine:
                  else "I found 1 card purchase that matches something on your list")
         return [Outbound(chat_id, f"{found}:\n{lines}\n\nShould I use what you paid as the price for "
                                   f"{'these' if count != 1 else 'it'}? A purchase record is also proof for the "
-                                  "insurer. Reply yes or no.")]
+                                  "insurer. Reply yes or no.", choices=[("Use these prices", "yes"), ("Keep as is", "no")])]
 
     def _bank_apply(self, case: dict, chat_id: str, member: dict, pending: list) -> list[Outbound]:
         from . import bank
@@ -1022,7 +1023,8 @@ class Engine:
             thing = heard[0]
             self.store.add_question(case_id, "add", {"label": thing}, chat_id,
                                     (now + timedelta(hours=QUESTION_HOURS)).isoformat(), now.isoformat())
-            out.append(Outbound(chat_id, f"I heard a {thing} mentioned. Add it to the list? Reply yes or no."))
+            out.append(Outbound(chat_id, f"I heard a {thing} mentioned. Add it to the list? Reply yes or no.",
+                                choices=[("Add it", "yes"), ("Leave it off", "no")]))
         elif merged["maybe"]:
             out += self._ask_same(case_id, chat_id, merged["maybe"], now)
 
@@ -1128,7 +1130,8 @@ class Engine:
                              config.case_dir(case_id) / "questions" / f"same-{qid}.jpg")
         noun = item_key(b["label"]) or "item"
         more = f" ({len(pairs) - 1} more might be duplicates too.)" if len(pairs) > 1 else ""
-        return [Outbound(chat_id, f"Same {noun}? 1 = same, 2 = different.{more}", image=str(image))]
+        return [Outbound(chat_id, f"Same {noun}? 1 = same, 2 = different.{more}", image=str(image),
+                         choices=[("Same", "1"), ("Different", "2")])]
 
     # ------------------------------------------------------- pending answers
     def _answer_paid(self, chat_id: str, member: dict, case: dict, low: str):

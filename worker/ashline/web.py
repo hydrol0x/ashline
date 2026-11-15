@@ -411,16 +411,16 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
         return Response(cached.read_bytes(), media_type="image/jpeg", headers={"Cache-Control": "private, max-age=3600"})
 
     @app.get("/p/{token}/sighting/{item_id}.jpg")
-    def sighting(token: str, item_id: int):
-        """The full original photo with this one item's box drawn on it."""
+    def sighting(token: str, item_id: int, full: int = 0):
+        """The full original photo with this one item's box drawn on it. ?full=1 for zooming in."""
         store, case, _ = resolve(token)
         item = owned_item(store, case, item_id)
         photo = store.get_photo(case["case_id"], item["photo_id"]) if item.get("photo_id") else None
         if not photo:
             raise HTTPException(status_code=404)
         buf = io.BytesIO()
-        annotate(photo["path"], [{"n": 1, "bbox": item["bbox"], "status": "new"}], max_side=1400).save(
-            buf, format="JPEG", quality=85)
+        annotate(photo["path"], [{"n": 1, "bbox": item["bbox"], "status": "new"}], max_side=2800 if full else 1400).save(
+            buf, format="JPEG", quality=90 if full else 85)
         return Response(buf.getvalue(), media_type="image/jpeg", headers={"Cache-Control": "private, max-age=600"})
 
     @app.get("/p/{token}/item/{item_id}.json")

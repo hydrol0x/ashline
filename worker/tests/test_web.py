@@ -342,3 +342,13 @@ def test_an_item_moves_only_to_a_room_of_this_home(case):
         assert client.post(url, json={"action": "room", "value": typed}).status_code == 400
     assert store.get_item("fam1", ids["lamp"])["room_label"] == "Garage"
     assert client.post(f"/p/member-token/item/{ids['lamp']}", json={"action": "room", "value": "Living room"}).status_code == 403
+
+
+def test_sighting_full_size_for_zooming(case):
+    from PIL import Image as PILImage
+    client, _, ids = case
+    normal = client.get(f"/p/owner-token/sighting/{ids['sofa']}.jpg")
+    full = client.get(f"/p/owner-token/sighting/{ids['sofa']}.jpg?full=1")
+    assert normal.status_code == full.status_code == 200
+    assert max(PILImage.open(io.BytesIO(full.content)).size) >= max(PILImage.open(io.BytesIO(normal.content)).size)
+    assert 'id="lightbox"' in client.get("/p/owner-token").text

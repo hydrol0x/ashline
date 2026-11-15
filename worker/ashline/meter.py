@@ -37,8 +37,10 @@ def meter(case_id: str, store: Store | None = None, today: date | None = None) -
     items = store.get_items(case_id, canonical_only=True)
     confirmed = [i for i in items if i["status"] == "confirmed"]
     suggested = [i for i in items if i["status"] == "suggested"]
-    backed = [i for i in confirmed if i["source"] not in MEMORY_SOURCES]
-    memory = [i for i in confirmed if i["source"] in MEMORY_SOURCES]
+    def proven(item: dict) -> bool:                      # a photo, scan or receipt, or a matching card purchase
+        return item["source"] not in MEMORY_SOURCES or (item.get("price_source") or "").startswith("bank record")
+    backed = [i for i in confirmed if proven(i)]
+    memory = [i for i in confirmed if not proven(i)]
 
     out = {
         "items": len(confirmed),

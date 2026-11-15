@@ -15,6 +15,7 @@ import asyncio
 import base64
 import hashlib
 import io
+import json
 import re
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -79,6 +80,7 @@ def item_view(item: dict, sightings: list[dict]) -> dict:
     price = money_range(low, high) if mid else ""
     contributors = sorted({("3D scan" if s["added_by"] == "scan" else s["added_by"])
                            for s in sightings if s.get("added_by")})
+    bank = int((item.get("price_source") or "").startswith("bank record"))     # a card purchase is proof of purchase
     return {
         "id": item["item_id"],
         "title": _title(item["label"]),
@@ -92,11 +94,31 @@ def item_view(item: dict, sightings: list[dict]) -> dict:
         "status": item["status"],
         "memory_only": bool(sources) and all(s in MEMORY_SOURCES for s in sources),
         "has_photo": any(s.get("photo_id") and s.get("bbox") for s in sightings),
-        "badges": {"photo": photo_like, "memory": sources.count("voice"), "receipt": sources.count("receipt")},
+        "badges": {"photo": photo_like, "memory": sources.count("voice"), "receipt": sources.count("receipt") + bank},
         "contributors": contributors,
         "created": item.get("created_at") or "",
-        "needs_proof": photo_like == 0 and sources.count("receipt") == 0,
+        "needs_proof": photo_like == 0 and sources.count("receipt") + bank == 0,
     }
+
+
+def price_evidence(item: dict) -> list[dict]:
+    """Where a looked-up price came from: [{text, url}] from the item's stored references."""
+    try:
+        refs = json.loads(item.get("price_ref") or "[]")
+    except ValueError:
+        return []
+    out = []
+    for ref in refs if isinstance(refs, list) else []:
+        if not isinstance(ref, dict) or not ref.get("price"):
+            continue
+        url = str(ref.get("url") or "")
+        text = f"{money(ref['price'])} at {ref.get('retailer') or 'a retailer'}"
+        if ref.get("date"):
+            text += f" on {ref['date']}"
+        if ref.get("title"):
+            text += f": {str(ref['title'])[:80]}"
+        out.append({"text": text, "url": url if url.startswith(("https://", "http://")) else ""})
+    return out[:4]
 
 
 def page_data(case_id: str, store: Store, role: str) -> dict:
@@ -227,11 +249,17 @@ def create_app(store_factory=Store) -> FastAPI:
         basis = {"set by family": "Price set by the family.",
                  "category default": "A rough figure for this kind of item. Set the price if you know it."}.get(
             item.get("price_source") or "", "Estimate of buying it new today, at a typical mid-range price.")
-        if item.get("price_mid") and item.get("price_source") != "set by family":
+        source = item.get("price_source") or ""
+        evidence = price_evidence(item)
+        if source.startswith("bank record"):
+            basis = "What the family paid, from their card purchases."
+        elif source.startswith("web:"):
+            basis = "Price of the closest match found online today."
+        elif item.get("price_mid") and source != "set by family":
             basis += (" The range covers 90% of similar items in our test set." if calibrated
                       else " The range is a rough allowance for uncertainty.")
         return JSONResponse({
-            **view, "label": item["label"], "price_basis": basis,
+            **view, "label": item["label"], "price_basis": basis, "price_evidence": evidence,
             "price_mid": item.get("price_mid"), "editable": role == "owner",
             "sightings": [{
                 "id": s["item_id"], "source": SOURCE_NAMES.get(s["source"], s["source"]),

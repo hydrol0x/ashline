@@ -439,6 +439,13 @@
     if (d.qty > 1 && !d.price) sheet.appendChild(el('p', 'Quantity: ' + d.qty, 'price-line'));
     if (flash) { sheet.appendChild(el('p', flash, 'saved')); flash = ''; }
     sheet.appendChild(el('p', d.price_basis, 'muted small'));
+    (d.price_evidence || []).forEach(function (e) {                     // where a looked-up price came from
+      var line = el('p', '', 'muted small');
+      if (e.url) { var a = document.createElement('a'); a.href = e.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+                   a.textContent = e.text; a.style.color = 'var(--accent)'; line.appendChild(a); }
+      else line.textContent = e.text;
+      sheet.appendChild(line);
+    });
     if (d.sightings.length > 1) sheet.appendChild(el('p', 'Seen in ' + d.sightings.length + ' photos. Swipe to see each one.', 'muted small'));
 
     if (d.editable) {

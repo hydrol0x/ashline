@@ -78,6 +78,12 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("photon", help="run the conversation on Photon 2.0 (iMessage)")
     sub.add_parser("telegram", help="run the conversation on Telegram (works in family group chats)")
 
+    p = sub.add_parser("bank", help="match the family's card purchases (Capital One Nessie) to inventory items")
+    p.add_argument("--case", required=True)
+    p.add_argument("--apply", action="store_true", help="use the matched purchases as the items' prices")
+    p.add_argument("--seed-demo", type=int, metavar="N",
+                   help="demo only: first write purchases for the N most valuable items into the mock bank")
+
     p = sub.add_parser("plan", help="draw the 2D plan of a case: from its scan, or sketched from its photos")
     p.add_argument("--case", required=True)
     p.add_argument("--png", help="also save the plan as an image at this path")
@@ -155,6 +161,34 @@ def _run(args, parser) -> None:
     elif args.cmd == "telegram":
         from .bridge_telegram import TelegramBridge
         TelegramBridge().run()
+    elif args.cmd == "bank":
+        from . import bank
+        store = Store()
+        if not store.get_case(args.case):
+            parser.exit(1, f"No case {args.case!r}.\n")
+        try:
+            client = bank.NessieClient()
+            if args.seed_demo:
+                made = bank.seed_demo(args.case, store, client, top=args.seed_demo)
+                print(f"Demo purchases written to the mock bank: {len(made['purchases'])}")
+                for row in made["purchases"]:
+                    print(f"  {row['amount']:>9.2f}  {row['merchant']:<12} {row['item']}")
+                print(f"Add to .env so only this account is read:\n  NESSIE_CUSTOMER_ID={made['customer_id']}\n"
+                      f"  NESSIE_ACCOUNT_ID={made['account_id']}")
+                matches = bank.match_purchases(
+                    [i for i in store.get_items(args.case, canonical_only=True) if i["status"] != "rejected"],
+                    bank.purchases(client, account_id=made["account_id"]))
+            else:
+                matches = bank.find_matches(args.case, store, client)
+        except (config.MissingKey, bank.BankError) as exc:
+            parser.exit(1, f"{exc}\n")
+        print(f"{len(matches)} purchase(s) match items on the list" + (":" if matches else "."))
+        for match in matches:
+            print(f"  {bank.describe(match)}")
+        if args.apply and matches:
+            print(f"Prices updated on {bank.apply_matches(store, args.case, matches)} item(s).")
+        elif matches:
+            print("Run again with --apply to use these as the prices, or text 'check my bank' to Ashline.")
     elif args.cmd == "plan":
         from . import layout, sketch_claude
         store = Store()

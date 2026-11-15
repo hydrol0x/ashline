@@ -55,6 +55,7 @@ HELP = ("Send me photos from inside the home, from any year, and I'll list what'
         "• how much so far\n"
         "• show photo 3\n"
         "• map: where things were in the home\n"
+        "• check my bank: use what you paid as the price\n"
         "• call me: remember things no photo shows\n"
         "• export: spreadsheet and PDF\n"
         "• undo · pause")
@@ -176,6 +177,7 @@ class Engine:
         self.batch_seconds = batch_seconds if batch_seconds is not None else int(
             config.env("ASHLINE_BATCH_SECONDS") or BATCH_SECONDS)
         self.video_frames = int(config.env("ASHLINE_VIDEO_FRAMES") or 14)     # stills kept from one video
+        self.bank = None                                    # a bank client; built from NESSIE_API_KEY when first needed
 
     # ------------------------------------------------------------ helpers
     def link(self, case: dict, member: dict) -> str:
@@ -515,6 +517,44 @@ class Engine:
         return [Outbound(chat_id, f"Here is the home with {placed} item{'s' if placed != 1 else ''} where "
                                   f"{'they were' if placed != 1 else 'it was'} recorded ({kind}). Tap around it here: "
                                   f"{self.link(case, member)}/plan", image=str(image))]
+
+    def _bank(self, case: dict, chat_id: str, member: dict) -> list[Outbound]:
+        """Look in the family's card purchases for what they paid for things on the list."""
+        from . import bank
+        if member["role"] != "owner":
+            return [Outbound(chat_id, "Only the person who started this list can connect bank records.")]
+        try:
+            matches = bank.find_matches(case["case_id"], self.store, self.bank)
+        except config.MissingKey:
+            return [Outbound(chat_id, "Bank records aren't connected yet, so I can't look at purchases.")]
+        except bank.BankError as exc:
+            return [Outbound(chat_id, f"I couldn't read the bank records just now. {exc}")]
+        if not matches:
+            return [Outbound(chat_id, "I looked through the card purchases and found none that clearly match "
+                                      "something on the list.")]
+        matches = sorted(matches, key=lambda m: -m["purchase"]["amount"])[:8]       # the biggest purchases first
+        context = self._context(chat_id)
+        context["bank"] = [{"item_id": m["item"]["item_id"], "purchase": m["purchase"]} for m in matches]
+        self._save(chat_id, context)
+        lines = "\n".join(f"{n}. {_cap(bank.describe(m))}" for n, m in enumerate(matches, 1))
+        count = len(matches)
+        return [Outbound(chat_id, f"I found {count} card purchase{'s' if count != 1 else ''} that match"
+                                  f"{'' if count != 1 else 'es'} things on your list:\n{lines}\n\n"
+                                  "Should I use what you paid as the price for these? A purchase record is also "
+                                  "proof for the insurer. Reply yes or no.")]
+
+    def _bank_apply(self, case: dict, chat_id: str, member: dict, pending: list) -> list[Outbound]:
+        from . import bank
+        case_id = case["case_id"]
+        matches = [{"item": item, "purchase": row["purchase"]} for row in pending
+                   if (item := self.store.get_item(case_id, row["item_id"]))]
+        done = bank.apply_matches(self.store, case_id, matches, member["member_id"])
+        context = self._context(chat_id)
+        context.pop("bank", None)
+        self._save(chat_id, context)
+        return [Outbound(chat_id, f"Done. {done} item{'s now carry' if done != 1 else ' now carries'} the price you "
+                                  f"paid, marked as a bank record. {meter_line(meter(case_id, self.store)).splitlines()[0]} "
+                                  "Say undo to go back.")]
 
     def _sketch_later(self, case_id: str) -> None:
         """Redraw the plan sketch in the background after new photos, when a model is available."""
@@ -895,6 +935,19 @@ class Engine:
             return [Outbound(chat_id, "Okay. I'll stay quiet until you write again.")]
         if low in ("list", "show me everything", "show everything", "the list", "link"):
             return [Outbound(chat_id, f"Here is everything so far: {self.link(case, member)}")]
+        pending = self._context(chat_id).get("bank") if owner else None
+        if pending:                                         # purchases were proposed as prices: use them?
+            yes, no = yes_or_no(low)
+            if yes or low in ("use them", "use those", "use bank prices", "ok", "okay"):
+                return self._bank_apply(case, chat_id, member, pending)
+            context = self._context(chat_id)
+            context.pop("bank", None)
+            self._save(chat_id, context)
+            if no or low in ("skip", "leave them", "not now"):
+                return [Outbound(chat_id, "Okay, the prices stay as they are.")]
+        if re.fullmatch(r"(check |look (at|in|through) |search )?(my |the |our )?(bank|card|credit card|purchases?|statements?)"
+                        r"( records?| statements?| purchases?)?", low):
+            return self._bank(case, chat_id, member)
         if re.fullmatch(r"(show (me )?)?(the )?(map|plan|floor ?plan|layout)( of the (home|house))?", low):
             return self._plan(case, chat_id, member)
         if re.fullmatch(r"(how much( so far)?|total|progress|how are we doing|where are we)", low):
@@ -1048,6 +1101,11 @@ class Engine:
             for item_id in payload["moved"]:
                 self.store.update_item(case_id, item_id, cluster_id=payload["into"])
             text = "Undone: those are one item again."
+        elif action == "bank":                              # prices taken from card purchases
+            for row in payload["before"]:
+                self.store.update_item(case_id, row["item_id"], **{k: row[k] for k in (
+                    "price_low", "price_mid", "price_high", "price_source", "price_ref")})
+            text = "Undone: those prices are back to the estimates."
         elif action.startswith("item."):                  # a change made on the inventory page
             before = payload["before"]
             self.store.update_item(case_id, payload["item_id"], **{k: before[k] for k in (

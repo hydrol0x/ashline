@@ -98,6 +98,11 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("page", help="print the inventory page links of a case")
     p.add_argument("--case", required=True)
 
+    p = sub.add_parser("import-case", help="copy a ready-made home from another Ashline data folder into this one")
+    p.add_argument("source", help="the other data folder, e.g. ../ashline-sample-data/cases")
+    p.add_argument("--case", required=True, help="the home's id in that folder")
+    p.add_argument("--as", dest="new_id", help="the id to give it here (default: the same id)")
+
     p = sub.add_parser("delete", help="delete every stored row of a case")
     p.add_argument("--case", required=True)
 
@@ -265,6 +270,16 @@ def _run(args, parser) -> None:
             case = store.get_case(args.case)
         base = (config.env("ASHLINE_PUBLIC_URL") or "http://127.0.0.1:8000").rstrip("/")
         print(f"owner:  {base}/p/{case['owner_token']}\nfamily: {base}/p/{case['member_token']}")
+    elif args.cmd == "import-case":
+        from . import sample
+        try:
+            got = sample.import_case(args.source, args.case, args.new_id)
+        except sample.ImportError_ as exc:
+            parser.exit(1, f"{exc}\n")
+        base = (config.env("ASHLINE_PUBLIC_URL") or "http://127.0.0.1:8000").rstrip("/")
+        print(f"{got['name'] or got['case_id']}: {got['items']} items and {got['photos']} photos copied as {got['case_id']}.")
+        print(f"owner:  {base}/p/{got['owner_token']}\nfamily: {base}/p/{got['member_token']}")
+        print(f"code:   {got['invite_code']}   (post it in a chat with Ashline to join this home)")
     elif args.cmd == "delete":
         _known(args.case, parser)
         Store().delete_case(args.case)

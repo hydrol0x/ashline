@@ -231,6 +231,13 @@
     document.getElementById('shown').textContent = shown + ' shown';
     try { localStorage.setItem('ashline-sort', mode); } catch (e) {}
   }
+  chips.forEach(function (chip) {
+    chip.addEventListener('click', function () {
+      room = chip.dataset.room;
+      chips.forEach(function (c) { c.setAttribute('aria-pressed', c === chip ? 'true' : 'false'); });
+      apply();
+    });
+  });
   sortBox.addEventListener('change', apply);
   apply();
 

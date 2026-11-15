@@ -538,7 +538,7 @@
       room = chip.dataset.room;
       chips.forEach(function (c) { c.setAttribute('aria-pressed', c === chip ? 'true' : 'false'); });
       rooms.forEach(function (r) { r.classList.toggle('on', !!room && r.dataset.room === room); });
-      apply();
+      apply(); refreshReview();
     });
   });
   tabs.forEach(function (tab) {
@@ -551,7 +551,7 @@
   // The small plan is the room filter too: tap a room for its things, tap it again for every room.
   function pickRoom(name) {
     var target = room === name ? '' : name, chip = chips.filter(function (c) { return c.dataset.room === target; })[0];
-    if (chip) { chip.click(); refreshReview(); }
+    if (chip) chip.click();
   }
   rooms.forEach(function (r) {
     if (!r.dataset.room) return;
@@ -793,7 +793,8 @@
     titleRow.appendChild(el('h2', d.title));
     titleRow.appendChild(el('span', { confirmed: '✓ On your list', suggested: 'Waiting for OK', rejected: 'Removed' }[d.status] || '', 'state ' + d.status));
     sheet.appendChild(titleRow);
-    sheet.appendChild(el('p', [d.room, d.category, d.brand].filter(Boolean).join(' · '), 'muted'));
+    var category = d.category ? d.category.charAt(0).toUpperCase() + d.category.slice(1) : '';
+    sheet.appendChild(el('p', [d.room, category, d.brand].filter(Boolean).join(' · '), 'muted'));
     if (d.price) sheet.appendChild(el('p', d.price, 'price-line'));
     if (d.acv_text) sheet.appendChild(el('p', 'About ' + d.acv_text + ' depreciated, which is what flood insurance pays (an estimate).', 'muted small'));
     if (d.qty > 1 && !d.price) sheet.appendChild(el('p', 'Quantity: ' + d.qty, 'price-line'));

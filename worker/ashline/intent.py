@@ -60,18 +60,22 @@ last numbered list, X is text the person gave):
 - pause              (stop prompts and reminders for now)
 - delete my case     (the owner wants everything deleted; Ashline then asks them to confirm with yes)
 - help               (what Ashline can do)
+- address X          (the family gives the home's street address, e.g. address 12 Oak St, Pasadena, CA)
 
 Rules:
 - Only choose a command the person clearly wants. Fix typos ("lsit" means list).
 - If the message is small talk, thanks, a feeling, or a question you can answer in a sentence, set command to
   null and give a short reply (one or two sentences, no lists). Do not promise anything Ashline cannot do.
 - If it is unclear, set command to null and reply with one short question that would make it clear.
+- Your reply is sent as Ashline: write in the first person ("I"), never about "Ashline" in the third person.
+  Never say you can't save or remember something the family tells you; if no command fits, ask what they
+  would like you to do with it.
 - Choose "delete my case" only when the person clearly asks to delete or erase their case, list or data.
   It does not delete anything by itself: Ashline asks them to confirm first."""
 
 ALLOWED = ("new", "1", "2", "list", "check my bank", "map", "how much so far", "review", "ok", "undo", "export", "call me", "pause", "help",
            "delete my case")
-PREFIXES = ("show ", "remove ", "split ", "price ")
+PREFIXES = ("show ", "remove ", "split ", "price ", "address ")
 
 
 def valid_command(command: str | None) -> str | None:

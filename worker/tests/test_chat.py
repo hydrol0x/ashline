@@ -807,3 +807,22 @@ def test_room_and_quantity_changes_are_not_renames_and_can_be_undone(fam):
     assert texts(fam.say(MAYA, "undo")) == ["Undone: it's back in the room it was in."]
     item = fam.store.get_item(fam.case_id, table)
     assert (item["label"], item["qty"], item["room_label"]) == ("oak coffee table", 1, "Living room")
+
+
+@pytest.mark.parametrize("text", ["632 N Detroit St, Los Angeles, CA 90036", "address 632 N Detroit St, Los Angeles, CA",
+                                  "Our address is 12 Oak Street, Pasadena"])
+def test_an_address_after_setup_is_saved(fam, text):
+    fam.engine.lookup = lambda address: {"found": False, "reason": "no scan"}
+    out = fam.say(MOM, text)
+    assert out[0].text.startswith("Saved the address")
+    assert fam.store.get_case(fam.case_id)["address"].startswith(("632 N Detroit", "12 Oak"))
+
+
+def test_an_address_with_a_scan_offers_it_without_repeating_setup(fam):
+    fam.engine.lookup = lambda address: {"found": True, "sid": "abc", "room_count": 6, "original_created": "2021-05-01"}
+    out = fam.say(MOM, "632 N Detroit St, Los Angeles, CA 90036")
+    assert "I found a 3D scan" in out[0].text
+    assert texts(fam.say(MOM, "no")) == ["That's fine, we'll leave it."]          # no rooms question again
+    maya = fam.say(MAYA, "1 Elm St, Austin, TX")                                     # only the owner can set it
+    assert not any(o.text.startswith("Saved the address") for o in maya)
+    assert fam.store.get_case(fam.case_id)["address"].startswith("632 N Detroit")

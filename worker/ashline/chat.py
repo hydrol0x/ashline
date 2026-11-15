@@ -41,6 +41,9 @@ CODE = re.compile(r"\b(HOME-\d{4})\b", re.I)
 NEW_ITEMS = (r"(?:(?:no,?\s*)?(?:they|these|those|it|this|that)(?:'re| are| were| was|'s| is)?\s+)?(?:new|"
              r"not (?:previously |already )?(?:added|listed|on (?:the|my) list)|(?:were|was)n't (?:previously |already )?(?:added|listed)|"
              r"not the same(?: (?:ones?|things?|items?))?|different(?: (?:ones?|things?|items?))?)")
+ADDRESS_CMD = re.compile(r"(?:(?:the |our |my )?(?:home |house |street )?address(?: is|:)?|we lived at|it was at|it's at)\s+(?P<addr>\d.+)", re.I)
+ADDRESS = re.compile(r"\d{1,6}\s+(?:[NSEW]\.?\s+)?[\w .'-]{2,40}\s(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|way|"
+                     r"ct|court|pl|place|ter|terrace|pkwy|parkway|hwy|highway|cir|circle|trl|trail)\b\.?(?:[ ,].*)?", re.I)
 WHAT_HAPPENED = "One more question: what happened to the home? A fire, a flood, a hurricane or storm, or something else?"
 INSURED_Q = "Do you have insurance that covers it? Yes, no or not sure is fine."
 TELEGRAM_PREFIX = "tg:"                            # chat and sender ids that came from the Telegram bridge
@@ -380,11 +383,15 @@ class Engine:
 
         if member["state"]["step"] == "use_scan":
             scan = member["state"].get("scan") or {}
+            later = member["state"].get("later")
             if text.lower().strip(" .!") in ("yes", "y", "ok", "okay", "sure", "yes please", "use it"):
                 # The aerial photo has to be from before the fire, so this one date is asked now.
-                self.store.set_member(member["member_id"], state={"step": "loss_date", "scan": scan})
+                self.store.set_member(member["member_id"], state={"step": "loss_date", "scan": scan, "later": later})
                 return [Outbound(inbound.chat_id, "When did it happen? A month and year is enough. It lets me use an "
                                                   "aerial photo of the home from before it. You can say skip.")]
+            if later:
+                self.store.set_member(member["member_id"], state={})
+                return [Outbound(inbound.chat_id, "That's fine, we'll leave it.")]
             self.store.set_member(member["member_id"], state={"step": "rooms"})
             return [Outbound(inbound.chat_id, "That's fine, we'll leave it. Which rooms did it have? A rough list is fine.")]
 
@@ -399,6 +406,10 @@ class Engine:
             context = self._context(inbound.chat_id)
             context["seed"] = {"scan": scan, "member_id": member["member_id"]}
             self._save(inbound.chat_id, context)
+            if member["state"].get("later"):                # setup was already done: no invite again
+                self.store.set_member(member["member_id"], state={})
+                return [Outbound(inbound.chat_id, "Thank you. I'll go through the scan now; it takes a few minutes "
+                                                  "and I'll text you when it's done.")]
             self.store.set_member(member["member_id"], state={"step": "disaster"})
             return [Outbound(inbound.chat_id, "Thank you. I'll go through the scan now; it takes a few minutes and "
                                               "I'll text you when it's done.")] + self._invite_messages(inbound, case) \
@@ -459,6 +470,29 @@ class Engine:
             return [Outbound(chat_id, "Good. I'll keep the list in the form your adjuster expects.\n\n"
                                       "Send photos from inside the home whenever you're ready.")]
         return None
+
+    def _set_address(self, inbound: Inbound, member: dict, case: dict, address: str) -> list[Outbound]:
+        """The home's address, given after setup: save it and look for a 3D scan or listing, as setup does."""
+        chat_id = inbound.chat_id
+        self.store.set_case(case["case_id"], address=address[:200])
+        try:
+            found = self.lookup(address)
+        except Exception:                                   # the scan index is a bonus: never fail on it
+            found = {"found": False}
+        if found.get("found"):
+            self.store.set_member(member["member_id"], state={"step": "use_scan", "later": True, "scan": {
+                k: found.get(k) for k in ("sid", "lat", "lon", "homes_listing_id", "original_created")}})
+            when = _month_year(found.get("original_created"))
+            size = f" with {found['room_count']} rooms" if found.get("room_count") else ""
+            return [Outbound(chat_id, f"Saved the address. I found a 3D scan of it{' from ' + when if when else ''}{size}. "
+                                      "Use it as a starting point? It may show staging or a previous owner's things, "
+                                      "so nothing is added until you confirm it.")]
+        note = ""
+        if disaster.uses_sb495(self.store.get_case(case["case_id"])) and (case.get("disaster") or "fire") != "fire":
+            note = (" Since it's in California, SB 495 applies: after a declared disaster the insurer pays part of "
+                    "the contents limit without an itemized list, and I'll count that in.")
+        return [Outbound(chat_id, f"Saved the address: {address}. I don't have a 3D scan or listing for it, which is "
+                                  f"normal, so we'll keep building the list from your photos.{note}")]
 
     def _set_cause(self, case: dict, chat_id: str, text: str) -> list[Outbound] | None:
         """'the kitchen flooded' / 'bedroom was wind damage' / 'it was a hurricane', any time later."""
@@ -1280,6 +1314,10 @@ class Engine:
         cause = self._set_cause(case, chat_id, text)
         if cause is not None:
             return cause
+        said = ADDRESS_CMD.fullmatch(text.strip())
+        address = said.group("addr") if said else (text.strip() if ADDRESS.fullmatch(text.strip()) else None)
+        if address and owner:
+            return self._set_address(inbound, member, case, address.strip())
         if low in ("pause", "not today", "stop", "not now") and not member["state"].get("memory"):
             self.store.set_member(member["member_id"], paused=1)
             return [Outbound(chat_id, "Okay. I'll stay quiet until you write again.")]

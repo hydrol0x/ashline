@@ -862,3 +862,26 @@ def test_the_date_can_be_given_any_time(fam, text, when):
     out = fam.say(MOM, text)
     assert out[0].text.startswith("Saved: it happened in") or "insurance" in out[0].text   # or it answered "what happened?"
     assert fam.store.get_case(fam.case_id)["loss_date"] == when
+
+
+def test_a_failed_scan_can_be_retried_and_the_error_is_plain(fam):
+    from ashline import seed
+    fam.engine.lookup = lambda address: {"found": True, "sid": "abc", "room_count": 9, "original_created": "2026-10-01"}
+    calls = []
+
+    def boom(case_id, **kw):
+        calls.append(1)
+        raise RuntimeError("MATTERPORT_API_KEY is not set. Put it in .env (see .env.example).")
+    real, seed.seed_home_twin = seed.seed_home_twin, boom
+    try:
+        fam.say(MOM, "632 N Detroit St, Los Angeles, CA 90036")
+        fam.say(MOM, "yes")
+        fam.say(MOM, "july 2025")
+        out = fam.wait(5)
+        text = " ".join(o.text for o in out)
+        assert "couldn't go through the scan" in text and "MATTERPORT" not in text and "try again" in text
+        assert fam.say(MOM, "try again")[0].text.startswith("Trying the scan again")
+        fam.wait(5)
+        assert len(calls) == 2
+    finally:
+        seed.seed_home_twin = real

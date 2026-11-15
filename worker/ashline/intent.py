@@ -33,7 +33,7 @@ belongings their insurer needs after their home burned down. Be gentle; these pe
 A family member sent this message, and it did not match any exact command:
 <message>{message}</message>
 
-Context: {context}
+Context (facts on file; trust these, never contradict them): {context}
 
 Map the message to at most ONE of these commands, written exactly in this form (N is a number from Ashline's
 last numbered list, X is text the person gave):
@@ -62,6 +62,7 @@ last numbered list, X is text the person gave):
 - help               (what Ashline can do)
 - address X          (the family gives the home's street address, e.g. address 12 Oak St, Pasadena, CA)
 - date X             (when the fire, flood or storm happened, e.g. date July 2025)
+- try again          (retry the 3D scan after it failed)
 
 Rules:
 - Only choose a command the person clearly wants. Fix typos ("lsit" means list).
@@ -75,7 +76,7 @@ Rules:
 - Choose "delete my case" only when the person clearly asks to delete or erase their case, list or data.
   It does not delete anything by itself: Ashline asks them to confirm first."""
 
-ALLOWED = ("new", "1", "2", "list", "check my bank", "map", "how much so far", "review", "ok", "undo", "export", "call me", "pause", "help",
+ALLOWED = ("try again", "new", "1", "2", "list", "check my bank", "map", "how much so far", "review", "ok", "undo", "export", "call me", "pause", "help",
            "delete my case")
 PREFIXES = ("show ", "remove ", "split ", "price ", "address ", "date ")
 

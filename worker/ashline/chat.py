@@ -330,6 +330,12 @@ class Engine:
             if open_qs else "no open question",
             f"Ashline's last numbered list had items 1 to {len(numbered)}" if numbered else "",
             "sender owns the case" if member["role"] == "owner" else "sender is a relative",
+            f"home address on file: {case['address']}" if case.get("address") else "no address on file yet",
+            f"date of loss on file: {case['loss_date'][:10]}" if case.get("loss_date") else "no date of loss yet",
+            f"{len(self.store.get_rooms(case_id))} rooms on file" if self.store.get_rooms(case_id) else "",
+            f"{len(self.store.get_items(case_id, canonical_only=True))} items on the list",
+            "the last scan attempt failed; the command 'try again' retries it"
+            if self._context(inbound.chat_id).get("scan_failed") else "",
         ]))
         result = self._interpreter(text, context)
         command = result.get("command")
@@ -565,8 +571,12 @@ class Engine:
         try:
             seed.seed_home_twin(case_id, sid=scan["sid"], loss_date=case.get("loss_date"), store=self.store)
         except Exception as exc:
-            return [Outbound(chat_id, f"I couldn't go through the scan just now ({exc}). You can still send photos; "
-                                      "I'll work from those.")]
+            print(f"ashline: scan seed failed for {case_id}: {exc}")
+            context = self._context(chat_id)
+            context["scan_failed"] = job                    # "try again" picks it up
+            self._save(chat_id, context)
+            return [Outbound(chat_id, "I couldn't go through the scan just now. Say \"try again\" in a minute, or keep "
+                                      "sending photos and I'll work from those.")]
         priced = price_items(case_id, self.store, self.pricer)
         self._research_later(case_id, chat_id, None)
         waiting = self.store.get_items(case_id, status="suggested", canonical_only=True)
@@ -1329,6 +1339,14 @@ class Engine:
         cause = self._set_cause(case, chat_id, text)
         if cause is not None:
             return cause
+        failed = self._context(chat_id).get("scan_failed")
+        if failed and owner and re.fullmatch(r"(?:please |pls |can you )?(?:try (?:it )?again|retry|try the scan again|"
+                                             r"retry the scan|go through the scan(?: again)?|redo the scan)[.!? ]*", low):
+            context = self._context(chat_id)
+            context.pop("scan_failed", None)
+            context["seed"] = failed
+            self._save(chat_id, context)
+            return [Outbound(chat_id, "Trying the scan again now. It takes a few minutes; I'll text you when it's done.")]
         offered = self._context(chat_id).get("offered_scan")
         if offered and owner and re.search(r"\b(use (it|the scan|that scan|the 3d scan)|starting point|start from the scan)\b", low) \
                 and not re.search(r"\b(don'?t|do not|no)\b", low):

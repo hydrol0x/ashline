@@ -150,9 +150,10 @@ def test_build_draws_the_scan_with_a_pin_per_line(scanned):
     pins = {p["id"]: p for p in drawn["pins"]}
     assert pins[sofa]["exact"] and pins[sofa]["room_id"] == "living" and pins[sofa]["value"] == 900
     assert pins[sofa]["x"] == pytest.approx(3 + layout.CAMERA_HEIGHT / 0.75, abs=0.01) and pins[sofa]["y"] == pytest.approx(2.0)
-    # Known only by its room: somewhere inside that room. No room at all: listed, not drawn.
-    assert not pins[mixer]["exact"] and 6 < pins[mixer]["x"] < 9 and 0 < pins[mixer]["y"] < 4
-    assert pins[lost]["x"] is None and drawn["unplaced"] == 1
+    # Known only by its room: counted with that room, but no dot, since nobody knows where it stood.
+    assert pins[mixer]["room_id"] == "kitchen" and pins[mixer]["x"] is None and not pins[mixer]["exact"]
+    # No room at all: listed as not placed.
+    assert pins[lost]["x"] is None and pins[lost]["room_id"] is None and drawn["unplaced"] == 1 and drawn["dotted"] == 1
     store.set_item_status("c1", sofa, "rejected")
     assert sofa not in {p["id"] for p in layout.build("c1", store)["pins"]}
 
@@ -177,11 +178,11 @@ def test_without_a_scan_rooms_are_sketched_in_the_order_seen():
     rooms = {r["name"]: Polygon(r["points"]) for r in drawn["rooms"]}
     assert all(not a.intersection(b).area > 0.01 for n, a in rooms.items() for m, b in rooms.items() if n != m)
     assert rooms["Garage"].area > rooms["Kitchen"].area
-    for pin in drawn["pins"]:
-        assert rooms[pin["room"]].contains(Polygon([(pin["x"], pin["y"]), (pin["x"] + .01, pin["y"]), (pin["x"], pin["y"] + .01)]))
-    table = next(p for p in drawn["pins"] if "coffee table" in p["label"])
-    x0, y0, x1, y1 = rooms["Living room"].bounds
-    assert abs(table["y"] - (y0 + y1) / 2) < 0.01               # a coffee table stands in the middle, not on a wall
+    # Without a look at the photos nobody knows where in the room a thing stood: it is listed with
+    # its room and gets no dot, rather than a tidy made-up position.
+    by_name = {r["name"]: r["id"] for r in drawn["rooms"]}
+    assert all(p["x"] is None and p["room_id"] == by_name[p["room"]] for p in drawn["pins"])
+    assert drawn["dotted"] == 0 and drawn["unplaced"] == 0 and "a dot appears once" in drawn["note"]
 
 
 def test_a_model_sketch_sets_sizes_neighbours_and_item_spots():
@@ -213,6 +214,9 @@ def test_a_model_sketch_sets_sizes_neighbours_and_item_spots():
     pin = next(p for p in built["pins"] if p["id"] == sofa["item_id"])
     x0, y0, x1, y1 = rooms["Living room"].bounds
     assert pin["x"] > x0 + 0.8 * (x1 - x0)                                                   # against the right wall
+    # Only the thing the model placed has a dot; the rest are still listed with their rooms.
+    assert built["dotted"] == 1 and all(p["x"] is None for p in built["pins"] if p["id"] != sofa["item_id"])
+    assert "positions are approximate" in built["note"]
 
     # Nothing changed: the kept sketch is reused without asking again.
     class Never:

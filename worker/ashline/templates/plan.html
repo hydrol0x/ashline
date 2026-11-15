@@ -162,11 +162,12 @@
   const unit = Math.min(Math.max(full.w / 62, 0.3), 0.7);              // text and dots grow with the size of the home
   svg.style.setProperty("--u", unit);
 
-  const placed = L.pins.filter(p => p.x != null), loose = L.pins.filter(p => p.x == null);
+  // A thing has a dot only when its place is known; its room counts it either way.
+  const placed = L.pins.filter(p => p.x != null), loose = L.pins.filter(p => p.x == null && p.room_id == null);
   const rough = L.kind === "sketch";
   let room = null, pinOn = null, only = null, more = false;            // the open room, the lit dot, one category or all
   const seen = p => only === null || p.category === only;
-  const shownIn = id => placed.filter(p => p.room_id === id && seen(p));
+  const shownIn = id => L.pins.filter(p => p.room_id === id && seen(p));
   const worth = pins => pins.reduce((s, p) => s + p.value, 0);
   const priced = p => p.value ? money(p.value) : "";
 
@@ -298,10 +299,15 @@
       const price = li.appendChild(html("div", "price", priced(p)));
       if (p.value && p.basis) price.appendChild(html("small", "", p.basis));
       li.addEventListener("click", () => show(p));
-      li.addEventListener("pointerenter", () => { pinOn = p.id; refresh(); });
-      li.addEventListener("pointerleave", () => { pinOn = null; refresh(); });
+      if (p.x != null) {
+        li.addEventListener("pointerenter", () => { pinOn = p.id; refresh(); });
+        li.addEventListener("pointerleave", () => { pinOn = null; refresh(); });
+      }
     });
     if (!pins.length) card.appendChild(html("p", "muted", "Nothing of this kind was recorded here."));
+    else if (!pins.some(p => p.x != null)) card.appendChild(html("p", "muted", rough
+      ? "These were seen in this room. Where each stood is not known yet, so none is drawn on the plan."
+      : "These are known to have been in this room, but not where, so none is drawn on the plan."));
   }
 
   function itemCard(p) {
@@ -316,7 +322,8 @@
     top.appendChild(html("span", "state" + (p.status === "confirmed" ? "" : " wait"), p.status === "confirmed" ? "On your list" : "Waiting for OK"));
     card.appendChild(html("p", "muted", [p.room, cap(p.category), p.qty > 1 ? "quantity " + p.qty : ""].filter(Boolean).join(" · ")));
     if (p.value) card.appendChild(html("p", "muted", priced(p) + (p.basis ? " · " + p.basis : "")));
-    card.appendChild(html("p", "muted", p.exact ? "Placed where it stood on the floor in the scan." : "Its place on the plan is approximate."));
+    card.appendChild(html("p", "muted", p.x == null ? "Known by its room only, so it has no dot on the plan."
+      : p.exact ? "Placed where it stood on the floor in the scan." : "Its place on the plan is approximate."));
     const link = card.appendChild(html("a", "open", "Open in the list"));
     link.href = "/p/" + token + "#item-" + p.id;
   }
@@ -350,7 +357,8 @@
     if (p.room_id != null && p.room_id !== room) { room = p.room_id; more = false; frame(L.rooms.find(x => x.id === room)); }
     pinOn = p.id; side.dataset.item = String(p.id);
     draw(); refresh();
-    requestAnimationFrame(() => thing(p, pinNodes[p.id]));              // after any move to its room
+    if (pinNodes[p.id]) requestAnimationFrame(() => thing(p, pinNodes[p.id]));   // after any move to its room
+    else unthing();
   }
 
   // One kind of thing at a time, or all of them

@@ -43,6 +43,8 @@ THROUGH_DOOR = 6.0               # metres: how far an item seen in the next room
 CAMERA_MARGIN = 1.2              # metres added round a room's camera spots when the scan has no walls for it
 FLOOR_GAP = 2.0                 # metres between floors drawn side by side
 SKETCH_NOTE = "A sketch from your photos: rooms and positions are approximate, not to scale."
+SKETCH_ROOMS_NOTE = ("A sketch from your photos: rooms are approximate, not to scale. Things are listed by room; "
+                     "a dot appears once its place has been worked out from the photos.")
 SCAN_NOTE = "Room outlines come from the 3D scan. Item positions are estimated from where each was seen."
 APPROX_NOTE = ("This scan has no measured walls, so rooms are drawn roughly from where the scanner stood. "
                "Item positions are estimated from where each was seen.")
@@ -63,8 +65,6 @@ ROOM_SIZES = [
     (("patio", "deck", "yard", "porch", "balcony"), (4.5, 3.0)),
 ]
 DEFAULT_SIZE = (3.4, 3.0)
-# Things that usually stand in the middle of a room rather than against a wall.
-MIDDLE_WORDS = {"rug", "coffee", "dining", "island", "ottoman", "bed", "table", "carpet"}
 
 
 # ------------------------------------------------------------------- scan
@@ -350,30 +350,6 @@ def sketch_plan(names: list[str], drawn: dict | None = None) -> dict:
                       for n, r in enumerate(rooms)]}
 
 
-def wall_spots(count: int, middle: list[bool]) -> list[tuple[float, float]]:
-    """Positions inside a unit room for `count` things in the order they were seen.
-
-    Things that stand against walls go round the walls clockwise from the top left; things that
-    stand in the middle (a rug, a coffee table) are spread across the centre.
-    """
-    along = [n for n in range(count) if not middle[n]]
-    centre = [n for n in range(count) if middle[n]]
-    spots: dict[int, tuple[float, float]] = {}
-    inset = 0.14
-    for k, n in enumerate(along):
-        t = (k + 0.5) / len(along) * 4                       # 0..4 round the four walls
-        side, f = int(t) % 4, t - int(t)
-        f = inset + f * (1 - 2 * inset)
-        spots[n] = [(f, inset), (1 - inset, f), (1 - f, 1 - inset), (inset, 1 - f)][side]
-    for k, n in enumerate(centre):
-        spots[n] = (0.5 + (k - (len(centre) - 1) / 2) * min(0.22, 0.5 / max(len(centre), 1)), 0.5)
-    return [spots[n] for n in range(count)]
-
-
-def _stands_in_middle(label: str) -> bool:
-    return bool(MIDDLE_WORDS & set(re.findall(r"[a-z]+", (label or "").lower())))
-
-
 # ------------------------------------------------------------------ build
 def _lines(store, case_id: str) -> list[dict]:
     """Inventory lines (one per item, not per sighting), rejected ones left out."""
@@ -405,29 +381,6 @@ def _image_size(path: str | None, cache: dict) -> tuple[int, int]:
         except Exception:
             cache[path] = (2048, 2048)
     return cache[path]
-
-
-def _fill_points(outline: Polygon, count: int) -> list[tuple[float, float]]:
-    """`count` spread-out points inside a room, for items whose exact spot is unknown."""
-    if count <= 0:
-        return []
-    x0, y0, x1, y1 = outline.bounds
-    step = max(math.sqrt(max(outline.area, 0.5) / (count * 1.6)), 0.25)
-    inside = outline.buffer(-min(0.3, step / 2))
-    inside = inside if not inside.is_empty else outline
-    points, y = [], y0 + step / 2
-    while y < y1:
-        x = x0 + step / 2
-        while x < x1:
-            if inside.contains(Point(x, y)):
-                points.append((x, y))
-            x += step
-        y += step
-    if len(points) < count:
-        centre = outline.representative_point()
-        points += [(centre.x, centre.y)] * (count - len(points))
-    stride = len(points) / count
-    return [points[int(n * stride)] for n in range(count)]
 
 
 def build(case_id: str, store, drawn: dict | None = None) -> dict:
@@ -504,33 +457,31 @@ def build(case_id: str, store, drawn: dict | None = None) -> dict:
         else:
             pins.append({**pin, "x": None, "y": None, "exact": False, "room_id": None})
 
-    # Items known only by their room: round the walls in the order seen (sketch), or spread over the floor (scan).
+    # Items known only by their room get a dot only where a position is really known: a spot the
+    # model gave after looking at the photos. Otherwise they are counted and listed with their
+    # room and drawn nowhere; evenly spaced dots would look measured when they are not.
     for room in rooms:
-        waiting = loose.get(room["id"]) or []
-        if not waiting:
-            continue
         outline = outlines[room["id"]]
-        if plan["kind"] == "sketch":
-            x0, y0, x1, y1 = outline.bounds
-            spots = wall_spots(len(waiting), [_stands_in_middle(p["label"]) for p in waiting])
-            for pin, (u, v) in zip(waiting, spots):
-                spot = drawn_spots.get(pin["id"]) or {}
-                if all(isinstance(spot.get(k), (int, float)) and 0 <= spot[k] <= 1 for k in ("u", "v")):
-                    u, v = 0.08 + spot["u"] * 0.84, 0.08 + spot["v"] * 0.84
+        x0, y0, x1, y1 = outline.bounds
+        for pin in loose.get(room["id"]) or []:
+            spot = drawn_spots.get(pin["id"]) or {}
+            if plan["kind"] == "sketch" and all(isinstance(spot.get(k), (int, float)) and 0 <= spot[k] <= 1 for k in ("u", "v")):
+                u, v = 0.08 + spot["u"] * 0.84, 0.08 + spot["v"] * 0.84
                 px, py = to_page(x0 + u * (x1 - x0), y0 + v * (y1 - y0), room["floor"])
                 pins.append({**pin, "x": px, "y": py, "exact": False, "room_id": room["id"]})
-        else:
-            for pin, (x, y) in zip(waiting, _fill_points(outline, len(waiting))):
-                px, py = to_page(x, y, room["floor"])
-                pins.append({**pin, "x": px, "y": py, "exact": False, "room_id": room["id"]})
+            else:
+                pins.append({**pin, "x": None, "y": None, "exact": False, "room_id": room["id"]})
 
     labels = {f["id"]: f.get("label") for f in plan.get("floors") or []}
-    note = SKETCH_NOTE if plan["kind"] == "sketch" else APPROX_NOTE if plan.get("approx") else SCAN_NOTE
+    dotted = sum(1 for p in pins if p["x"] is not None)
+    note = ((SKETCH_NOTE if dotted else SKETCH_ROOMS_NOTE) if plan["kind"] == "sketch"
+            else APPROX_NOTE if plan.get("approx") else SCAN_NOTE)
     return {"kind": plan["kind"], "note": note,
             "width": round(max(cursor - FLOOR_GAP, 1.0), 2) if shift else 1.0, "height": round(max(height, 1.0), 2),
             "floors": [{"id": f, "label": labels.get(f) or "", "x": round(shift[f][0], 2)} for f in floors if f in shift]
             if len(shift) > 1 else [],
-            "rooms": rooms, "pins": pins, "unplaced": sum(1 for p in pins if p["x"] is None)}
+            "rooms": rooms, "pins": pins, "dotted": dotted,
+            "unplaced": sum(1 for p in pins if p["x"] is None and p["room_id"] is None)}
 
 
 # ----------------------------------------------------- model sketch, kept
@@ -587,11 +538,18 @@ def render_png(layout: dict, path: str | Path, width: int = 1400) -> Path:
         r = 7
         draw.ellipse([x - r, y - r, x + r, y + r], fill=CATEGORY_COLOURS.get(pin["category"], "#666666"),
                      outline="white", width=2)
+    held: dict = {}
+    for pin in layout["pins"]:
+        held[pin["room_id"]] = held.get(pin["room_id"], 0) + 1
     for room in layout["rooms"]:
         if room["name"]:
             x, y = at(*room["label_at"])
             box = draw.textbbox((0, 0), room["name"], font=font)
             draw.text((x - (box[2] - box[0]) / 2, y - 12), room["name"], fill="#1f1e1b", font=font)
+            if held.get(room["id"]):
+                count = f"{held[room['id']]} item{'s' if held[room['id']] != 1 else ''}"
+                box = draw.textbbox((0, 0), count, font=small)
+                draw.text((x - (box[2] - box[0]) / 2, y + 16), count, fill="#6b6a65", font=small)
     for floor in layout.get("floors") or []:
         if floor.get("label"):
             draw.text((at(floor["x"], 0)[0], pad - 30), f"Floor {floor['label']}", fill="#6b6a65", font=small)

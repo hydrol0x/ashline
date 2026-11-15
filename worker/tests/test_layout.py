@@ -47,6 +47,31 @@ def test_scan_plan_reads_rooms_and_cameras():
     assert layout.scan_plan({"rooms": [{"id": "x", "boundary": None}]})["rooms"] == []      # no geometry: no room
 
 
+def test_a_scan_without_walls_gets_rough_rooms_from_its_camera_spots():
+    def pano(pid, x, y, room):
+        return {"id": pid, "position": {"x": x, "y": y, "z": 1.5}, "rotation": quaternion(0),
+                "anchor": {"room": {"id": room}, "floor": {"id": "f1"}}}
+    model = {"floors": [{"id": "f1", "label": "1", "sequence": 0}],
+             "rooms": [{"id": "big", "floor": {"id": "f1"}, "boundary": {"edges": []}},
+                       {"id": "small", "floor": {"id": "f1"}, "boundary": {"edges": []}},
+                       {"id": "unseen", "floor": {"id": "f1"}, "boundary": None}],
+             "panoLocations": [pano("a", 0, 0, "big"), pano("b", 4, 0, "big"), pano("c", 4, 3, "big"),
+                               pano("d", 6, 1, "small")]}
+    plan = layout.scan_plan(model)
+    assert plan["approx"] and [r["id"] for r in plan["rooms"]] == ["big", "small"]          # no camera, no room
+    big, small = (Polygon(r["points"]) for r in plan["rooms"])
+    assert big.intersection(small).area < 1e-6                                              # cut back, not overlapping
+    assert all(big.contains(Polygon([(x, y), (x + .01, y), (x, y + .01)])) for x, y in ((0, 0), (4, 0), (4, 3)))
+    assert small.bounds[0] == pytest.approx(5.0) and big.bounds[2] == pytest.approx(5.0)    # the wall between them
+    assert not layout.scan_plan(MODEL)["approx"]
+    # Next to measured rooms: a rough room is kept beside them (a patio), dropped if it would lie over one.
+    mixed = {**MODEL, "rooms": MODEL["rooms"] + [{"id": "patio", "floor": {"id": "f1"}, "boundary": {"edges": []}},
+                                                  {"id": "ghost", "floor": {"id": "f1"}, "boundary": {"edges": []}}],
+             "panoLocations": MODEL["panoLocations"] + [pano("p", 4, 6, "patio"), pano("g", 7, 2, "ghost")]}
+    plan = layout.scan_plan(mixed)
+    assert [r["id"] for r in plan["rooms"]] == ["living", "kitchen", "patio"] and not plan["approx"]
+
+
 def test_an_item_is_placed_where_its_foot_meets_the_floor():
     camera = {"x": 3.0, "y": 2.0, "yaw": 0.0}
     room = Polygon([(0, 0), (6, 0), (6, 4), (0, 4)])

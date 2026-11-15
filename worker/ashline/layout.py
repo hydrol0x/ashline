@@ -33,9 +33,12 @@ from .rooms import tidy_room
 CAMERA_HEIGHT = 1.45            # metres above the floor; a scan tripod
 WALL_MARGIN = 0.93              # an item is never placed past this share of the way to the wall
 THROUGH_DOOR = 6.0               # metres: how far an item seen in the next room is still placed by its floor point
+CAMERA_MARGIN = 1.2              # metres added round a room's camera spots when the scan has no walls for it
 FLOOR_GAP = 2.0                 # metres between floors drawn side by side
 SKETCH_NOTE = "A sketch from your photos: rooms and positions are approximate, not to scale."
 SCAN_NOTE = "Room outlines come from the 3D scan. Item positions are estimated from where each was seen."
+APPROX_NOTE = ("This scan has no measured walls, so rooms are drawn roughly from where the scanner stood. "
+               "Item positions are estimated from where each was seen.")
 
 Q_PLAN = """query Plan($id: ID!) { model(id: $id) {
   floors { id label sequence }
@@ -92,21 +95,70 @@ def _yaw(q: dict | None) -> float:
 
 
 def scan_plan(model: dict) -> dict:
-    """Room outlines and camera spots from a Model API reply to `Q_PLAN`."""
+    """Room outlines and camera spots from a Model API reply to `Q_PLAN`.
+
+    Checked on 15 Nov 2026: residential scans carry wall segments for most rooms, with one to four
+    rooms per home left without (often outdoor areas); commercial scans often carry none. A room
+    without walls is approximated from where the scan's cameras stood in it (`camera_rooms`),
+    unless that rectangle would lie over a measured room. A plan with no measured room at all is
+    marked `approx`.
+    """
     floors = sorted(model.get("floors") or [], key=lambda f: f.get("sequence") or 0)
-    rooms = []
-    for room in model.get("rooms") or []:
-        points = ring(((room.get("boundary") or {}).get("edges")) or [])
-        if len(points) >= 3:
-            rooms.append({"id": room["id"], "floor": (room.get("floor") or {}).get("id"),
-                          "points": [[round(x, 3), round(y, 3)] for x, y in points]})
     cameras = {}
     for pano in model.get("panoLocations") or []:
         anchor = pano.get("anchor") or {}
         cameras[pano["id"]] = {"x": pano["position"]["x"], "y": pano["position"]["y"], "yaw": _yaw(pano.get("rotation")),
                                "room": (anchor.get("room") or {}).get("id"), "floor": (anchor.get("floor") or {}).get("id")}
-    return {"kind": "scan", "floors": [{"id": f["id"], "label": f.get("label") or ""} for f in floors],
-            "rooms": rooms, "cameras": cameras}
+    rooms, missing = [], []
+    for room in model.get("rooms") or []:
+        points = ring(((room.get("boundary") or {}).get("edges")) or [])
+        floor = (room.get("floor") or {}).get("id")
+        if len(points) >= 3:
+            rooms.append({"id": room["id"], "floor": floor, "points": [[round(x, 3), round(y, 3)] for x, y in points]})
+        else:
+            missing.append({"id": room["id"], "floor": floor})
+    measured = [(r["floor"], Polygon(r["points"]).buffer(0)) for r in rooms]
+    guessed = []
+    for room in camera_rooms(missing, cameras):
+        box = Polygon(room["points"])
+        covered = sum(box.intersection(outline).area for floor, outline in measured if floor == room["floor"])
+        if covered <= 0.2 * box.area:                       # not lying over rooms the scan did measure
+            guessed.append(room)
+    return {"kind": "scan", "approx": bool(guessed) and not rooms, "floors": [{"id": f["id"], "label": f.get("label") or ""} for f in floors],
+            "rooms": rooms + guessed, "cameras": cameras}
+
+
+def camera_rooms(rooms: list[dict], cameras: dict, margin: float = CAMERA_MARGIN) -> list[dict]:
+    """Rough rectangles for rooms the scan gives no walls for: the area its cameras covered, plus a margin.
+
+    A scan operator sets the camera down every couple of metres and not against a wall, so the
+    cameras of a room span most of it. Rectangles of neighbouring rooms are cut back where they
+    would overlap. Rooms no camera stood in are left out.
+    """
+    boxes = []
+    for room in rooms:
+        spots = [(c["x"], c["y"]) for c in cameras.values() if c["room"] == room["id"]]
+        if not spots:
+            continue
+        xs, ys = [p[0] for p in spots], [p[1] for p in spots]
+        boxes.append({**room, "x0": min(xs) - margin, "x1": max(xs) + margin, "y0": min(ys) - margin, "y1": max(ys) + margin})
+    for _ in range(2):
+        for n, a in enumerate(boxes):
+            for b in boxes[n + 1:]:
+                if a["floor"] != b["floor"]:
+                    continue
+                over_x = min(a["x1"], b["x1"]) - max(a["x0"], b["x0"])
+                over_y = min(a["y1"], b["y1"]) - max(a["y0"], b["y0"])
+                if over_x <= 0 or over_y <= 0:
+                    continue
+                axis, lo, hi = ("x", "x0", "x1") if over_x <= over_y else ("y", "y0", "y1")
+                first, second = (a, b) if a[lo] + a[hi] <= b[lo] + b[hi] else (b, a)      # by centre along that axis
+                cut = (max(a[lo], b[lo]) + min(a[hi], b[hi])) / 2
+                first[hi], second[lo] = min(first[hi], cut), max(second[lo], cut)
+    return [{"id": b["id"], "floor": b["floor"], "approx": True,
+             "points": [[round(b["x0"], 3), round(b["y0"], 3)], [round(b["x1"], 3), round(b["y0"], 3)],
+                        [round(b["x1"], 3), round(b["y1"], 3)], [round(b["x0"], 3), round(b["y1"], 3)]]}
+            for b in boxes if b["x1"] - b["x0"] > 0.3 and b["y1"] - b["y0"] > 0.3]
 
 
 def plan_path(case_id: str) -> Path:
@@ -421,7 +473,8 @@ def build(case_id: str, store, drawn: dict | None = None) -> dict:
                 pins.append({**pin, "x": px, "y": py, "exact": False, "room_id": room["id"]})
 
     labels = {f["id"]: f.get("label") for f in plan.get("floors") or []}
-    return {"kind": plan["kind"], "note": SCAN_NOTE if plan["kind"] == "scan" else SKETCH_NOTE,
+    note = SKETCH_NOTE if plan["kind"] == "sketch" else APPROX_NOTE if plan.get("approx") else SCAN_NOTE
+    return {"kind": plan["kind"], "note": note,
             "width": round(max(cursor - FLOOR_GAP, 1.0), 2) if shift else 1.0, "height": round(max(height, 1.0), 2),
             "floors": [{"id": f, "label": labels.get(f) or "", "x": round(shift[f][0], 2)} for f in floors if f in shift]
             if len(shift) > 1 else [],
@@ -484,6 +537,9 @@ def render_png(layout: dict, path: str | Path, width: int = 1400) -> Path:
             x, y = at(*room["label_at"])
             box = draw.textbbox((0, 0), room["name"], font=font)
             draw.text((x - (box[2] - box[0]) / 2, y - 12), room["name"], fill="#1f1e1b", font=font)
+    for floor in layout.get("floors") or []:
+        if floor.get("label"):
+            draw.text((at(floor["x"], 0)[0], pad - 30), f"Floor {floor['label']}", fill="#6b6a65", font=small)
     draw.text((pad, height - 34), layout["note"], fill="#6b6a65", font=small)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

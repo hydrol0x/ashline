@@ -241,7 +241,9 @@ class Engine:
             if reply is not None:
                 return reply
             if addressed:
-                return self._interpret(inbound, member, case, text, now) or [Outbound(inbound.chat_id, HELP)]
+                from . import assistant
+                return (assistant.converse(self, inbound, member, case, text, now)
+                        or self._interpret(inbound, member, case, text, now) or [Outbound(inbound.chat_id, HELP)])
             self._listen(inbound.chat_id, text)           # unsure = silent
             return []
 
@@ -253,7 +255,9 @@ class Engine:
         if re.fullmatch(r"(?:ok(?:ay)?|k|cool|nice|great|thanks?|thank you|ty|got it|perfect|awesome|sounds good|"
                         r"👍|❤️|🙏)[ .!]*", text.strip().lower()):
             return [Outbound(inbound.chat_id, "Anytime. Send more photos whenever you have them.")]
-        return (self._interpret(inbound, member, case, text, now)
+        from . import assistant                             # the LangChain agent, when a model is available
+        return (assistant.converse(self, inbound, member, case, text, now)
+                or self._interpret(inbound, member, case, text, now)
                 or [Outbound(inbound.chat_id, "I'm not sure what you'd like me to do with that.\n\n" + HELP)])
 
     def _interpret(self, inbound: Inbound, member: dict, case: dict, text: str, now: datetime):

@@ -59,7 +59,7 @@ MIGRATIONS = {
               "coverage_limit": "REAL", "coverage_skipped": "INTEGER DEFAULT 0", "review_hour": "INTEGER DEFAULT 18",
               "last_review_at": "TEXT", "rooms_note": "TEXT", "reminders": "TEXT"},
     "items": {"price_low": "REAL", "price_mid": "REAL", "price_high": "REAL", "price_source": "TEXT",
-              "detail": "TEXT", "reviewed": "INTEGER DEFAULT 0"},
+              "detail": "TEXT", "reviewed": "INTEGER DEFAULT 0", "price_ref": "TEXT"},
     "members": {"dm_chat": "TEXT"},
     "photos": {"number": "INTEGER", "batch_id": "TEXT", "taken": "TEXT", "status": "TEXT DEFAULT 'done'",
                "chat_id": "TEXT"},
@@ -76,7 +76,8 @@ class Store:
             root = config.data_dir()
             root.mkdir(parents=True, exist_ok=True)
             path = str(root / "ashline.sqlite")
-        self.db = sqlite3.connect(path)
+        # The LangChain agent runs its tools on worker threads; callers serialize their use of a Store.
+        self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)
         self._migrate()
@@ -369,7 +370,7 @@ class Store:
 
     def update_item(self, case_id: str, item_id: int, **fields) -> None:
         allowed = ("label", "category", "brand_guess", "qty", "room_id", "room_label", "detail", "price_low",
-                   "price_mid", "price_high", "price_source", "reviewed", "cluster_id", "status")
+                   "price_mid", "price_high", "price_source", "reviewed", "cluster_id", "status", "price_ref")
         with self.tx() as db:
             for key, value in fields.items():
                 if key in allowed:

@@ -71,6 +71,10 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--port", type=int, default=8000)
     p.add_argument("--host", default="127.0.0.1", help="use 0.0.0.0 to accept connections from a tunnel or phone")
 
+    p = sub.add_parser("price-check", help="look up the most valuable items' prices online")
+    p.add_argument("--case", required=True)
+    p.add_argument("--top", type=int, default=20, help="how many items to look up, most valuable first")
+
     sub.add_parser("photon", help="run the conversation on Photon 2.0 (iMessage)")
     sub.add_parser("telegram", help="run the conversation on Telegram (works in family group chats)")
 
@@ -137,6 +141,9 @@ def _run(args, parser) -> None:
             parser.exit(1, f"The page needs packages that are not installed ({exc.name}). From worker/, run:\n"
                            "  pip install -e '.[agent,claude,dev]'\n")
         uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    elif args.cmd == "price-check":
+        from .price_search import price_check
+        print(json.dumps(price_check(args.case, top=args.top, report=print), indent=1))
     elif args.cmd == "photon":
         from .bridge_photon import PhotonBridge
         PhotonBridge().run()

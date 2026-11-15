@@ -14,7 +14,9 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import hmac
 import io
+import ipaddress
 import json
 import re
 from contextlib import asynccontextmanager
@@ -541,17 +543,23 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
         if role != "owner":
             raise HTTPException(status_code=403, detail="Only the case owner can export.")
         from . import export as exporter
-        name = (case.get("name") or "inventory").replace(" ", "-").lower()
+        # A header carries plain ASCII only: a home named in another script still downloads, under its real name.
+        real = (case.get("name") or "inventory").strip() or "inventory"
+        name = re.sub(r"[^a-z0-9]+", "-", real.lower()).strip("-") or "inventory"
+
+        def named(kind_: str, how: str = "attachment") -> dict:
+            from urllib.parse import quote
+            return {"Content-Disposition": f"{how}; filename=\"{name}.{kind_}\"; filename*=UTF-8''{quote(real)}.{kind_}"}
         if kind == "csv":
             return Response(exporter.export_csv(case["case_id"], store).read_bytes(), media_type="text/csv",
-                            headers={"Content-Disposition": f'attachment; filename="{name}.csv"'})
+                            headers=named("csv"))
         if kind == "xlsx":
             return Response(exporter.export_xlsx(case["case_id"], store).read_bytes(),
                             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'})
+                            headers=named("xlsx"))
         if kind == "pdf":
             return Response(exporter.export_pdf(case["case_id"], store).read_bytes(), media_type="application/pdf",
-                            headers={"Content-Disposition": f'{"inline" if inline else "attachment"}; filename="{name}.pdf"'})
+                            headers=named("pdf", "inline" if inline else "attachment"))
         raise HTTPException(status_code=404)
 
     # ------------------------------------------------------------ messaging bridge (build spec 6.1)
@@ -560,9 +568,22 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
         return Engine(store_factory())
 
     def check_secret(request: Request) -> None:
+        # These two routes speak for any phone number, and a reply can carry a family's private link.
+        # With a secret set, every call must carry it. With none, only this machine may call: anything
+        # that came through a tunnel or from another machine is refused.
         secret = config.env("ASHLINE_INBOUND_SECRET")
-        if secret and request.headers.get("x-ashline-secret") != secret:
-            raise HTTPException(status_code=401, detail="Wrong or missing X-Ashline-Secret.")
+        if secret:
+            if not hmac.compare_digest(request.headers.get("x-ashline-secret") or "", secret):
+                raise HTTPException(status_code=401, detail="Wrong or missing X-Ashline-Secret.")
+            return
+        forwarded = any(request.headers.get(h) for h in ("x-forwarded-for", "x-forwarded-host", "forwarded", "x-real-ip",
+                                                           "cf-connecting-ip"))
+        try:
+            remote = not ipaddress.ip_address(request.client.host if request.client else "").is_loopback
+        except ValueError:
+            remote = False                                  # not a network address: a caller inside this process
+        if forwarded or remote:
+            raise HTTPException(status_code=401, detail="Set ASHLINE_INBOUND_SECRET to use this from another machine.")
 
     @app.post("/inbound")
     async def inbound(request: Request):

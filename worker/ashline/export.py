@@ -120,12 +120,21 @@ def claim_groups(case: dict, rows: list[dict]) -> list[dict]:
     return out
 
 
+def plain_cell(value):
+    """Text a spreadsheet must not run. A family member names items in chat, and the insurer opens the file:
+    a name starting like a formula is kept as text by putting an apostrophe in front."""
+    if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + value
+    return value
+
+
 def export_csv(case_id: str, store: Store | None = None, include_suggested: bool = False) -> Path:
     path = config.case_dir(case_id) / "inventory.csv"
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=COLUMNS, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(export_rows(case_id, store, include_suggested))
+        writer.writerows({c: plain_cell(row.get(c)) for c in COLUMNS}
+                         for row in export_rows(case_id, store, include_suggested))
         fh.write(f"# {DISCLAIMER}\n")
     return path
 
@@ -141,13 +150,14 @@ def export_xlsx(case_id: str, store: Store | None = None, include_suggested: boo
     sheet = book.active
     sheet.title = "Inventory"
     headers = ["Room", "Category", "Item", "Qty", "Brand / model", "Age", "Low", "Mid", "High", "Evidence type",
-               "Evidence", "Status", "Photos", "Contributor", "Evidence link", "Claim", "Depreciated (est.)", "Essential"]
+               "Evidence", "Status", "Photos", "Contributor", "Evidence link", "Claim", "Depreciated (est.)", "Essential",
+               "Price basis"]
     sheet.append(headers)
     for cell in sheet[1]:
         cell.font = Font(bold=True)
     for row in rows:
-        sheet.append([row[c] for c in COLUMNS])
-    for index, width in enumerate([22, 14, 44, 6, 18, 8, 10, 10, 10, 13, 38, 11, 22, 18, 40, 34, 16, 10], 1):
+        sheet.append([plain_cell(row[c]) for c in COLUMNS])
+    for index, width in enumerate([22, 14, 44, 6, 18, 8, 10, 10, 10, 13, 38, 11, 22, 18, 40, 34, 16, 10, 24], 1):
         sheet.column_dimensions[get_column_letter(index)].width = width
     for row in sheet.iter_rows(min_row=2, min_col=7, max_col=9):
         for cell in row:
@@ -189,7 +199,7 @@ def export_xlsx(case_id: str, store: Store | None = None, include_suggested: boo
             for cell in part[1]:
                 cell.font = Font(bold=True)
             for row in g["rows"]:
-                part.append([row[c] for c in COLUMNS])
+                part.append([plain_cell(row[c]) for c in COLUMNS])
             part.freeze_panes = "A2"
     if case.get("insured") == "no":
         essentials = book.create_sheet("Essentials (FEMA)")
@@ -198,7 +208,7 @@ def export_xlsx(case_id: str, store: Store | None = None, include_suggested: boo
             cell.font = Font(bold=True)
         for row in rows:
             if row["essential"]:
-                essentials.append([row["item"], row["room"], row["qty"], row["rcv_mid"]])
+                essentials.append([plain_cell(row["item"]), plain_cell(row["room"]), row["qty"], row["rcv_mid"]])
     path = config.case_dir(case_id) / "inventory.xlsx"
     book.save(path)
     return path
@@ -277,7 +287,8 @@ def export_pdf(case_id: str, store: Store | None = None, include_suggested: bool
     story += [Paragraph(f"Contents inventory: {esc(case.get('name') or 'Home')}", title),
               Table([[""]], colWidths=[6.8 * inch], rowHeights=[2], hAlign="LEFT",
                     style=TableStyle([("BACKGROUND", (0, 0), (-1, -1), red)]))]
-    facts = [["Items listed", str(sum(int(r['qty'] or 1) for r in rows))],
+    things = sum(int(r['qty'] or 1) for r in rows)             # a line can stand for several of the same thing
+    facts = [["Items listed", str(len(rows)) + (f" ({things} counting quantities)" if things != len(rows) else "")],
              ["Estimated replacement cost (mid)", money(sum(float(r['rcv_mid'] or 0) * int(r['qty'] or 1) for r in rows))],
              ["Range (low to high)", f"{money(m['low'])} to {money(m['high'])}"],
              ["Backed by a photo, scan or receipt", money(m["backed"])],

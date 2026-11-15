@@ -129,9 +129,11 @@ def _run(args, parser) -> None:
             result["pricing"] = price_items(args.case)
         print(json.dumps(result, indent=1))
     elif args.cmd == "questions":
+        _known(args.case, parser)
         for q in gap_questions(args.case):
             print(f"[{q['kind']:<9} {q['weight']:>6}] {q['text']}")
     elif args.cmd == "export":
+        _known(args.case, parser)
         print(export_csv(args.case, include_suggested=args.include_suggested))
     elif args.cmd == "kit-info":
         from .costar.listing import kit_info
@@ -229,7 +231,10 @@ def _run(args, parser) -> None:
         print(f"{drawn['kind']} plan: {len(drawn['rooms'])} rooms, {len(drawn['pins']) - drawn['unplaced']} items placed"
               + (f", {drawn['unplaced']} with no known room" if drawn["unplaced"] else ""))
         if args.png:
-            print(f"saved {layout.render_png(drawn, args.png)}")
+            try:
+                print(f"saved {layout.render_png(drawn, args.png)}")
+            except (OSError, ValueError) as exc:           # a folder that is not there, or a name that is not a picture
+                parser.exit(1, f"Cannot write {args.png}: {exc}\n")
         if case.get("owner_token"):
             base = (config.env("ASHLINE_PUBLIC_URL") or "http://127.0.0.1:8000").rstrip("/")
             print(f"page: {base}/p/{case['owner_token']}/plan")
@@ -246,8 +251,17 @@ def _run(args, parser) -> None:
         base = (config.env("ASHLINE_PUBLIC_URL") or "http://127.0.0.1:8000").rstrip("/")
         print(f"owner:  {base}/p/{case['owner_token']}\nfamily: {base}/p/{case['member_token']}")
     elif args.cmd == "delete":
+        _known(args.case, parser)
         Store().delete_case(args.case)
         print(f"case {args.case} deleted")
+
+
+def _known(case_id: str, parser) -> dict:
+    """The case, or a plain message and exit: a mistyped id must not quietly make an empty case."""
+    case = Store().get_case(case_id)
+    if not case:
+        parser.exit(1, f"No case {case_id!r}.\n")
+    return case
 
 
 SIM_HELP = """Type a message and press enter. Lines starting with / are simulator commands:

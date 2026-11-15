@@ -66,20 +66,20 @@ def test_a_receipt_prices_the_item_it_names_and_offers_the_rest(tmp_path):
     out = texts(f.say(MOM, "receipt from when we bought the couch", photos=[picture()]))
     assert len(out) == 1 and out[0].startswith("I read the receipt from IKEA: 3 things bought.")
     assert "This matches things on your list:\n1. Blue velvet sofa: $1,149 at IKEA on 2024-03-12" in out[0]
-    assert "Also on it, not on your list yet: 2 x Walnut bookcase ($398). Reply add to list it." in out[0]
+    assert "Also on it, not on your list yet: 2 x Walnut bookcase ($398). Reply \"add\" to put it on the list." in out[0]
     assert "napkins" not in out[0]                                              # too small to be a belonging worth listing
     assert f.store.get_item(f.case_id, sofa["item_id"])["price_mid"] == estimate    # nothing changes before a yes
     assert not f.store.get_photos(f.case_id, source="photo")[1:]                # the receipt is not a photo of the home
 
     out = texts(f.say(MOM, "yes"))
     assert out[0].startswith("Done. 1 item now carries the price you paid, marked as a receipt.")
-    assert out[0].endswith("Reply add to list the other things on the receipt.")
+    assert out[0].endswith('Reply "add" to put the other things on the receipt on the list.')
     after = f.store.get_item(f.case_id, sofa["item_id"])
     assert (after["price_mid"], after["price_source"]) == (1149.0, "receipt: IKEA")
     kept = json.loads(after["price_ref"])
     assert kept["paid"]["receipt"] == "rcpt-1" and kept["estimate"]["mid"] == estimate
 
-    out = texts(f.say(MOM, "add"))
+    out = texts(f.say(MOM, "add them to the list"))
     assert out[0].startswith("Added 1 thing from the receipt as a suggestion, priced at what you paid.")
     bookcase = next(i for i in f.store.get_items(f.case_id) if "bookcase" in i["label"])
     assert (bookcase["source"], bookcase["status"], bookcase["qty"], bookcase["price_mid"]) == ("receipt", "suggested", 2, 199.0)
@@ -143,3 +143,16 @@ def test_the_reader_sends_a_picture_or_a_pdf_and_reads_the_reply():
     reader.read(b"%PDF-1.7 fake")
     assert calls[1]["messages"][0]["content"][0] == {"type": "document", "source": {
         "type": "base64", "media_type": "application/pdf", "data": "JVBERi0xLjcgZmFrZQ=="}}
+
+
+def test_a_receipt_for_something_already_paid_for_is_not_offered_again():
+    f = family()
+    f.say(MOM, "receipt", photos=[picture()])
+    f.say(MOM, "yes")                                              # the sofa now carries what was paid
+    f.say(MOM, "add")
+    before = len(f.store.get_items(f.case_id, canonical_only=True))
+    out = texts(f.say(MOM, "receipt again", photos=[picture()]))
+    assert out[0].endswith("Already on your list with a price: Walnut bookcase; Blue velvet sofa. I left those as they are.")
+    f.say(MOM, "add")
+    labels = [i["label"].lower() for i in f.store.get_items(f.case_id, canonical_only=True) if i["status"] != "rejected"]
+    assert sum("sofa" in l for l in labels) == 1 and len(labels) <= before

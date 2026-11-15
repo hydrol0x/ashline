@@ -666,6 +666,9 @@ class Engine:
         open_items = [i for i in everything if i.get("price_source") != "set by family" and not price_sources(i).get("paid")]
         matches = sorted(bank.match_purchases(open_items, bought), key=lambda m: -m["purchase"]["amount"])[:8]
         matched = {m["purchase"]["id"] for m in matches}
+        priced = [i for i in everything if i not in open_items]                 # already have a price the family gave or paid
+        known = bank.match_purchases(priced, [p for p in bought if p["id"] not in matched])
+        matched |= {m["purchase"]["id"] for m in known}
         extra = [p for p in bought if p["id"] not in matched and p["amount"] >= 20][:8]      # things not on the list yet
         context = self._context(chat_id)
         context.pop("bank", None)
@@ -684,11 +687,14 @@ class Engine:
             text += (f"\n\n{'These match' if len(matches) != 1 else 'This matches'} things on your list:\n{lines}\n\n"
                      f"Should I use what you paid as the price for {'these' if len(matches) != 1 else 'it'}? "
                      "A receipt is also proof for the insurer. Reply yes or no.")
+        if known:
+            names = "; ".join(_cap(m["item"]["label"]) for m in known)
+            text += f"\n\nAlready on your list with a price: {names}. I left {'those' if len(known) != 1 else 'it'} as {'they are' if len(known) != 1 else 'it is'}."
         if extra:
             names = "; ".join(f"{_cap(p['description'])} ({money(p['amount'])})" for p in extra)
             text += (f"\n\n{'Also on it, not' if matches else 'Not'} on your list yet: {names}. "
-                     f"Reply add to list {'them' if len(extra) != 1 else 'it'}.")
-        if not matches and not extra:
+                     f"Reply \"add\" to put {'them' if len(extra) != 1 else 'it'} on the list.")
+        if not matches and not extra and not known:
             text += " None of it matches something on your list, and nothing on it looks like a belonging to add."
         if unread:
             text += f"\n\nI couldn't read {unread} of the files."
@@ -755,9 +761,13 @@ class Engine:
         self._save(chat_id, context)
         proof = "a receipt" if any(row["purchase"].get("receipt") for row in pending) else "a bank record"
         more = context.get("receipt_adds")
+        waiting = sum(1 for row in pending if (item := self.store.get_item(case_id, row["item_id"])) and item["status"] == "suggested")
+        progress = (f"{'They' if done != 1 else 'It'} still {'wait' if done != 1 else 'waits'} for your OK in the review before "
+                    f"{'they count' if done != 1 else 'it counts'} on the list." if waiting
+                    else meter_line(meter(case_id, self.store)).splitlines()[0])
         return [Outbound(chat_id, f"Done. {done} item{'s now carry' if done != 1 else ' now carries'} the price you "
-                                  f"paid, marked as {proof}. {meter_line(meter(case_id, self.store)).splitlines()[0]} "
-                                  "Say undo to go back." + (" Reply add to list the other things on the receipt." if more else ""))]
+                                  f"paid, marked as {proof}. {progress} "
+                                  "Say undo to go back." + (" Reply \"add\" to put the other things on the receipt on the list." if more else ""))]
 
     def _research_later(self, case_id: str, chat_id: str, item_ids: list[int] | None) -> None:
         """Have the price agent look the bigger new items up online, without anyone asking.
@@ -1176,7 +1186,8 @@ class Engine:
             return None
         context = self._context(chat_id)
         adds, pending = context.get("receipt_adds"), context.get("bank")
-        if adds and low in ("add", "add them", "add it", "yes add", "add those", "add all"):
+        if adds and low in ("add", "add them", "add it", "yes add", "add those", "add all", "add to list", "add to the list",
+                            "add them to the list", "add them to list", "add it to the list", "add it to list"):
             return self._receipt_add(case, chat_id, member, adds)
         if pending:
             yes, no = yes_or_no(low)

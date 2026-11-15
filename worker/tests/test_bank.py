@@ -131,6 +131,7 @@ def test_checking_the_bank_in_chat_proposes_then_applies_and_undoes(nessie, clie
 
     out = texts(f.say(MOM, "yes"))
     assert out[0].startswith("Done. 2 items now carry the price you paid, marked as a bank record.")
+    assert "They still wait for your OK in the review" in out[0] and "$0" not in out[0]
     after = f.store.get_item(f.case_id, sofa["item_id"])
     assert after["price_mid"] == after["price_low"] == after["price_high"] == 1149.0
     assert after["price_source"] == "bank record: IKEA"

@@ -122,6 +122,16 @@ def test_commands_run_through_the_same_checks(fam):
     assert [o.text for o in out] == ["I can't do that."] and len(fam.store.get_items(fam.case_id)) == 3
 
 
+def test_the_plan_and_bank_records_are_commands_the_agent_can_run(fam):
+    out = say(fam, MAYA, "where was everything in the house?", [
+        call("run_command", {"command": "map"}), AIMessage(content="DONE")])
+    assert len(out) == 1 and out[0].image.endswith("plan.png") and out[0].text.endswith("/plan")
+    assert "3 items where they were recorded" in out[0].text
+    out = say(fam, MAYA, "can you look at mom's card statement for prices", [
+        call("run_command", {"command": "check my bank"}), AIMessage(content="DONE")])
+    assert [o.text for o in out] == ["Only the person who started this list can connect bank records."]
+
+
 def test_price_researcher_subagent_looks_it_up_and_the_price_is_recorded(fam):
     fam.engine.price_searcher = FakeSearcher(MATCHES)
     out = say(fam, MOM, "is the sofa price right? check online", [

@@ -178,6 +178,8 @@ def build_tools(engine, inbound, member: dict, case: dict, now: datetime, outbox
     def run_command(command: str) -> str:
         """Run one of Ashline's commands for the person, exactly as if they had typed it. Commands:
         list · how much so far · review · ok · undo · export · pause · help · call me · delete my case ·
+        map (a plan of the home with a dot where each item was; use it for "where was...", "show the layout") ·
+        check my bank (finds card purchases that match items, then asks the owner before using what was paid) ·
         show photo N · show the ROOM · remove N · split N · price N AMOUNT · N is a NEW NAME
         (N is a number from the last list they were shown or from search_inventory)."""
         from .intent import valid_command

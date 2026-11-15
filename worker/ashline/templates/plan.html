@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>{{ name }} · Plan · Ashline</title>
+<!-- A link to this page may be previewed in a chat or on a lock screen: the preview names nothing about the family. -->
+<title>Plan of the home · Ashline</title>
+<meta property="og:title" content="Plan of the home · Ashline">
+<meta property="og:description" content="A private page for one family.">
 <link rel="icon" href="/static/img/favicon.png?v={{ v }}">
 <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png?v={{ v }}">
 <link rel="stylesheet" href="/static/brand.css?v={{ v }}">
@@ -179,6 +182,7 @@
 (function () {
   const L = {{ layout|tojson }};
   const token = {{ token|tojson }};
+  document.title = {{ name|tojson }} + " · Plan · Ashline";             // the home's name only once the page is open
   if (!L.rooms.length) return;
   const COLOURS = {furniture: "#8A5A2B", electronics: "#1F5FA8", appliances: "#4C5B69", kitchen: "#E1513A",
                    decor: "#7B3F98", lighting: "#C08A00", bedding: "#3E7CA6", clothing: "#2E8062", tools: "#6B6B3A",

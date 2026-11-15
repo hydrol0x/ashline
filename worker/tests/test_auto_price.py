@@ -194,3 +194,45 @@ def test_one_listing_keeps_the_3x_rule_except_against_a_fixed_figure():
     _, chair = chair_case("category default", 450.0, f=f)
     assert price_search.auto_price(f.case_id, f.store, [chair], Staged([90.0]), minimum=0) == []
     assert f.store.get_item(f.case_id, chair)["price_mid"] == 450
+
+
+def test_reach_more_items_and_cheaper_ones(monkeypatch):
+    assert (price_search.AUTO_TOP, price_search.AUTO_MIN, price_search.AUTO_AT_ONCE) == (12, 60.0, 3)
+    f, first = chair_case("claude estimate", 40.0, label="toaster")               # under $60: left alone
+    ids = [first] + [chair_case("claude estimate", 70.0 + n, label=f"thing {n}", f=f)[1] for n in range(14)]
+    staged = Staged([90.0, 95.0])
+    price_search.auto_price(f.case_id, f.store, ids, staged)
+    assert len(staged.asked) == 12 and "toaster" not in staged.asked and "thing 0" not in staged.asked   # the 12 dearest
+    monkeypatch.setenv("ASHLINE_AUTO_PRICE_TOP", "1")
+    monkeypatch.setenv("ASHLINE_AUTO_PRICE_MIN", "30")
+    again = Staged([30.0, 35.0])
+    price_search.auto_price(f.case_id, f.store, ids, again)
+    assert again.asked == ["thing 1"]                                              # what is left, dearest first
+
+
+def test_a_fixed_furniture_figure_is_looked_up_whatever_the_minimum():
+    f, sofa = chair_case("category default", 450.0, label="sofa")
+    _, lamp = chair_case("claude estimate", 450.0, label="side table", f=f)
+    staged = Staged([300.0, 320.0])
+    price_search.auto_price(f.case_id, f.store, [sofa, lamp], staged, minimum=1000)
+    assert staged.asked == ["sofa"]
+
+
+def test_at_most_three_lookups_at_once():
+    import threading
+    import time
+    lock, now = threading.Lock(), {"running": 0, "most": 0}
+
+    class Slow(Staged):
+        def lookup(self, description, brand=None, image=None):
+            with lock:
+                now["running"] += 1
+                now["most"] = max(now["most"], now["running"])
+            time.sleep(0.05)
+            with lock:
+                now["running"] -= 1
+            return super().lookup(description, brand, image)
+    f, first = chair_case("claude estimate", 100.0, label="thing a")
+    ids = [first] + [chair_case("claude estimate", 100.0, label=f"thing {n}", f=f)[1] for n in range(7)]
+    price_search.auto_price(f.case_id, f.store, ids, Slow([90.0, 95.0]), minimum=0)
+    assert now["most"] == 3

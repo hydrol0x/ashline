@@ -533,8 +533,10 @@ def price_check(case_id: str, store: Store | None = None, top: int = 20, searche
 
 
 # ------------------------------------------------- without being asked
-AUTO_TOP = 6                    # items looked up after each batch of new items, most valuable first
-AUTO_MIN = 150.0                # only items estimated at this much or more (for the whole quantity)
+AUTO_TOP = 12                   # items looked up after each batch of new items, most valuable first
+AUTO_MIN = 60.0                 # only items estimated at this much or more (for the whole quantity)
+AUTO_AT_ONCE = 3                # lookups running at the same time
+ALWAYS_WORTH = ("furniture", "electronics", "appliances")   # their fixed figures say nothing, so AUTO_MIN does not apply
 AUTO_TRUST = 3.0                # a lone listing is used unasked only within this factor of the estimate, either way
 AGREE = 2.0                     # two checked listings within this factor of each other are trusted whatever the estimate
 
@@ -543,6 +545,11 @@ def fixed_figure(item: dict) -> bool:
     """True when the item's estimate is the fixed figure for its whole category, which says
     nothing about this particular thing."""
     return (item.get("price_source") or "").startswith("category default")
+
+
+def worth(item: dict) -> float:
+    """What the line is thought to be worth, for choosing which to look up."""
+    return float(item.get("price_mid") or 0) * (item.get("qty") or 1)
 
 
 def trusted(result: dict, item: dict) -> bool:
@@ -598,8 +605,8 @@ def auto_price(case_id: str, store: Store, item_ids: list[int] | None = None, se
     wanted = set(item_ids) if item_ids is not None else None
     items = [i for i in store.get_items(case_id, canonical_only=True)
              if i["status"] != "rejected" and not kept_price(i) and (wanted is None or i["item_id"] in wanted)
-             and (i.get("price_mid") or 0) * (i.get("qty") or 1) >= minimum]
-    items.sort(key=lambda i: -((i.get("price_mid") or 0) * (i.get("qty") or 1)))
+             and (worth(i) >= minimum or (fixed_figure(i) and i.get("category") in ALWAYS_WORTH))]
+    items.sort(key=lambda i: -worth(i))
     items = items[:max(0, top)]
     if not items:
         return []
@@ -609,7 +616,7 @@ def auto_price(case_id: str, store: Store, item_ids: list[int] | None = None, se
         return find_price(item["label"], item.get("brand_guess"), searcher, image=pictures[item["item_id"]])
 
     from concurrent.futures import ThreadPoolExecutor
-    with ThreadPoolExecutor(max_workers=3) as pool:
+    with ThreadPoolExecutor(max_workers=AUTO_AT_ONCE) as pool:
         found = list(pool.map(look, items))
     results = []
     for item, result in zip(items, found):

@@ -197,6 +197,7 @@ def price_check(case_id: str, store: Store | None = None, top: int = 20, searche
 # ------------------------------------------------- without being asked
 AUTO_TOP = 6                    # items looked up after each batch of new items, most valuable first
 AUTO_MIN = 150.0                # only items estimated at this much or more (for the whole quantity)
+AUTO_TRUST = 3.0                # an unasked lookup is used only within this factor of the estimate, either way
 _news_lock = threading.Lock()
 
 
@@ -223,7 +224,9 @@ def auto_price(case_id: str, store: Store, item_ids: list[int] | None = None, se
 
     Considers `item_ids` (or every line), leaves out prices the family set, paid or already
     looked up, and anything estimated under `minimum`; takes the `top` most valuable. Lookups
-    run a few at a time. Each result is also kept as news for the chat to mention once.
+    run a few at a time. A found price far from the estimate (more than three times, or under a
+    third) is not used: with nobody watching, that is more likely the wrong product than a
+    better number. Each result is also kept as news for the chat to mention once.
     Returns [{item_id, label, price, retailer, before}].
     """
     searcher = searcher or get_searcher()
@@ -251,6 +254,9 @@ def auto_price(case_id: str, store: Store, item_ids: list[int] | None = None, se
     for item, result in zip(items, found):
         if not result.get("found"):
             continue
+        estimate = float(item.get("price_mid") or 0)
+        if estimate and not estimate / AUTO_TRUST <= float(result["price"]) <= estimate * AUTO_TRUST:
+            continue        # far from the estimate: likely the wrong product, so nobody's price changes unasked
         line = apply_price(store, case_id, item["item_id"], result, log=False)
         if line.startswith("Recorded"):
             results.append({"item_id": item["item_id"], "label": item["label"], "price": nice(result["price"]),

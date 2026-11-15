@@ -106,8 +106,11 @@ line as the one photographed in the dining room.
 
 ### Prices from what was paid or what it costs today
 
-- `ashline price-check --case demo --top 20` looks the most valuable items up online
-  (`price_search.py`, Claude's web search) and keeps the closest match's price with its link.
+- After each batch of new items the price agent looks the bigger ones up online by itself, in the
+  background, sending the item's photo along with its name (`price_search.py`, Claude's web
+  search). The closest match's price replaces the estimate, with its link, and the chat mentions
+  once what was found. A match far from the estimate is not used unasked. Turn it off with
+  `ASHLINE_AUTO_PRICE=off`. `ashline price-check --case demo --top 20` does the same on request.
 - `check my bank` in the chat, or `ashline bank --case demo`, matches the family's card purchases to
   items (`bank.py`, Capital One's Nessie mock bank, `NESSIE_API_KEY`). The owner sees the matches and
   says yes before any price changes; the purchase is kept as a bank record and counts as proof for

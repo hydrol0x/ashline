@@ -48,6 +48,8 @@ WHAT_HAPPENED = "One more question: what happened to the home? A fire, a flood, 
 INSURED_Q = "Do you have insurance that covers it? Yes, no or not sure is fine."
 TELEGRAM_PREFIX = "tg:"                            # chat and sender ids that came from the Telegram bridge
 ADDRESSED = re.compile(r"^\s*@?ashline\b[,:]?\s*", re.I)
+NOT_SURE = re.compile(r"(?:idk|i ?(?:don'?t|dont|do not) know|don'?t know|dont know|dunno|not sure|no idea|no clue|"
+                      r"skip|pass|\?+|)", re.I)       # "I don't know" to a setup question: skip it
 MEMORY_QUESTIONS = 6                    # a text "call" asks at most this many questions
 MEMORY_COMMANDS = ("help", "menu", "commands", "list", "export", "review", "undo", "map", "receipt", "call me",
                    "how much", "how much so far", "total", "check my bank", "show me the list", "what can you do?")
@@ -350,7 +352,10 @@ class Engine:
         return [Outbound(inbound.chat_id, INTRO)]
 
     def _continue_onboarding(self, inbound: Inbound, member: dict, case: dict, text: str) -> list[Outbound]:
+        skipped = bool(NOT_SURE.fullmatch(text.strip(" .!")))
         if member["state"]["step"] == "home_name":
+            if skipped:
+                text = ""
             name = re.sub(r"^(call it|it's|its)\s+", "", text, flags=re.I).strip(" .\"'") or "Our home"
             if not re.match(r"(the|our|my)\b", name, re.I):
                 name = f"The {name}"
@@ -361,7 +366,7 @@ class Engine:
 
         if member["state"]["step"] == "address":
             found = {"found": False}
-            if text.lower().strip(" .") not in ("skip", "no", "later", "not now"):
+            if text.lower().strip(" .") not in ("skip", "no", "later", "not now") and not skipped:
                 self.store.set_case(case["case_id"], address=text[:200])
                 try:
                     found = self.lookup(text)
@@ -415,11 +420,12 @@ class Engine:
                                               "I'll text you when it's done.")] + self._invite_messages(inbound, case) \
                 + [Outbound(inbound.chat_id, WHAT_HAPPENED)]
 
-        rooms = split_rooms(text)
+        rooms = [] if skipped else split_rooms(text)
         if rooms and not self.store.get_rooms(case["case_id"]):
             self.store.set_rooms(case["case_id"], [{"room_id": f"fam-{n}", "label": re.sub(r" \d+$", "", r), "name": r}
                                                    for n, r in enumerate(rooms, 1)], source="family")
-        self.store.set_case(case["case_id"], rooms_note=text[:300])
+        if not skipped:
+            self.store.set_case(case["case_id"], rooms_note=text[:300])
         self.store.set_member(member["member_id"], state={"step": "disaster"})
         out = self._invite_messages(inbound, case)
         out[0].text = "Thank you. " + out[0].text
@@ -432,6 +438,10 @@ class Engine:
         step, chat_id = member["state"].get("step"), inbound.chat_id
         if step == "disaster":
             kind = disaster.parse_disaster(text)
+            if not kind and NOT_SURE.fullmatch(text.strip(" .!")):
+                self.store.set_member(member["member_id"], state={})
+                return [Outbound(chat_id, "That's fine, we can leave it for now. "
+                                          "Send photos from inside the home whenever you're ready.")]
             if not kind:
                 return None
             self.store.set_case(case["case_id"], disaster=kind)
@@ -498,6 +508,10 @@ class Engine:
         """'the kitchen flooded' / 'bedroom was wind damage' / 'it was a hurricane', any time later."""
         low = text.lower().strip(" .!")
         said = re.fullmatch(r"(?:it was|it's|this was|that was|we had|there was)\s+(?:a |an )?(.+)", low)
+        if not said and not case.get("disaster") and re.fullmatch(           # a bare "fire" to the unanswered question
+                r"(?:a |an |the )?(?:house |forest |brush |grass |camp )?(?:fire|wildfire|flood|flooding|hurricane|storm|"
+                r"tropical storm|tornado|typhoon|derecho|nor'?easter|earthquake|landslide|mudslide|explosion|smoke)", low):
+            said = re.fullmatch(r"(.+)", low)
         if said and disaster.parse_disaster(said.group(1)) and not re.search(r"\b(room|kitchen|bed|bath)", low):
             kind = disaster.parse_disaster(said.group(1))
             self.store.set_case(case["case_id"], disaster=kind)
@@ -528,7 +542,8 @@ class Engine:
                              "when you create it. I'll link the group to this list on my own, and every photo anyone "
                              "drops in it goes into the same list. You can keep sending me photos here too.\n\n"
                              f"If I ever don't link a group, post {case['invite_code']} in it.")]
-        forward = (f"We're using Ashline to rebuild the {short} inventory. Text {case['invite_code']} to "
+        whose = "our home's" if re.fullmatch(r"(?:our|my) home", short, re.I) else f"the {short}"      # the default name
+        forward = (f"We're using Ashline to rebuild {whose} inventory. Text {case['invite_code']} to "
                    f"{self.number}, then send any photos from inside the house, from any year.")
         return [
             Outbound(inbound.chat_id,

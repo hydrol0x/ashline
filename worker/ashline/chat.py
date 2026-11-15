@@ -41,6 +41,9 @@ CODE = re.compile(r"\b(HOME-\d{4})\b", re.I)
 NEW_ITEMS = (r"(?:(?:no,?\s*)?(?:they|these|those|it|this|that)(?:'re| are| were| was|'s| is)?\s+)?(?:new|"
              r"not (?:previously |already )?(?:added|listed|on (?:the|my) list)|(?:were|was)n't (?:previously |already )?(?:added|listed)|"
              r"not the same(?: (?:ones?|things?|items?))?|different(?: (?:ones?|things?|items?))?)")
+LOSS_DATE = re.compile(r"(?:it happened|it was|this was|that was|the (?:fire|flood|storm|hurricane|disaster) (?:was|happened)|"
+                       r"(?:the )?date of (?:the )?loss(?: is| was|:)?|loss date(?: is| was|:)?|date(?: is| was|:)?)\s+(?:in |on |back in )?"
+                       r"(?P<when>.*\b20\d\d\b.*)")
 ADDRESS_CMD = re.compile(r"(?:(?:the |our |my )?(?:home |house |street )?address(?: is|:)?|we lived at|it was at|it's at)\s+(?P<addr>\d.+)", re.I)
 ADDRESS = re.compile(r"\d{1,6}\s+(?:[NSEW]\.?\s+)?[\w .'-]{2,40}\s(?:st|street|ave|avenue|rd|road|blvd|boulevard|dr|drive|ln|lane|way|"
                      r"ct|court|pl|place|ter|terrace|pkwy|parkway|hwy|highway|cir|circle|trl|trail)\b\.?(?:[ ,].*)?", re.I)
@@ -132,8 +135,11 @@ def parse_date(text: str) -> str | None:
         year, month, day = (int(g) for g in match.groups())
     else:
         match = re.search(r"\b(\d{1,2})/(\d{1,2})/(20\d\d)\b", low)
+        short = re.search(r"\b(\d{1,2})/(20\d\d)\b", low)
         if match:
             month, day, year = (int(g) for g in match.groups())
+        elif short:
+            month, year, day = int(short.group(1)), int(short.group(2)), 1
         else:
             month = next((n for n, name in enumerate(MONTHS, 1) if re.search(rf"\b{name[:3]}[a-z]*\b", low)), None)
             year = re.search(r"\b(20\d\d)\b", low)
@@ -267,7 +273,8 @@ class Engine:
             self.store.set_member(member["member_id"], dm_chat=inbound.chat_id)          # where to reach them 1:1
 
         step = member["state"].get("step")
-        if step in ("home_name", "address", "use_scan", "loss_date", "rooms") and not inbound.is_group:
+        asked_here = member["state"].get("later") and step in ("use_scan", "loss_date")   # asked after setup, maybe in a group
+        if step in ("home_name", "address", "use_scan", "loss_date", "rooms") and (not inbound.is_group or asked_here):
             return self._continue_onboarding(inbound, member, case, text)
         if step in ("disaster", "flooded", "insured") and not inbound.is_group and not (inbound.attachments or inbound.missing):
             answered = self._answer_setup(inbound, member, case, text)
@@ -438,6 +445,8 @@ class Engine:
             if not kind:
                 return None
             self.store.set_case(case["case_id"], disaster=kind)
+            if parse_date(text):                            # "a fire, in January 2025": keep the date too
+                self.store.set_case(case["case_id"], loss_date=parse_date(text))
             if kind == disaster.STORM:
                 self.store.set_member(member["member_id"], state={"step": "flooded"})
                 return [Outbound(chat_id, "I'm sorry. After a hurricane or storm there are usually two claims: flood "
@@ -1326,6 +1335,14 @@ class Engine:
             self.store.set_member(member["member_id"], state={"step": "loss_date", "scan": offered, "later": True})
             return [Outbound(chat_id, "When did it happen? A month and year is enough. It lets me use an aerial photo "
                                       "of the home from before it. You can say skip.")]
+        loss = LOSS_DATE.fullmatch(low)
+        if loss and owner and parse_date(loss.group("when")):
+            when = parse_date(loss.group("when"))
+            self.store.set_case(case_id, loss_date=when)
+            pretty = datetime.fromisoformat(when).strftime("%B %Y" if when.endswith("-01") else "%B %-d, %Y")
+            return [Outbound(chat_id, f"Saved: it happened in {pretty}." + (
+                f" The proof of loss is due in {meter(case_id, self.store)['days_left']} days."
+                if meter(case_id, self.store)["days_left"] is not None else ""))]
         said = ADDRESS_CMD.fullmatch(text.strip())
         address = said.group("addr") if said else (text.strip() if ADDRESS.fullmatch(text.strip()) else None)
         if address and owner:

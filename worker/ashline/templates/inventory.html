@@ -106,6 +106,30 @@
                   background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%);
                   background-position: calc(100% - 13px) 50%, calc(100% - 8px) 50%; background-size: 5px 5px; background-repeat: no-repeat; cursor: pointer; }
   .close { position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border-radius: 16px; border: 0; background: rgba(0,0,0,.45); color: #fff; font-size: 16px; cursor: pointer; z-index: 2; }
+  .review { display: flex; align-items: center; gap: 12px; justify-content: space-between; background: #E6F0EF; border: 1px solid #C9DEDC;
+            border-radius: 14px; padding: 12px 14px; margin: 0 0 14px; }
+  .review b { display: block; font-size: 14.5px; }
+  .review div > span { font-size: 12.5px; color: var(--muted); }
+  .review .btn { flex: none; padding: 10px 18px; font-weight: 600; }
+  .progress { display: flex; justify-content: space-between; align-items: center; font-size: 12.5px; color: var(--muted); margin: 0 0 10px; }
+  .link { border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; padding: 4px 0; cursor: pointer; }
+  .price-line { font-weight: 600; font-size: 15px !important; }
+  .sheet .small { font-size: 12.5px; }
+  .state { font-size: 13px; font-weight: 600; color: var(--muted); }
+  .state.ok { color: var(--accent); }
+  .decide { display: grid; grid-template-columns: 1fr 2fr; gap: 10px; margin-top: 16px; }
+  .decide .btn:only-child { grid-column: 1 / -1; }
+  .btn.big { padding: 14px 16px; font-size: 16px; font-weight: 600; border-radius: 12px; }
+  .sheet .row .btn { flex: 1 1 0; font-size: 13.5px; padding: 10px 8px; }
+  .done { text-align: center; padding: 26px 8px 8px; }
+  .done-mark { width: 56px; height: 56px; border-radius: 28px; background: var(--accent); color: #fff; font-size: 28px; line-height: 56px; margin: 0 auto 12px; }
+  .done .btn { width: 100%; margin-top: 14px; }
+  dialog { overscroll-behavior: contain; }
+  .sheet { padding-bottom: max(18px, env(safe-area-inset-bottom)); }
+  @media (max-width: 639px) {
+    dialog { width: 100vw; max-height: 94vh; }
+    .sightings img { max-height: 40vh; }
+  }
 </style>
 </head>
 <body>
@@ -142,6 +166,12 @@
     {% endif %}
   </section>
 
+  {% if role == 'owner' %}
+  <div class="review" id="review" hidden>
+    <div><b>Check <span id="review-count"></span></b><span>Tap yes or no on each one. It takes a few seconds per item.</span></div>
+    <button class="btn" type="button" id="review-start">Start</button>
+  </div>
+  {% endif %}
   <nav class="chips" aria-label="Rooms">
     <button class="chip" aria-pressed="true" data-room="">All<span>{{ items|length }}</span></button>
     {% for room, count in rooms %}<button class="chip" aria-pressed="false" data-room="{{ room }}">{{ room }}<span>{{ count }}</span></button>{% endfor %}
@@ -247,35 +277,91 @@
   }
   function el(tag, text, cls) { var e = document.createElement(tag); if (text != null) e.textContent = text; if (cls) e.className = cls; return e; }
 
-  var dialog = document.getElementById('detail');
+  var dialog = document.getElementById('detail'), dirty = false, current = null;
+  function cards() { return grid ? [].slice.call(grid.querySelectorAll('.item')) : []; }
+  function toCheck() { return cards().filter(function (c) { return !c.hidden && c.dataset.review === '1'; }); }
+  function nextAfter(id) {
+    var all = cards().filter(function (c) { return !c.hidden; }), i = all.findIndex(function (c) { return c.dataset.id === String(id); });
+    for (var k = 1; k <= all.length; k++) { var c = all[(i + k) % all.length]; if (c.dataset.review === '1' && c.dataset.id !== String(id)) return c; }
+    return null;
+  }
+  function markCard(id, status) {
+    var card = grid && grid.querySelector('.item[data-id="' + id + '"]');
+    if (!card) return;
+    card.classList.remove('suggested', 'confirmed', 'rejected'); card.classList.add(status);
+    card.dataset.review = status === 'suggested' ? '1' : '0';
+    var foot = card.querySelector('.foot span');
+    if (foot) foot.textContent = foot.textContent.replace(' · to check', '') + (status === 'rejected' ? ' · removed' : status === 'confirmed' ? ' · ✓' : '');
+    refreshReview();
+  }
+  function refreshReview() {
+    var n = toCheck().length, bar = document.getElementById('review');
+    if (!bar) return;
+    bar.hidden = n === 0;
+    var c = document.getElementById('review-count'); if (c) c.textContent = n + (n === 1 ? ' item' : ' items');
+  }
+  function goNext(id) {
+    var next = nextAfter(id);
+    if (next) open(next.dataset.id); else allDone();
+  }
+  function allDone() {
+    var strip = document.getElementById('sightings'), sheet = document.getElementById('sheet');
+    strip.innerHTML = ''; sheet.innerHTML = '';
+    var box = el('div', null, 'done');
+    box.appendChild(el('div', '✓', 'done-mark'));
+    box.appendChild(el('h2', 'All caught up'));
+    box.appendChild(el('p', 'Every item here has an answer. Your totals update when you close this.', 'muted'));
+    var b = el('button', 'Done', 'btn big'); b.type = 'button';
+    b.addEventListener('click', function () { dialog.close(); });
+    box.appendChild(b); sheet.appendChild(box);
+    if (!dialog.open) dialog.showModal();
+  }
   function open(id) {
+    current = id;
     fetch('/p/' + token + '/item/' + id + '.json').then(function (r) { return r.json(); }).then(function (d) {
+      if (current !== id) return;
       var strip = document.getElementById('sightings'), sheet = document.getElementById('sheet');
-      strip.innerHTML = ''; sheet.innerHTML = '';
-      d.sightings.forEach(function (s) {
+      strip.innerHTML = ''; sheet.innerHTML = ''; strip.scrollLeft = 0;
+      d.sightings.forEach(function (s, n) {
         var fig = el('figure');
         if (s.image) { var img = el('img'); img.src = s.image; img.alt = s.label; fig.appendChild(img); }
         else { fig.appendChild(el('div', '“' + s.label + '”', 'quote')); }
-        fig.appendChild(el('figcaption', [s.source, s.by !== s.source ? s.by : null, s.date].filter(Boolean).join(' · ')));
+        fig.appendChild(el('figcaption', [d.sightings.length > 1 ? (n + 1) + ' of ' + d.sightings.length : null, s.source, s.by !== s.source ? s.by : null, s.date].filter(Boolean).join(' · ')));
         strip.appendChild(fig);
       });
+      var reviewing = d.status === 'suggested';
+      if (reviewing && d.editable) {
+        var left = toCheck().length, top = el('div', null, 'progress');
+        top.appendChild(el('span', left + ' left to check'));
+        var skip = el('button', 'Skip →', 'link'); skip.type = 'button';
+        skip.addEventListener('click', function () { goNext(id); });
+        if (left > 1) top.appendChild(skip);
+        sheet.appendChild(top);
+      }
       sheet.appendChild(el('h2', d.title));
       sheet.appendChild(el('p', [d.room, d.category, d.brand].filter(Boolean).join(' · '), 'muted'));
-      if (d.price) sheet.appendChild(el('p', d.price));
-      sheet.appendChild(el('p', d.price_basis, 'muted'));
-      if (d.sightings.length > 1) sheet.appendChild(el('p', 'Seen ' + d.sightings.length + ' times. Swipe the photo to see each one.', 'muted'));
+      if (d.price) sheet.appendChild(el('p', d.price, 'price-line'));
+      sheet.appendChild(el('p', d.price_basis, 'muted small'));
+      if (d.sightings.length > 1) sheet.appendChild(el('p', 'Seen in ' + d.sightings.length + ' photos. Swipe to see each one.', 'muted small'));
+      if (d.status === 'confirmed') sheet.appendChild(el('p', '✓ Confirmed as yours', 'state ok'));
+      if (d.status === 'rejected') sheet.appendChild(el('p', 'Removed from the list', 'state'));
       if (d.editable) {
-        var row = el('div', null, 'row'), editor = el('form', null, 'editor');
+        var main = el('div', null, 'decide'), row = el('div', null, 'row'), editor = el('form', null, 'editor');
         editor.hidden = true;
-        function send(body, btn) {
+        function send(body, btn, after) {
+          var old = btn ? btn.textContent : '';
           if (btn) { btn.disabled = true; btn.textContent = 'Saving…'; }
-          return post('/item/' + id, body).then(function () { location.reload(); })
+          return post('/item/' + id, body).then(function () { dirty = true; after(); })
             .catch(function () { if (btn) { btn.disabled = false; btn.textContent = 'Try again'; } });
+        }
+        function decide(action, status, btn) {
+          send({ action: action }, btn, function () { markCard(id, status); goNext(id); });
         }
         function edit(title, hint, value, kind, action) {
           editor.innerHTML = '';
           var label = el('label', title, 'editor-label'), input = el('input');
           input.type = 'text'; input.value = value == null ? '' : value; input.required = true;
+          input.setAttribute('enterkeyhint', 'done');
           if (kind === 'qty') { input.inputMode = 'numeric'; input.pattern = '[0-9]*'; }
           if (kind === 'money') { input.inputMode = 'decimal'; input.placeholder = 'e.g. 450'; }
           var wrap = el('div', null, 'editor-field' + (kind === 'money' ? ' money' : ''));
@@ -283,7 +369,7 @@
           wrap.appendChild(input);
           var buttons = el('div', null, 'editor-buttons'), save = el('button', 'Save', 'btn'), cancel = el('button', 'Cancel', 'btn quiet');
           save.type = 'submit'; cancel.type = 'button';
-          cancel.addEventListener('click', function () { editor.hidden = true; row.hidden = false; });
+          cancel.addEventListener('click', function () { editor.hidden = true; main.hidden = false; row.hidden = false; });
           buttons.appendChild(cancel); buttons.appendChild(save);
           editor.appendChild(label); if (hint) editor.appendChild(el('p', hint, 'editor-hint'));
           editor.appendChild(wrap); editor.appendChild(buttons);
@@ -291,28 +377,38 @@
             e.preventDefault();
             var v = input.value.trim();
             if (!v) { input.focus(); return; }
-            send({ action: action, value: v }, save);
+            send({ action: action, value: v }, save, function () { open(id); });
           };
-          row.hidden = true; editor.hidden = false; input.focus(); input.select();
+          main.hidden = true; row.hidden = true; editor.hidden = false; input.focus(); input.select();
         }
-        function act(label, onClick, quiet) {
-          var b = el('button', label, 'btn' + (quiet ? ' quiet' : ''));
-          b.type = 'button';
+        function act(parent, label, cls, onClick) {
+          var b = el('button', label, 'btn ' + cls); b.type = 'button';
           b.addEventListener('click', function () { onClick(b); });
-          row.appendChild(b);
+          parent.appendChild(b);
         }
-        if (d.status === 'suggested') act('Yes, this was ours', function (b) { send({ action: 'confirm' }, b); });
-        act('Fix name', function () { edit('What is it?', 'Be as specific as you can, e.g. "Pottery Barn arc floor lamp".', d.label, 'text', 'rename'); }, true);
-        act('Quantity', function () { edit('How many were there?', null, d.qty, 'qty', 'qty'); }, true);
-        act('Set price', function () { edit('What does one cost to buy new?', 'Your number replaces the estimate and is marked as set by the family.', d.price_mid ? Math.round(d.price_mid) : '', 'money', 'price'); }, true);
-        act('Remove', function (b) { send({ action: 'remove' }, b); }, true);
+        if (reviewing) {
+          act(main, 'Not ours', 'quiet big', function (b) { decide('remove', 'rejected', b); });
+          act(main, 'Yes, this was ours', 'big', function (b) { decide('confirm', 'confirmed', b); });
+        } else if (d.status === 'rejected') {
+          act(main, 'Put it back', 'quiet big', function (b) { send({ action: 'restore' }, b, function () { markCard(id, 'suggested'); open(id); }); });
+        }
+        act(row, 'Fix name', 'quiet', function () { edit('What is it?', 'Be as specific as you can, e.g. "Pottery Barn arc floor lamp".', d.label, 'text', 'rename'); });
+        act(row, 'Quantity', 'quiet', function () { edit('How many were there?', null, d.qty, 'qty', 'qty'); });
+        act(row, 'Set price', 'quiet', function () { edit('What does one cost to buy new?', 'Your number replaces the estimate and is marked as set by the family.', d.price_mid ? Math.round(d.price_mid) : '', 'money', 'price'); });
+        if (d.status === 'confirmed') act(row, 'Remove', 'quiet', function (b) { decide('remove', 'rejected', b); });
+        if (main.children.length) sheet.appendChild(main);
         sheet.appendChild(row); sheet.appendChild(editor);
       }
-      dialog.showModal();
+      if (!dialog.open) dialog.showModal();
+      dialog.scrollTop = 0;
     });
   }
   if (grid) grid.addEventListener('click', function (e) { var card = e.target.closest('.item'); if (card) open(card.dataset.id); });
+  var start = document.getElementById('review-start');
+  if (start) start.addEventListener('click', function () { var first = toCheck()[0]; if (first) open(first.dataset.id); });
+  refreshReview();
   document.getElementById('close').addEventListener('click', function () { dialog.close(); });
+  dialog.addEventListener('close', function () { current = null; if (dirty) location.reload(); });
   dialog.addEventListener('click', function (e) { if (e.target === dialog) dialog.close(); });
 
   var form = document.getElementById('coverage');

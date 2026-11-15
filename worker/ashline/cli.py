@@ -171,7 +171,7 @@ def _run(args, parser) -> None:
         if searcher is not None and args.verbose:
             searcher.trace = print                         # what was looked for, found, kept and dropped
         if searcher is not None and not args.verbose:
-            print(f"Looking up to {args.top} items up online, three at a time. Each takes a minute or two; "
+            print(f"Looking up as many as {args.top} items online, three at a time. Each takes a minute or two; "
                   "a line appears as each one finishes.", flush=True)
         try:
             print(json.dumps(price_check(args.case, top=args.top, searcher=searcher, report=print), indent=1))

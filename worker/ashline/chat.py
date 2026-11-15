@@ -429,8 +429,8 @@ class Engine:
             if not re.match(r"(the|our|my)\b", name, re.I):
                 name = f"The {name}"
             self.store.set_case(case["case_id"], name=name[:60])
-            if not config.env("ASHLINE_ASK_ADDRESS", "").lower() in ("1", "on", "yes", "true"):
-                # Demo setting: the address question is off. "address 12 Oak St" still works any time.
+            if config.env("ASHLINE_ASK_ADDRESS", "on").lower() in ("0", "off", "no", "false"):
+                # ASHLINE_ASK_ADDRESS=off skips the address question. "address 12 Oak St" still works any time.
                 self.store.set_member(member["member_id"], state={"step": "rooms"})
                 return [Outbound(inbound.chat_id, "Which rooms did it have? A rough list is fine.")]
             self.store.set_member(member["member_id"], state={"step": "address"})

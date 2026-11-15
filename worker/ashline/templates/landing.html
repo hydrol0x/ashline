@@ -84,10 +84,10 @@
       <span class="loop">photos<svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><path d="M8 22 C 6 6, 70 2, 92 12 C 104 18, 90 36, 52 36 C 18 36, 2 30, 10 16 C 14 10, 30 6, 46 6"/></svg></span>
       already have it.</h1>
     <p class="lede">After a fire, a flood or a hurricane, text Ashline the pictures you already have: a birthday in the living room, last year’s holiday table, a listing photo from when you bought the house. It finds each thing, gives it an honest price range, and keeps one list the whole family adds to.</p>
-    <div class="act">
-      {% if number %}<a class="btn" href="sms:{{ number }}&body=hi">Text Ashline</a>
-      <small>or send <b>hi</b> to <b>{{ number_display }}</b> from iMessage</small>{% endif %}
-    </div>
+    {% if number %}<div class="act">
+      <a class="btn" href="sms:{{ number }}&body=hi">Text Ashline</a>
+      <small>or send <b>hi</b> to <b>{{ number_display }}</b> from iMessage</small>
+    </div>{% endif %}
     <p><a href="/check">See if there is a 3D scan of your home from before</a></p>
   </div>
 </div>

@@ -611,12 +611,22 @@ def build(case_id: str, store, drawn: dict | None = None) -> dict:
             else APPROX_NOTE if plan.get("approx") else SCAN_NOTE)
     return {"kind": plan["kind"], "note": note,
             "width": round(max(cursor - FLOOR_GAP, 1.0), 2) if shift else 1.0, "height": round(max(height, 1.0), 2),
-            "floors": [{"id": f, "label": labels.get(f) or "", "x": round(shift[f][0], 2)} for f in floors if f in shift]
+            "floors": [{"id": f, "label": floor_label(labels.get(f)), "x": round(shift[f][0], 2)} for f in floors if f in shift]
             if len(shift) > 1 else [],
             "rooms": rooms, "pins": pins, "dotted": dotted,
             "tour": tour_url((store.get_home(case_id) or {}).get("sid")) if plan["kind"] == "scan" else None,
             "records": home_records(case_id, store),
-            "unplaced": sum(1 for p in pins if p["x"] is None and p["room_id"] is None)}
+            "unplaced": sum(1 for p in pins if p["x"] is None and p["room_id"] is None),
+            # of those: the ones with no room at all, and the ones in a room the plan has no outline for
+            "roomless": sum(1 for p in pins if p["x"] is None and p["room_id"] is None and not p["room"]),
+            "off_plan": sum(1 for p in pins if p["x"] is None and p["room_id"] is None and p["room"])}
+
+
+def floor_label(label: str | None) -> str:
+    """A floor's name as people say it: the scan's own label when it is a name ("Floor 1",
+    "Basement"), "Floor 2" when it is a bare number."""
+    label = (label or "").strip()
+    return f"Floor {label}" if label and label[0].isdigit() else label
 
 
 # ----------------------------------------------------- model sketch, kept
@@ -687,7 +697,7 @@ def render_png(layout: dict, path: str | Path, width: int = 1400) -> Path:
                 draw.text((x - (box[2] - box[0]) / 2, y + 16), count, fill="#6b6a65", font=small)
     for floor in layout.get("floors") or []:
         if floor.get("label"):
-            draw.text((at(floor["x"], 0)[0], pad - 30), f"Floor {floor['label']}", fill="#6b6a65", font=small)
+            draw.text((at(floor["x"], 0)[0], pad - 30), floor["label"], fill="#6b6a65", font=small)
     draw.text((pad, height - 34), layout["note"], fill="#6b6a65", font=small)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)

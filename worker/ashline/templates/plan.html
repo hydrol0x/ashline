@@ -79,10 +79,18 @@
   .shapename { font-size: calc(var(--us, var(--u)) * 0.72px); fill: var(--ink-2); text-anchor: middle; dominant-baseline: central;
                pointer-events: none; font-weight: 600; }
   .halo { fill: #C9CCD1; fill-opacity: 0.55; pointer-events: none; }
+  .halo.under { fill-opacity: 0; }                        /* under the open room's name: the name stays readable */
   .pin { stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; cursor: pointer; }
   .pin.suggested { fill-opacity: 0.85; }
   .pin.on { stroke: var(--ink); stroke-width: 2.6; }
   .hide { display: none; }
+  /* A visible ring for the keyboard, on the plan and beside it. */
+  .room:focus { outline: none; }
+  .room:focus-visible { stroke: var(--red); stroke-width: 3.5; stroke-dasharray: none; }
+  .shape:focus, .pin:focus { outline: none; }
+  .shape:focus-visible { stroke: var(--ink); stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+  .pin:focus-visible { stroke: var(--ink); stroke-width: 3.2; }
+  .side tr:focus-visible, .side li:focus-visible, .side a:focus-visible { outline: 2.5px solid var(--ink); outline-offset: 2px; border-radius: 10px; }
 
   .tip { position: absolute; pointer-events: none; background: var(--ink); color: #fff; font-size: 13px; padding: 6px 11px;
          border-radius: 999px; white-space: nowrap; transform: translate(-50%, -150%); z-index: 2; }
@@ -145,23 +153,25 @@
   <a class="back" href="/p/{{ token }}">Back to the list</a>
   <div class="head">
     <h1>Where things were</h1>
-    {% if layout.kind == 'sketch' %}
+    {% if not layout.rooms %}
+    {% elif layout.kind == 'sketch' %}
     <span class="pill rough"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 2.5l2.5 2.5L6 12.5 3 13l.5-3z"/></svg>Sketch from your photos · not to scale</span>
     {% else %}
     <span class="pill">Rooms measured by the 3D scan</span>
     {% endif %}
-    {% if layout.rooms %}<div class="chips" id="chips"></div>{% endif %}
+    {% if layout.rooms and layout.pins %}<div class="chips" id="chips"></div>{% endif %}
   </div>
 
   {% if layout.rooms %}
   <div class="layout">
     <div class="main">
     <div class="card canvas">
-      <svg id="plan" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Plan of the home"></svg>
+      <svg id="plan" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Plan of the home"></svg>
       <div class="tip" id="tip" hidden></div>
       <div class="under">
         <span class="why">{{ layout.note }}</span>
-        {% if layout.unplaced %}<span class="pill rough">{{ layout.unplaced }} item{{ '' if layout.unplaced == 1 else 's' }} with no room yet</span>{% endif %}
+        {% if layout.off_plan %}<span class="pill rough">{{ layout.off_plan }} item{{ '' if layout.off_plan == 1 else 's' }} in rooms not on the plan</span>{% endif %}
+        {% if layout.roomless %}<span class="pill rough">{{ layout.roomless }} item{{ '' if layout.roomless == 1 else 's' }} with no room yet</span>{% endif %}
         <div class="zoom"><button id="out" aria-label="Zoom out">−</button><button id="in" aria-label="Zoom in">+</button><button id="fit" aria-label="Show everything">⤢</button></div>
       </div>
     </div>
@@ -199,22 +209,38 @@
     for (const k in attrs) n.setAttribute(k, attrs[k]); if (text != null) n.textContent = text; return n; };
   const html = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls;
     if (text != null) n.textContent = text; return n; };
+  // Reachable with Tab and opened with Enter or Space, like a button.
+  const pressable = (n, name, fn) => { n.setAttribute("tabindex", "0"); n.setAttribute("role", "button");
+    if (name) n.setAttribute("aria-label", name);
+    n.addEventListener("keydown", ev => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); fn(); } }); return n; };
 
   const pad = 0.8, full = {x: -pad, y: -pad, w: L.width + 2 * pad, h: L.height + 2 * pad};
   let view = Object.assign({}, full);
   let resize = () => {};                                               // set once the drawing exists
-  const apply = () => { svg.setAttribute("viewBox", [view.x, view.y, view.w, view.h].join(" ")); resize(); };
+  const keep = (at, size, start, whole) => {                           // at least a third of the home stays in view
+    const m = Math.min(whole / 3, size);
+    return Math.min(Math.max(at, start - size + m), start + whole - m);
+  };
+  const apply = () => { view.x = keep(view.x, view.w, full.x, full.w); view.y = keep(view.y, view.h, full.y, full.h);
+    svg.setAttribute("viewBox", [view.x, view.y, view.w, view.h].join(" ")); resize(); };
   apply();
   svg.style.aspectRatio = full.w + " / " + full.h;
   const unit = Math.min(Math.max(full.w / 62, 0.3), 0.7);              // text and dots grow with the size of the home
   svg.style.setProperty("--u", unit);
 
   // A thing has a dot only when its place is known; its room counts it either way.
-  const placed = L.pins.filter(p => p.x != null), loose = L.pins.filter(p => p.x == null && p.room_id == null);
+  const placed = L.pins.filter(p => p.x != null), loose = L.pins.filter(p => p.x == null && p.room_id == null && !p.room);
+  // A room the family named that the plan has no outline for (a garage the scan left out): its
+  // things are listed under its name, and none is drawn.
+  const offKey = p => p.x == null && p.room_id == null && p.room ? "off:" + p.room.toLowerCase() : null;
+  const offRooms = [];
+  L.pins.forEach(p => { const k = offKey(p); if (k && !offRooms.some(r => r.id === k)) offRooms.push({id: k, name: p.room, off: true, points: []}); });
+  const roomOf = p => p.room_id != null ? p.room_id : offKey(p);
+  const findRoom = id => L.rooms.find(x => x.id === id) || offRooms.find(x => x.id === id);
   const rough = L.kind === "sketch";
   let room = null, pinOn = null, only = null, more = false;            // the open room, the lit dot, one category or all
   const seen = p => only === null || p.category === only;
-  const shownIn = id => L.pins.filter(p => p.room_id === id && seen(p));
+  const shownIn = id => L.pins.filter(p => roomOf(p) === id && seen(p));
   const worth = pins => pins.reduce((s, p) => s + p.value, 0);
   const priced = p => p.value ? money(p.value) : "";
 
@@ -222,11 +248,12 @@
         gHalo = svg.appendChild(el("g")), gPins = svg.appendChild(el("g")), gText = svg.appendChild(el("g"));   // names on top
   const SHAPES_AT = 0.72, DOTS_AT = 0.42;                              // how far in before furniture, then everything, appears
   const detail = () => view.w / full.w;                                 // 1 = the whole home, smaller = closer
-  L.floors.forEach(f => gText.appendChild(el("text", {x: f.x, y: -0.25 * unit, class: "floor"}, f.label ? "Floor " + f.label : "")));
+  L.floors.forEach(f => gText.appendChild(el("text", {x: f.x, y: -0.25 * unit, class: "floor"}, f.label || "")));
   const roomNodes = {}, pinNodes = {}, haloNodes = {}, shapeNodes = {}, labels = {};
   L.rooms.forEach(r => {
     const node = el("polygon", {points: r.points.map(p => p.join(",")).join(" "), class: "room" + (rough ? " sketch" : "")});
     node.addEventListener("click", () => { if (!moved) select(room === r.id ? null : r.id); });
+    pressable(node, r.name || "Room", () => select(room === r.id ? null : r.id));
     gRooms.appendChild(node); roomNodes[r.id] = node;
     (r.doors || []).forEach(d => gDoors.appendChild(el("line", {x1: d[0][0], y1: d[0][1], x2: d[1][0], y2: d[1][1], class: "door"})));
     const xs = r.points.map(p => p[0]), ys = r.points.map(p => p[1]);
@@ -235,10 +262,14 @@
     if (rough) {                                                        // a sketched room: its name in the corner, as on a drawing
       label.name = gText.appendChild(el("text", {x: x0 + unit * 0.6, y: y0 + unit * 1.5, class: "name"}, r.name));
       label.about = gText.appendChild(el("text", {x: x0 + unit * 0.6, y: y0 + unit * 2.6, class: "about"}, ""));
-      label.at = label.small ? null : [x0 + wide / 2, y0 + tall / 2 + unit * 0.8];
+      label.tall = tall;
+      // A small room keeps its count, in its middle and a little smaller; only its name may give way.
+      label.at = label.small ? [x0 + wide / 2, y0 + tall / 2] : [x0 + wide / 2, y0 + tall / 2 + unit * 0.8];
+      label.k = label.small ? 0.8 : 1;
     } else {                                                            // a measured room can be any shape: label where it is widest
       if (r.name && r.area >= 2) label.name = gText.appendChild(el("text", {x: r.label_at[0], y: r.label_at[1], class: "name mid"}, r.name));
       label.at = [r.label_at[0], r.label_at[1] + (label.name ? unit * 1.5 : 0)];
+      label.tall = tall; label.k = 1;
     }
     if (label.at) {                                                     // a count in a circle stands for the room's things until it is opened
       const g = gText.appendChild(el("g", {class: "bubble", transform: "translate(" + label.at[0] + "," + label.at[1] + ")"}));
@@ -251,6 +282,7 @@
     node.addEventListener("click", ev => { ev.stopPropagation(); if (!moved) show(p); });
     node.addEventListener("pointerenter", () => { if (!tip.classList.contains("thing")) hint(p, node); });
     node.addEventListener("pointerleave", () => { if (!tip.classList.contains("thing")) tip.hidden = true; });
+    pressable(node, cap(p.label), () => show(p));                       // hidden footprints are out of the Tab order
     const cx = p.shape.reduce((a, c) => a + c[0], 0) / 4, cy = p.shape.reduce((a, c) => a + c[1], 0) / 4;
     const edge = (a, b) => Math.hypot(p.shape[a][0] - p.shape[b][0], p.shape[a][1] - p.shape[b][1]);
     shapeNodes[p.id] = {node: node, name: gText.appendChild(el("text", {x: cx, y: cy, class: "shapename"}, p.short || "")),
@@ -262,6 +294,7 @@
     node.addEventListener("click", ev => { ev.stopPropagation(); if (!moved) show(p); });
     node.addEventListener("pointerenter", () => { if (!tip.classList.contains("thing")) hint(p, node); });
     node.addEventListener("pointerleave", () => { if (!tip.classList.contains("thing")) tip.hidden = true; });
+    pressable(node, cap(p.label), () => show(p));                       // hidden dots are out of the Tab order
     gPins.appendChild(node); pinNodes[p.id] = node;
   });
 
@@ -276,15 +309,57 @@
         label.name.setAttribute("x", label.x0 + u * 0.6); label.name.setAttribute("y", label.y0 + u * 1.5);
         label.about.setAttribute("x", label.x0 + u * 0.6); label.about.setAttribute("y", label.y0 + u * 2.6);
       }
-      if (label.bubble) label.bubble.setAttribute("transform", "translate(" + label.at[0] + "," + label.at[1] + ") scale(" + z + ")");
-      if (label.name) {                                                 // a name that would spill over its neighbours is left off
-        const fits = (r.name || "").length * 0.56 * u <= label.wide * 1.08;
-        label.name.classList.toggle("hide", !fits);
-        if (label.about) label.about.classList.toggle("hide", !fits);
-      }
+      if (label.bubble) label.bubble.setAttribute("transform", "translate(" + label.at[0] + "," + label.at[1] + ") scale(" + z * label.k + ")");
     });
     placed.forEach(p => { pinNodes[p.id].setAttribute("r", u * 0.36); haloNodes[p.id].setAttribute("r", u * 0.66); });
+    curU = u; fit();
   };
+
+  // Which words fit: a name that would spill over its room is left off, measured as drawn (so it is
+  // shown for a moment to be measured), with no overflow at all. A small room with things shows
+  // its count in a bubble when its words do not fit. Then furniture names that would cover
+  // another name are left off, and grey halos under the open room's name are faded.
+  let curU = unit;
+  const grow = (b, m) => ({x: b.x - m, y: b.y - m, w: b.width + 2 * m, h: b.height + 2 * m});
+  const meets = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+  function measures(node, room) { node.classList.remove("hide"); return node.textContent && node.getComputedTextLength() <= room; }
+  function fit() {
+    const u = curU, taken = [];
+    L.rooms.forEach(r => {
+      const label = labels[r.id];
+      let named = false, counted = false;
+      if (label.name) {
+        const room = rough ? label.wide - u * 1.2 : label.wide - u * 0.8;
+        named = measures(label.name, room) && label.tall >= (rough ? u * 1.9 : u * 1.2);
+        if (label.about) counted = named && measures(label.about, room) && label.tall >= u * 3.1;
+      }
+      const want = !!label.bubble && !!label.want;
+      if (want && rough && label.small && !counted) named = false;   // its count goes in the bubble, over the name
+      if (label.name) label.name.classList.toggle("hide", !named);
+      if (label.about) label.about.classList.toggle("hide", !counted);
+      if (label.bubble) label.bubble.classList.toggle("hide", !want || (rough && label.small && counted));
+      label.block = null;
+      [named && label.name, counted && label.about].filter(Boolean).forEach(n => {
+        const b = grow(n.getBBox(), u * 0.15);
+        taken.push(b);
+        label.block = label.block ? {x: Math.min(label.block.x, b.x), y: Math.min(label.block.y, b.y),
+          w: Math.max(label.block.x + label.block.w, b.x + b.w) - Math.min(label.block.x, b.x),
+          h: Math.max(label.block.y + label.block.h, b.y + b.h) - Math.min(label.block.y, b.y)} : b;
+      });
+    });
+    Object.values(shapeNodes).filter(s => s.shown).sort((a, b) => b.span - a.span).forEach(s => {
+      s.name.classList.remove("hide");
+      const b = grow(s.name.getBBox(), u * 0.1), clash = taken.some(t => meets(t, b));
+      s.name.classList.toggle("hide", clash);
+      if (!clash) taken.push(b);
+    });
+    const block = rough && room != null && labels[room] ? labels[room].block : null;
+    placed.forEach(p => {
+      const h = haloNodes[p.id], r = u * 0.66;
+      h.classList.toggle("under", !!block && p.room_id === room &&
+        meets(block, {x: p.x - r, y: p.y - r, w: 2 * r, h: 2 * r}));
+    });
+  }
   resize();
 
   function place(node) {
@@ -315,7 +390,8 @@
       const asDot = !asShape && seen(p) && (open || z <= DOTS_AT);
       if (shape) {
         shape.node.classList.toggle("hide", !asShape); shape.node.classList.toggle("on", pinOn === p.id);
-        shape.name.classList.toggle("hide", !asShape || shape.span * perUnit < 54);     // a name only where it fits
+        shape.shown = asShape && shape.span * perUnit >= 54 && !!shape.name.textContent;   // a name only where it fits
+        shape.name.classList.toggle("hide", !shape.shown);
       }
       pinNodes[p.id].classList.toggle("hide", !asDot); haloNodes[p.id].classList.toggle("hide", !asDot);
       pinNodes[p.id].classList.toggle("on", pinOn === p.id);
@@ -323,25 +399,33 @@
     L.rooms.forEach(r => {
       const label = labels[r.id], pins = shownIn(r.id), n = pins.length, open = r.id === room;
       roomNodes[r.id].classList.toggle("on", open);
-      if (label.bubble) { label.count.textContent = n; label.bubble.classList.toggle("hide", !n || open || z <= SHAPES_AT); }
+      if (label.bubble) { label.count.textContent = n; label.want = !!n && !open && z > SHAPES_AT; }
       if (label.about) label.about.textContent = !n ? "" : label.small ? n + (n === 1 ? " item" : " items")
         : open ? n + (n === 1 ? " item" : " items") + (worth(pins) ? " · about " + money(worth(pins)) : "")
         : (worth(pins) ? "about " + money(worth(pins)) : "");
     });
+    fit();
   }
 
   function roomsCard() {                                                // every room and what it held; the open one is marked
     const card = side.appendChild(html("div", "card"));
     card.appendChild(html("h2", "", "Rooms"));
+    if (!L.pins.length) { card.appendChild(html("p", "muted", "No items yet.")); return; }
     const table = card.appendChild(html("table")), head = table.appendChild(html("thead")).appendChild(html("tr"));
     head.appendChild(html("th", "", "Room")); head.appendChild(html("th", "n", "Items")); head.appendChild(html("th", "n", "Rough allowance"));
     const body = table.appendChild(html("tbody"));
-    const rows = L.rooms.map(r => ({r: r, pins: shownIn(r.id)})).filter(x => x.pins.length).sort((a, b) => worth(b.pins) - worth(a.pins));
+    // Every room, so an empty one can be opened too; with one kind chosen, only rooms holding that kind.
+    const rows = L.rooms.map(r => ({r: r, pins: shownIn(r.id), name: r.name || "Room"}))
+      .filter(x => x.pins.length || only === null)
+      .sort((a, b) => worth(b.pins) - worth(a.pins) || b.pins.length - a.pins.length)
+      .concat(offRooms.map(r => ({r: r, pins: shownIn(r.id), name: r.name + " · not on the plan"})).filter(x => x.pins.length));
     rows.forEach(x => {
       const tr = body.appendChild(html("tr", "go" + (x.r.id === room ? " on" : "")));
-      tr.appendChild(html("td", "", x.r.name || "Room")); tr.appendChild(html("td", "n", x.pins.length));
+      tr.appendChild(html("td", "", x.name)); tr.appendChild(html("td", "n", x.pins.length));
       tr.appendChild(html("td", "n", money(worth(x.pins)) || "—"));
-      tr.addEventListener("click", () => select(x.r.id === room ? null : x.r.id));
+      const go = () => select(x.r.id === room ? null : x.r.id);
+      tr.addEventListener("click", go);
+      pressable(tr, x.name + ", " + x.pins.length + (x.pins.length === 1 ? " item" : " items"), go);
     });
     const outside = placed.filter(p => p.room_id == null && seen(p)), nowhere = loose.filter(seen);
     [["Outside the rooms", outside], ["No room yet", nowhere]].forEach(([name, pins]) => {
@@ -351,7 +435,10 @@
     });
     const everything = rows.flatMap(x => x.pins).concat(outside, nowhere);
     const foot = table.appendChild(html("tfoot")).appendChild(html("tr", "total"));
-    foot.appendChild(html("td", "", "All")); foot.appendChild(html("td", "n", everything.length)); foot.appendChild(html("td", "n", money(worth(everything))));
+    foot.appendChild(html("td", "", "All")); foot.appendChild(html("td", "n", everything.length)); foot.appendChild(html("td", "n", money(worth(everything)) || "—"));
+    // The plan counts every thing, where it was; the list's total counts only what has an OK.
+    const waiting = everything.filter(p => p.status !== "confirmed").length;
+    if (waiting) card.appendChild(html("p", "muted", "Includes " + waiting + (waiting === 1 ? " item" : " items") + " still waiting for your OK."));
   }
 
   function recordsCard() {                                              // what was on file for this address from before
@@ -382,7 +469,9 @@
     top.appendChild(html("h2", "", "In the " + (r.name || "room").toLowerCase()));
     if (pins.length > 6) {
       const all = top.appendChild(html("a", "", more ? "Show fewer" : "See all " + pins.length));
-      all.addEventListener("click", () => { more = !more; draw(); });
+      all.href = "#"; all.setAttribute("role", "button");
+      all.addEventListener("click", ev => { ev.preventDefault(); more = !more; draw();
+        const again = side.querySelector(".things .row a"); if (again) again.focus(); });
     }
     if (pins.length) card.appendChild(html("p", "muted", pins.length + (pins.length === 1 ? " item" : " items") +
       (worth(pins) ? " · about " + money(worth(pins)) + ", a rough allowance" : "")));
@@ -395,12 +484,14 @@
       const price = li.appendChild(html("div", "price", priced(p)));
       if (p.value && p.basis) price.appendChild(html("small", "", p.basis));
       li.addEventListener("click", () => show(p));
+      pressable(li, cap(p.label) + (p.value ? ", " + priced(p) : ""), () => show(p));
       if (p.x != null) {
         li.addEventListener("pointerenter", () => { pinOn = p.id; refresh(); });
         li.addEventListener("pointerleave", () => { pinOn = null; refresh(); });
       }
     });
-    if (!pins.length) card.appendChild(html("p", "muted", "Nothing of this kind was recorded here."));
+    if (!pins.length) card.appendChild(html("p", "muted", only === null ? "Nothing was recorded in this room." : "Nothing of this kind was recorded here."));
+    else if (r.off) card.appendChild(html("p", "muted", "This room is not on the plan, so none of these is drawn on it."));
     else if (!pins.some(p => p.x != null)) card.appendChild(html("p", "muted", rough
       ? "These were seen in this room. Where each stood is not known yet, so none is drawn on the plan."
       : "These are known to have been in this room, but not where, so none is drawn on the plan."));
@@ -408,7 +499,7 @@
 
   function itemCard(p) {
     const card = side.appendChild(html("div", "card thing"));
-    const r = L.rooms.find(x => x.id === p.room_id);
+    const r = findRoom(roomOf(p));
     const back = card.appendChild(html("a", "back", r ? "Back to the " + (r.name || "room").toLowerCase() : "Back to the rooms"));
     back.href = "#"; back.style.display = "block"; back.style.marginBottom = "10px";
     back.addEventListener("click", ev => { ev.preventDefault(); pinOn = null; delete side.dataset.item; unthing(); draw(); refresh(); });
@@ -433,14 +524,14 @@
   function draw() {                                                     // the side: rooms always, then the open room or the open thing
     side.textContent = "";
     roomsCard();
-    const p = side.dataset.item ? L.pins.find(x => String(x.id) === side.dataset.item) : null, r = L.rooms.find(x => x.id === room);
+    const p = side.dataset.item ? L.pins.find(x => String(x.id) === side.dataset.item) : null, r = findRoom(room);
     if (p) itemCard(p); else if (r) listCard(r);
     recordsCard();
   }
 
   function frame(r) {                                                   // bring a room into view, or the whole home
     view = Object.assign({}, full);
-    if (r) {
+    if (r && r.points.length) {
       const xs = r.points.map(p => p[0]), ys = r.points.map(p => p[1]);
       const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
       const box = svg.getBoundingClientRect(), shape = box.width && box.height ? box.width / box.height : full.w / full.h;
@@ -453,21 +544,33 @@
 
   function select(id) {
     room = id; pinOn = null; more = false; delete side.dataset.item; unthing();
-    frame(L.rooms.find(x => x.id === id));
+    frame(findRoom(id));
     draw(); refresh();
   }
 
+  const narrow = () => window.matchMedia("(max-width: 899px)").matches;
   function show(p) {
-    if (p.room_id != null && p.room_id !== room) { room = p.room_id; more = false; frame(L.rooms.find(x => x.id === room)); }
+    const key = roomOf(p);
+    if (key != null && key !== room) { room = key; more = false; frame(findRoom(room)); }
+    if (p.x != null) {                                                  // its dot in view, the plan moved no more than needed
+      const m = Math.min(view.w, view.h) * 0.12;
+      if (p.x < view.x + m || p.x > view.x + view.w - m || p.y < view.y + m || p.y > view.y + view.h - m) {
+        view.x = p.x - view.w / 2; view.y = p.y - view.h / 2; apply();
+      }
+    }
     pinOn = p.id; side.dataset.item = String(p.id);
     draw(); refresh();
+    if (narrow()) {                                                     // on a phone its card is under the plan: bring it up
+      const card = side.querySelector(".thing");
+      if (card) requestAnimationFrame(() => card.scrollIntoView({behavior: "smooth", block: "start"}));
+    }
     const at = shapeNodes[p.id] ? shapeNodes[p.id].node : pinNodes[p.id];
     if (at) requestAnimationFrame(() => thing(p, at));                  // after any move to its room
     else unthing();
   }
 
   // One kind of thing at a time, or all of them
-  const chips = document.getElementById("chips");
+  const chips = document.getElementById("chips") || html("div");     // no chips while nothing is recorded
   const kinds = [...new Set(L.pins.map(p => p.category))].sort();
   [null].concat(kinds).forEach(c => {
     const b = chips.appendChild(html("button", "chip"));

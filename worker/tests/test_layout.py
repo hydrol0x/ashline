@@ -322,3 +322,20 @@ def test_plan_page(monkeypatch):
     assert data["kind"] == "sketch" and len(data["pins"]) == 3
     assert f'href="/p/{token}/plan"' in client.get(f"/p/{token}").text
     assert client.get("/p/not-a-token/plan").status_code == 404
+
+
+def test_floor_labels_are_used_as_they_are():
+    assert layout.floor_label("Floor 1") == "Floor 1"
+    assert layout.floor_label("Basement") == "Basement"
+    assert layout.floor_label("2") == "Floor 2"
+    assert layout.floor_label(None) == "" and layout.floor_label("  ") == ""
+
+
+def test_a_room_name_not_on_the_plan_is_kept_apart_from_no_room(scanned):
+    store, sofa, mixer, lost = scanned
+    saw = store.add_item("c1", {"label": "table saw", "category": "tools", "room_label": "Garage"}, source="voice")
+    drawn = layout.build("c1", store)
+    pins = {p["id"]: p for p in drawn["pins"]}
+    assert pins[saw]["room"] == "Garage" and pins[saw]["room_id"] is None and pins[saw]["x"] is None
+    assert pins[lost]["room"] == ""
+    assert (drawn["unplaced"], drawn["roomless"], drawn["off_plan"]) == (2, 1, 1)

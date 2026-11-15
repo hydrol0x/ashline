@@ -142,7 +142,11 @@ class ClaudeSearcher:
             raise RuntimeError(f"search stopped ({getattr(response, 'stop_reason', None)})")
         found = parse_candidates(_text(response))
         if hosts:                                   # a link to a site the search never returned was made up
-            found = [c for c in found if _host(c["url"]) in hosts]
+            known = [c for c in found if _host(c["url"]) in hosts]
+            # A filtered search does not always show every site it read. When most candidates would
+            # go, the list of sites is incomplete, not the candidates invented: the check decides.
+            if len(known) * 2 >= len(found):
+                found = known
         return found
 
     def verify(self, spec: dict, candidates: list[dict], image=None) -> list[dict]:
@@ -172,13 +176,27 @@ class ClaudeSearcher:
     def lookup(self, description: str, brand: str | None = None, image=None) -> dict | None:
         """The lookup in stages: {matches, spec, queries, checked, dropped}, `matches` being the kept
         listings priced per unit. None when a stage failed (the caller then uses `search`)."""
+        say = getattr(self, "trace", None) or (lambda line: None)
+        self.last_error = None
+        stage = "look"
         try:
             spec = self.look(description, brand, image)
+            say(f"  look: {spec_line(spec)}" + (f" | cannot see: {spec['cannot_see']}" if spec.get("cannot_see") else ""))
+            say("  queries: " + " | ".join(spec["queries"]))
             if not spec["enough_to_price"]:
+                say("  not enough of it can be seen to price it; no search")
                 return judge(spec, [], [])              # the part that sets the price cannot be seen: no search
+            stage = "search"
             candidates = self.gather(spec)
+            say(f"  search: {len(candidates)} listing{'s' if len(candidates) != 1 else ''}")
+            stage = "verify"
             verdicts = self.verify(spec, candidates, image) if candidates else []
-        except Exception:
+            for c, v in zip(candidates, verdicts):
+                say(f"    {'keep' if v.get('keep') else 'drop'} ${c['price']:,.2f} {c['retailer']}: {c['title'][:60]}"
+                    + (f" ({v.get('reason')})" if v.get("reason") else ""))
+        except Exception as exc:
+            self.last_error = f"the {stage} step failed: {type(exc).__name__}: {str(exc)[:300]}"
+            say(f"  {self.last_error}")
             return None
         return judge(spec, candidates, verdicts)
 
@@ -459,12 +477,13 @@ def find_price(description: str, brand: str | None = None, searcher=None, image=
         return {"found": True, "price": best["price"], "low": best["low"], "high": best["high"],
                 "retailer": best["matches"][0]["retailer"], "url": best["matches"][0]["url"],
                 "matches": best["matches"], "verified": True, **seen}
+    stumbled = getattr(searcher, "last_error", None)          # why the lookup in stages gave up, if it did
     try:
         matches = searcher.search(description, brand, image=image) if image is not None else searcher.search(description, brand)
     except Exception as exc:
-        return {"found": False, "reason": f"The search failed: {exc}"}
+        return {"found": False, "reason": f"The search failed: {exc}" + (f" (before that, {stumbled})" if stumbled else "")}
     if not matches:
-        return {"found": False, "reason": "No suitable listing was found."}
+        return {"found": False, "reason": "No suitable listing was found" + (f" ({stumbled})." if stumbled else ".")}
     prices = [m["price"] for m in matches]
     return {"found": True, "price": matches[0]["price"], "low": min(prices), "high": max(prices),
             "retailer": matches[0]["retailer"], "url": matches[0]["url"], "matches": matches}
@@ -521,12 +540,14 @@ def price_check(case_id: str, store: Store | None = None, top: int = 20, searche
     checked = found = 0
     for item in items[:max(0, top)]:
         checked += 1
+        if report and getattr(searcher, "trace", None):
+            report(f"{item['label']} (estimate {money(item.get('price_mid'))})")
         result = find_price(item["label"], item.get("brand_guess"), searcher, image=item_picture(store, case_id, item))
         if result.get("found"):
             found += 1
             line = apply_price(store, case_id, item["item_id"], result)
         else:
-            line = f"No listing found for the {item['label']}; the estimate stays."
+            line = f"The estimate stays for the {item['label']}. {result.get('reason') or 'No listing found.'}"
         if report:
             report(line)
     return {"checked": checked, "found": found}

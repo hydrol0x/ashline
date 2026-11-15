@@ -146,3 +146,16 @@ def test_what_was_looked_at_is_kept_with_the_online_price(fam):
     online = price_sources(fam.store.get_item(fam.case_id, lamp))["online"]
     assert (online["checked"], online["dropped"], online["queries"][0]) == (4, 1, SPEC["queries"][0])
     assert len(online["matches"]) == 3 and online["spec"]["kind"] == "dining chair"
+
+
+def test_a_watcher_sees_each_step_and_a_failure_names_its_step():
+    lines = []
+    searcher = ClaudeSearcher(model="claude-opus-5-5", client=Client())
+    searcher.trace = lines.append
+    assert find_price("wood dining chair", None, searcher)["found"]
+    seen = "\n".join(lines)
+    assert "look:" in seen and "queries:" in seen and "search: " in seen and "keep $" in seen and "drop $" in seen
+    broken = ClaudeSearcher(model="claude-opus-5-5", client=Client(fail="verify"))
+    broken.search = lambda *a, **k: []                      # the single search finds nothing either
+    result = find_price("wood dining chair", None, broken)
+    assert not result["found"] and "the verify step failed" in result["reason"]

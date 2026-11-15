@@ -74,6 +74,7 @@ def main(argv: list[str] | None = None) -> None:
     p = sub.add_parser("price-check", help="refresh the estimates, then look up the most valuable items' prices online")
     p.add_argument("--case", required=True)
     p.add_argument("--top", type=int, default=20, help="how many items to look up, most valuable first")
+    p.add_argument("-v", "--verbose", action="store_true", help="show each step: what was searched, kept and dropped")
 
     sub.add_parser("photon", help="run the conversation on Photon 2.0 (iMessage)")
     sub.add_parser("telegram", help="run the conversation on Telegram (works in family group chats)")
@@ -165,7 +166,11 @@ def _run(args, parser) -> None:
         from .pricing import price_items as refresh_estimates
         refreshed = refresh_estimates(args.case)           # rough figures are worked out again first
         print(f"estimates refreshed: {refreshed['priced']} items ({refreshed['source'] or 'nothing to do'})")
-        print(json.dumps(price_check(args.case, top=args.top, report=print), indent=1))
+        from .price_search import get_searcher
+        searcher = get_searcher()
+        if searcher is not None and args.verbose:
+            searcher.trace = print                         # what was looked for, found, kept and dropped
+        print(json.dumps(price_check(args.case, top=args.top, searcher=searcher, report=print), indent=1))
     elif args.cmd == "photon":
         from .bridge_photon import PhotonBridge
         PhotonBridge().run()

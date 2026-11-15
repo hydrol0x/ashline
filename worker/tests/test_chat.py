@@ -43,12 +43,24 @@ def photo(width, color=(120, 110, 100)):
     return (f"IMG_{width}.jpg", buf.getvalue())
 
 
+class CategoryPricer(DefaultPricer):
+    """The fixed category figures only, so the chat tests' sums stay put (the typical-price table
+    is tested in test_pricing_meter)."""
+
+    def prices(self, items):
+        from ashline.pricing import CATEGORY_DEFAULT
+        return {i["item_id"]: float(CATEGORY_DEFAULT.get(i.get("category") or "other", 50)) for i in items}
+
+    def source_for(self, item):
+        return self.source
+
+
 class Family:
     """Sends messages and advances the clock."""
 
     def __init__(self):
         self.store, self.detector, self.now = Store(), FakeDetector(), T0
-        self.engine = Engine(self.store, detector=self.detector, pricer=DefaultPricer(),
+        self.engine = Engine(self.store, detector=self.detector, pricer=CategoryPricer(),
                              public_url="https://ashline.example", number="+1 555 010 0000")
 
     def say(self, who, text="", photos=(), chat=None, name=None):

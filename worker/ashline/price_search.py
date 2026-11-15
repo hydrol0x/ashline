@@ -26,7 +26,7 @@ import threading
 import time
 
 from . import config
-from .pricing import in_use, kept_price, money, nice, record_price
+from .pricing import in_use, kept_price, money, nice, record_price, typical_price
 from .store import Store
 
 SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search", "max_uses": 3}     # the single-call lookup
@@ -548,8 +548,12 @@ def fixed_figure(item: dict) -> bool:
 
 
 def worth(item: dict) -> float:
-    """What the line is thought to be worth, for choosing which to look up."""
-    return float(item.get("price_mid") or 0) * (item.get("qty") or 1)
+    """What the line is thought to be worth, for choosing which to look up. A fixed category
+    figure ranks a $40 coffee maker as $400, so the typical price for its kind is used instead."""
+    mid = float(item.get("price_mid") or 0)
+    if fixed_figure(item):
+        mid = typical_price(item.get("label")) or mid
+    return mid * (item.get("qty") or 1)
 
 
 def trusted(result: dict, item: dict) -> bool:

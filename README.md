@@ -111,10 +111,24 @@ line as the one photographed in the dining room.
 ### Prices from what was paid or what it costs today
 
 - After each batch of new items the price agent looks the bigger ones up online by itself, in the
-  background, sending the item's photo along with its name (`price_search.py`, Claude's web
-  search). The closest match's price replaces the estimate, with its link, and the chat mentions
-  once what was found. A match far from the estimate is not used unasked. Turn it off with
-  `ASHLINE_AUTO_PRICE=off`. `ashline price-check --case demo --top 20` does the same on request.
+  background (`price_search.py`). A lookup has four steps. Claude looks at the item's photo and
+  writes what a shopper would search for: the kind of thing, its size, material, colour, quality,
+  and a brand only when one can be read. Claude's web search runs those searches and lists up to 8
+  listings with their pack size. A separate check, which sees the photo and the listings but not the
+  search, keeps only new listings of the same kind of thing and size from US stores, and divides a
+  set by its count. The price is the middle of the kept listings (the lower middle one for two),
+  with the lowest and highest as the range. Fewer than two kept listings is not enough evidence and
+  nothing is recorded, unless the one listing is for a brand and model read in the photo. If a step
+  fails, the older single search is used. Nothing here was run against the live API yet: it is
+  tested with fake clients only.
+- Unasked, a found price is used when two kept listings agree within 2x, whatever the estimate. A
+  lone listing far from the estimate (over 3x either way) is not used, unless the estimate is the
+  fixed category figure. The 12 dearest items from $60 are looked up after each batch
+  (`ASHLINE_AUTO_PRICE_TOP`, `ASHLINE_AUTO_PRICE_MIN`), three at a time; furniture, electronics and
+  appliances at the fixed category figure are always looked up. The chat mentions once what was
+  found. Turn it off with `ASHLINE_AUTO_PRICE=off`. `ashline price-check --case demo --top 20` does
+  the same on request. The item sheet's Amazon and Google Shopping links search the saved shopper's
+  query when there is one.
 - A receipt, invoice or order page sent in the chat with the word "receipt" (a photo, a screenshot
   or a PDF; `/receipt file` in the simulator) is read by Claude into its lines (`receipts.py`).
   Lines that match items are offered as their paid price, with the receipt kept as proof; lines for
@@ -168,7 +182,10 @@ price the family types in beats all three.
 
 Prices are replacement-cost estimates with a range (`pricing.py`). The range comes from
 `eval/calibration.json` once that has been measured; until then it is labelled a rough allowance
-and no coverage is claimed.
+and no coverage is claimed. Without an Anthropic key, an item whose label names a common household
+thing gets a typical new price from a table of about 135 phrases (a dining chair $90, a sofa $800,
+a coffee maker $40), marked "typical price"; anything else gets a rough figure for its category,
+marked "category default".
 
 `/check` is a public page where anyone can type an address and see whether a 3D scan of that home
 from before the disaster is on file (rooms, floors, capture month, aerial coverage), with no internal ids shown.

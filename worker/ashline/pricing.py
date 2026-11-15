@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 
 from . import config
 from .store import Store
@@ -104,12 +105,72 @@ def money_range(low: float | None, high: float | None) -> str:
     return f"{money(low)}–{money(high)}"
 
 
+# Typical new prices for common household things, budget to mid-market, used only when no model is
+# available. Matched on words in the label; the longest phrase wins ("office chair" before "chair").
+# Checked against real listings in November 2026 for the ones a price study looked up (coffee maker
+# about $40, nightstand about $51, dining chair about $80, microwave about $90, coffee table about
+# $111); the rest are set on the same scale, lower when unsure.
+TYPICAL_PRICE = {
+    # seating
+    "dining chair": 90, "kitchen chair": 80, "chair": 80, "armchair": 300, "accent chair": 200, "recliner": 450,
+    "office chair": 150, "desk chair": 150, "gaming chair": 180, "bar stool": 60, "stool": 45, "bench": 120,
+    "ottoman": 90, "sofa": 800, "couch": 800, "sofa bed": 600, "futon": 250, "sectional": 1200, "loveseat": 550,
+    # tables and storage
+    "coffee table": 120, "side table": 60, "end table": 60, "console table": 120, "dining table": 400,
+    "kitchen table": 300, "desk": 150, "tv stand": 150, "bookshelf": 100, "bookcase": 100, "shelf": 40,
+    "dresser": 300, "chest of drawers": 250, "nightstand": 60, "bedside table": 60, "wardrobe": 300,
+    "cabinet": 150, "shoe rack": 35,
+    # beds and bedding
+    "bed": 350, "bed frame": 300, "headboard": 150, "mattress": 500, "crib": 200, "duvet cover": 45,
+    "duvet": 60, "comforter": 60, "quilt": 60, "pillow": 20, "sheet set": 35, "blanket": 30,
+    # decor and lighting
+    "lamp": 40, "table lamp": 40, "desk lamp": 30, "floor lamp": 70, "ceiling light": 80, "rug": 75,
+    "area rug": 75, "runner rug": 40, "mirror": 70, "curtains": 35, "painting": 80, "picture frame": 20,
+    "plant pot": 20, "clock": 30, "vase": 25,
+    # screens and electronics
+    "tv": 400, "television": 400, "monitor": 180, "laptop": 700, "desktop computer": 800, "computer": 700,
+    "tablet": 350, "printer": 130, "speaker": 90, "soundbar": 200, "headphones": 80, "game console": 450,
+    "router": 90, "camera": 450, "smart speaker": 50,
+    # appliances
+    "refrigerator": 1000, "fridge": 1000, "mini fridge": 180, "freezer": 400, "washer": 650,
+    "washing machine": 650, "dryer": 600, "dishwasher": 550, "range": 700, "stove": 700, "oven": 700,
+    "cooktop": 400, "range hood": 200, "microwave": 100, "vacuum": 150, "robot vacuum": 250,
+    "air conditioner": 300, "space heater": 50, "fan": 40, "ceiling fan": 120, "air purifier": 120,
+    "humidifier": 45, "dehumidifier": 200, "water heater": 700,
+    # kitchen
+    "toaster": 30, "toaster oven": 80, "kettle": 30, "electric kettle": 30, "coffee maker": 40,
+    "espresso machine": 200, "blender": 50, "stand mixer": 300, "food processor": 80, "air fryer": 80,
+    "slow cooker": 45, "instant pot": 90, "pressure cooker": 90, "rice cooker": 50, "pots and pans set": 100,
+    "cookware set": 100, "frying pan": 30, "knife set": 60, "dinnerware set": 60, "cutlery set": 40,
+    # other
+    "bicycle": 450, "bike": 450, "treadmill": 700, "exercise bike": 350, "grill": 300, "lawn mower": 350,
+    "suitcase": 90, "guitar": 250, "piano": 3000, "sewing machine": 200, "stroller": 200, "car seat": 180,
+}
+
+
+def typical_price(label: str | None) -> float | None:
+    """The table's figure for the longest phrase found in the label, or None."""
+    words = " " + re.sub(r"[^a-z0-9]+", " ", (label or "").lower()) + " "
+    best = None
+    for phrase, price in TYPICAL_PRICE.items():
+        if f" {phrase} " in words or f" {phrase}s " in words or (phrase == "tv" and " tvs " in words):
+            if best is None or len(phrase) > len(best[0]):
+                best = (phrase, price)
+    return float(best[1]) if best else None
+
+
 class DefaultPricer:
-    """No model: a rough figure per category, clearly labelled as such."""
+    """No model: a typical price for the kind of thing when the label names one, else a rough
+    figure per category, each clearly labelled as such."""
     source = "category default"
+    typical = "typical price"
 
     def prices(self, items: list[dict]) -> dict[int, float]:
-        return {i["item_id"]: float(CATEGORY_DEFAULT.get(i.get("category") or "other", 50)) for i in items}
+        return {i["item_id"]: typical_price(i.get("label")) or float(CATEGORY_DEFAULT.get(i.get("category") or "other", 50))
+                for i in items}
+
+    def source_for(self, item: dict) -> str:
+        return self.typical if typical_price(item.get("label")) else self.source
 
 
 class ClaudePricer:
@@ -287,17 +348,20 @@ def price_items(case_id: str, store: Store | None = None, pricer=None, only_miss
     note = None
     if todo:
         pricer = pricer or get_pricer()
+        default = DefaultPricer()
         try:
             fresh, source = pricer.prices(todo), pricer.source
         except Exception as exc:                 # never lose the inventory over pricing
-            fresh, source = DefaultPricer().prices(todo), DefaultPricer.source
+            pricer = default
+            fresh, source = default.prices(todo), default.source
             note = f"category defaults used (pricing failed: {exc})"
+        source_for = getattr(pricer, "source_for", None)
         missing = [i for i in todo if i["item_id"] not in fresh]
-        fallback = DefaultPricer().prices(missing)
+        fallback = default.prices(missing)
         for item in todo:
             mid = fresh.get(item["item_id"])
-            cache[_cache_key(item)] = ({"mid": mid, "source": source} if mid else
-                                       {"mid": fallback[item["item_id"]], "source": DefaultPricer.source})
+            cache[_cache_key(item)] = ({"mid": mid, "source": source_for(item) if source_for else source} if mid else
+                                       {"mid": fallback[item["item_id"]], "source": default.source_for(item)})
         cache_path.write_text(json.dumps(cache, indent=1))
 
     calibration = load_calibration()

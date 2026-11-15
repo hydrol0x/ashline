@@ -93,6 +93,39 @@ def test_family_price_is_kept_and_failures_fall_back():
     assert DefaultPricer().prices([{"item_id": 1, "category": "tools"}]) == {1: 90.0}
 
 
+def test_without_a_key_the_kind_of_thing_sets_the_figure():
+    from ashline.pricing import typical_price
+    assert typical_price("wood-back dining chair with black metal frame") == 90      # "dining chair" before "chair"
+    assert typical_price("Office chair, mesh back") == 150 and typical_price("oak TV stand") == 150
+    assert typical_price("55 inch TV") == 400 and typical_price("black drip coffee maker with glass carafe") == 40
+    assert typical_price("nightstand, rustic brown top") == 60 and typical_price("black countertop microwave oven") == 100
+    assert typical_price("set of kitchen chairs") == 80 and typical_price("table saw") is None
+    pricer = DefaultPricer()
+    items = [{"item_id": 1, "label": "dining chair", "category": "furniture"},
+             {"item_id": 2, "label": "sofa", "category": "furniture"},
+             {"item_id": 3, "label": "bed", "category": "furniture"},
+             {"item_id": 4, "label": "table saw", "category": "tools"}]
+    assert pricer.prices(items) == {1: 90.0, 2: 800.0, 3: 350.0, 4: 90.0}
+    assert [pricer.source_for(i) for i in items] == ["typical price"] * 3 + ["category default"]
+
+
+def test_price_items_labels_a_table_hit_as_a_typical_price():
+    store, ids = seeded()
+    price_items("fam1", store, DefaultPricer())
+    sofa, lamp, saw = (store.get_item("fam1", i) for i in ids[:3])
+    assert (sofa["price_mid"], sofa["price_source"]) == (800, "typical price")
+    assert (lamp["price_mid"], lamp["price_source"]) == (70, "typical price")
+    assert (saw["price_mid"], saw["price_source"]) == (90, "category default")
+
+
+def test_lookups_are_chosen_by_the_typical_price_not_the_fixed_figure():
+    from ashline.price_search import worth
+    maker = {"label": "coffee maker", "category": "appliances", "price_mid": 400, "price_source": "category default"}
+    fridge = {"label": "refrigerator", "category": "appliances", "price_mid": 1100, "price_source": "claude estimate"}
+    assert worth(maker) == 40 and worth(fridge) == 1100
+    assert worth({"label": "widget", "price_mid": 50, "price_source": "category default", "qty": 2}) == 100
+
+
 def test_sb495_rule():
     assert sb495(400_000) == {"limit": 400_000, "advance": 240_000, "remaining": 160_000}
     assert sb495(700_000)["advance"] == 350_000 and sb495(700_000)["remaining"] == 350_000      # the cap

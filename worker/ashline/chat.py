@@ -1360,19 +1360,52 @@ class Engine:
             self.store.log_event(case_id, "split", {"into": item_id, "moved": [s["item_id"] for s in others]},
                                  member["member_id"])
             return [Outbound(chat_id, f"Split into {len(others) + 1} separate items. Say undo if that was a mistake.")]
+        moved = (re.fullmatch(r"#?(\d+)\s+(?:was|is|were|are)\s+in\s+(?:the\s+|our\s+|my\s+)?(.+)", low.strip(" .!"))
+                 or re.fullmatch(r"move\s+#?(\d+)\s+(?:to|into)\s+(?:the\s+|our\s+|my\s+)?(.+)", low.strip(" .!")))
+        counted = (re.fullmatch(r"#?(\d+)\s*x\s*(\d+)", low.strip(" .!"))
+                   or re.fullmatch(r"(?:qty|quantity)\s+#?(\d+)\s+(\d+)", low.strip(" .!"))
+                   or (lambda m: m and (m[0], m[2], m[1]))(
+                       re.fullmatch(r"there (?:were|are|was) (\d+) of (?:number |#)?(\d+)", low.strip(" .!"))))
+        if moved or counted:
+            number, value = (moved or counted)[1], (moved or counted)[2]
+            item_id = self._context(chat_id).get("list", {}).get(number)
+            item = self.store.get_item(case_id, item_id) if item_id else None
+            if not item:
+                return [Outbound(chat_id, f"I don't have a number {number} in the last list I sent.")]
+            if moved:
+                room = next((r for r in self.store.get_rooms(case_id) if (r.get("label") or "").lower() == value
+                             or (r.get("name") or "").lower() == value), None)
+                label = (room or {}).get("label") or value[:1].upper() + value[1:60]
+                self.store.log_event(case_id, "room", {"item_id": item_id, "room_id": item.get("room_id"),
+                                                       "room_label": item.get("room_label")}, member["member_id"])
+                self.store.update_item(case_id, item_id, room_label=label, room_id=(room or {}).get("room_id"))
+                return [Outbound(chat_id, f"Moved the {item['label']} to the {label.lower()}. Say undo if that was a mistake.")]
+            qty = int(value)
+            if not 1 <= qty <= 999:
+                return [Outbound(chat_id, "That number looks too big. How many were there?")]
+            self.store.log_event(case_id, "qty", {"item_id": item_id, "qty": item.get("qty")}, member["member_id"])
+            self.store.update_item(case_id, item_id, qty=qty)
+            return [Outbound(chat_id, f"Got it: {qty} of the {item['label']}. Say undo if that was a mistake.")]
         match = re.fullmatch(r"#?(\d+)\s+(?:is|was)\s+(?:an?\s+|the\s+)?(.+)", text.strip(" ."), flags=re.I)
         if match:
             item_id = self._context(chat_id).get("list", {}).get(match.group(1))
             item = self.store.get_item(case_id, item_id) if item_id else None
             if item:
-                self.store.log_event(case_id, "rename", {"item_id": item_id, "label": item["label"]}, member["member_id"])
-                self.store.update_item(case_id, item_id, label=match.group(2).strip()[:120], price_mid=None,
-                                       price_low=None, price_high=None, price_source=None)
+                from .pricing import price_sources
+                fields = ("price_low", "price_mid", "price_high", "price_source", "price_ref")
+                self.store.log_event(case_id, "rename", {"item_id": item_id, "label": item["label"],
+                                                         "prices": {k: item.get(k) for k in fields}}, member["member_id"])
+                keep = item.get("price_source") == "set by family" or price_sources(item).get("paid")
+                self.store.update_item(case_id, item_id, label=match.group(2).strip()[:120],
+                                       **({} if keep else dict(price_mid=None, price_low=None, price_high=None, price_source=None)))
                 price_items(case_id, self.store, self.pricer)
                 fresh = self.store.get_item(case_id, item_id)
                 return [Outbound(chat_id, f"Updated: {self._display(fresh)}.")]
         if low == "undo":
-            done = self._undo(case_id)
+            done = self._undo(case_id, None if owner else member["member_id"])
+            if not done and not owner and self.store.last_event(case_id):
+                return [Outbound(chat_id, "There's nothing of yours to undo. You can undo the changes you made yourself, "
+                                          "and the person who started the list can undo anything.")]
             return [Outbound(chat_id, done or "There's nothing to undo.")]
         if low in ("export", "send the list", "send me the list", "download"):
             if not owner:
@@ -1398,8 +1431,8 @@ class Engine:
                                       "Reply yes to delete, or anything else to keep it.")]
         return None
 
-    def _undo(self, case_id: str) -> str | None:
-        event = self.store.last_event(case_id)
+    def _undo(self, case_id: str, member_id: int | None = None) -> str | None:
+        event = self.store.last_event(case_id, member_id)
         if not event:
             return None
         payload, action = event["payload"], event["action"]
@@ -1411,8 +1444,18 @@ class Engine:
             self.store.set_item_status(case_id, payload["item_id"], payload["status"])
             text = "Undone: it's back on the list."
         elif action == "rename":
-            self.store.update_item(case_id, payload["item_id"], label=payload["label"])
+            from .pricing import price_sources
+            now_item, prices = self.store.get_item(case_id, payload["item_id"]) or {}, payload.get("prices", {})
+            if price_sources(now_item).get("paid") != price_sources(prices).get("paid"):
+                prices = {}                                 # a price paid since the rename stays
+            self.store.update_item(case_id, payload["item_id"], label=payload["label"], **prices)
             text = "Undone: the name is back to what it was."
+        elif action == "room":
+            self.store.update_item(case_id, payload["item_id"], room_id=payload["room_id"], room_label=payload["room_label"])
+            text = "Undone: it's back in the room it was in."
+        elif action == "qty":
+            self.store.update_item(case_id, payload["item_id"], qty=payload["qty"])
+            text = "Undone: the number is back to what it was."
         elif action == "merge":
             for item_id in payload["moved"]:
                 self.store.update_item(case_id, item_id, cluster_id=payload["from"])

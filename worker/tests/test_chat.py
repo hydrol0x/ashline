@@ -712,3 +712,59 @@ def test_claude_detector_retries_a_cut_off_reply_with_a_shorter_list(tmp_path):
     items = det.detect(path)
     assert [i["label"] for i in items] == ["sofa"]
     assert "at most 15 items" in asked[1]["messages"][0]["content"][1]["text"] and asked[1]["output_config"]["effort"] == "low"
+
+
+def listed(fam):
+    fam.say(MAYA, photos=[photo(640)])                            # 1 sofa, 2 lamp, 3 coffee table
+    fam.wait()
+
+
+def test_a_relative_undoes_only_their_own_change_and_the_owner_any(fam):
+    listed(fam)
+    fam.say(MOM, "review")
+    mine, hers = fam.engine._context(MOM)["list"], fam.engine._context(MAYA)["list"]
+    status = lambda item_id: fam.store.get_item(fam.case_id, item_id)["status"]
+    fam.say(MOM, "remove 1")
+    assert texts(fam.say(MAYA, "undo"))[0].startswith("There's nothing of yours to undo.")
+    assert status(mine["1"]) == "rejected"
+    other = next(n for n, i in hers.items() if i != mine["1"])
+    fam.say(MAYA, f"remove {other}")
+    last = next(n for n, i in mine.items() if i not in (mine["1"], hers[other]))
+    fam.say(MOM, f"remove {last}")
+    assert texts(fam.say(MAYA, "undo")) == ["Undone: it's back on the list."]          # her change, not Mom's
+    assert status(hers[other]) != "rejected" and status(mine[last]) == "rejected"
+    fam.say(MAYA, f"remove {other}")
+    assert texts(fam.say(MOM, "undo")) == ["Undone: it's back on the list."]           # the owner undoes anyone's
+    assert status(hers[other]) != "rejected"
+
+
+def test_a_rename_keeps_a_price_the_family_set_and_undo_restores_it(fam):
+    listed(fam)
+    fam.say(MAYA, "price 2 150")
+    assert texts(fam.say(MAYA, "2 is a tiffany lamp")) == ["Updated: tiffany lamp · $150."]
+    lamp = fam.engine._context(MAYA)["list"]["2"]
+    fam.say(MAYA, "1 is a grey couch")                            # an estimate is looked up again for a new name
+    assert texts(fam.say(MAYA, "undo")) == ["Undone: the name is back to what it was."]
+    assert texts(fam.say(MAYA, "undo")) == ["Undone: the name is back to what it was."]
+    item = fam.store.get_item(fam.case_id, lamp)
+    assert (item["label"], item["price_mid"], item["price_source"]) == ("brass floor lamp", 150, "set by family")
+
+
+def test_room_and_quantity_changes_are_not_renames_and_can_be_undone(fam):
+    listed(fam)
+    table = fam.engine._context(MAYA)["list"]["3"]
+    assert texts(fam.say(MAYA, "3 was in the kitchen")) == [
+        "Moved the oak coffee table to the kitchen. Say undo if that was a mistake."]
+    item = fam.store.get_item(fam.case_id, table)
+    assert (item["label"], item["room_label"]) == ("oak coffee table", "Kitchen")
+    fam.say(MAYA, "move 3 to the garage")
+    assert fam.store.get_item(fam.case_id, table)["room_label"] == "Garage"
+    for words, qty in (("3 x2", 2), ("qty 3 4", 4), ("there were 3 of number 3", 3)):
+        assert texts(fam.say(MAYA, words)) == [f"Got it: {qty} of the oak coffee table. Say undo if that was a mistake."]
+        assert fam.store.get_item(fam.case_id, table)["qty"] == qty
+    for _ in range(3):
+        assert texts(fam.say(MAYA, "undo")) == ["Undone: the number is back to what it was."]
+    assert texts(fam.say(MAYA, "undo")) == ["Undone: it's back in the room it was in."]
+    assert texts(fam.say(MAYA, "undo")) == ["Undone: it's back in the room it was in."]
+    item = fam.store.get_item(fam.case_id, table)
+    assert (item["label"], item["qty"], item["room_label"]) == ("oak coffee table", 1, "Living room")

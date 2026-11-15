@@ -239,9 +239,11 @@ class Store:
                              (case_id, member_id, action, json.dumps(payload), _now()))
             return cur.lastrowid
 
-    def last_event(self, case_id: str) -> dict | None:
-        rows = self._rows("SELECT * FROM events WHERE case_id = ? AND undone = 0 ORDER BY event_id DESC LIMIT 1",
-                          case_id)
+    def last_event(self, case_id: str, member_id: int | None = None) -> dict | None:
+        """The newest change not yet undone; with member_id, the newest one that person made."""
+        mine = " AND member_id = ?" if member_id is not None else ""
+        rows = self._rows(f"SELECT * FROM events WHERE case_id = ? AND undone = 0{mine} ORDER BY event_id DESC LIMIT 1",
+                          case_id, *([member_id] if member_id is not None else []))
         if not rows:
             return None
         rows[0]["payload"] = json.loads(rows[0]["payload"] or "{}")

@@ -552,17 +552,18 @@ def price_check(case_id: str, store: Store | None = None, top: int = 20, searche
         except Exception as exc:                            # one bad item must not end the run
             return {"found": False, "reason": f"The lookup stopped: {type(exc).__name__}: {str(exc)[:200]}"}
 
-    if watched:                                             # one at a time, so the steps read in order
-        results = None
+    pool = None
+    if watched or not items:                                # one at a time, so the steps read in order
+        results = (look(item) for item in items)
     else:
         from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor(max_workers=AUTO_AT_ONCE) as pool:
-            results = list(pool.map(look, items))
-    for n, item in enumerate(items):
+        pool = ThreadPoolExecutor(max_workers=AUTO_AT_ONCE)
+        results = pool.map(look, items)                     # yields in order, as each is ready
+    for item in items:
         checked += 1
         if report and watched:
             report(f"{item['label']} (estimate {money(item.get('price_mid'))})")
-        result = results[n] if results is not None else look(item)
+        result = next(results)
         if result.get("found"):
             found += 1
             line = apply_price(store, case_id, item["item_id"], result)
@@ -570,6 +571,8 @@ def price_check(case_id: str, store: Store | None = None, top: int = 20, searche
             line = f"The estimate stays for the {item['label']}. {result.get('reason') or 'No listing found.'}"
         if report:
             report(line)
+    if pool is not None:
+        pool.shutdown()
     return {"checked": checked, "found": found}
 
 

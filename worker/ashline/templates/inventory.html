@@ -187,7 +187,7 @@
       {% if meter.memory %}<span><i style="background: var(--flame-soft)"></i><b>{{ money(meter.memory) }}</b> from memory</span>{% endif %}
       {% if meter.pending %}<span><i style="background: #C9CED2"></i><b>{{ money(meter.pending) }}</b> waiting for an OK ({{ meter.pending_items }})</span>{% endif %}
     </div>
-    {% if claims|length > 1 or (claims and claims[0].basis == 'acv') %}
+    {% set claims = claims or [] %}{% if claims|length > 1 or (claims and claims[0].basis == 'acv') %}
     <div class="claims">
       {% for c in claims %}
       <div class="claim">
@@ -303,7 +303,7 @@
 
 <script>
 (function () {
-  var token = {{ token|tojson }}, grid = document.getElementById('grid'), DISASTER = {{ disaster|tojson }};
+  var token = {{ token|tojson }}, grid = document.getElementById('grid'), DISASTER = {{ (disaster or 'fire')|tojson }};
   var chips = [].slice.call(document.querySelectorAll('.chip')), room = '';
   var sortBox = document.getElementById('sort');
   try { var saved = localStorage.getItem('ashline-sort'); if (saved && sortBox.querySelector('option[value="' + saved + '"]')) sortBox.value = saved; } catch (e) {}

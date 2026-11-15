@@ -157,8 +157,16 @@ def export_pdf(case_id: str, store: Store | None = None, include_suggested: bool
         canvas.drawRightString(letter[0] - 0.75 * inch, 0.5 * inch, f"Page {doc.page}")
         canvas.restoreState()
 
+    from xml.sax.saxutils import escape
+
+    def esc(value) -> str:
+        """Paragraph text is markup: a stray & or < in a label would break the whole PDF."""
+        return escape(str(value or ""))
+
     def picture(image, width, max_height=None) -> RLImage:
         buf = io.BytesIO()
+        if image.mode not in ("RGB", "L"):
+            image = image.convert("RGB")                   # PNG screenshots with transparency, palette images
         image.save(buf, format="JPEG", quality=80)
         buf.seek(0)
         height = width * image.height / image.width
@@ -169,13 +177,15 @@ def export_pdf(case_id: str, store: Store | None = None, include_suggested: bool
     title = ParagraphStyle("title", parent=styles["Title"], alignment=0, fontSize=22, leading=26, textColor=ink, spaceAfter=4)
     logo_path = Path(__file__).parent / "static" / "img" / "logo.png"
     story = []
-    if logo_path.exists():
+    try:                                                # the logo is decoration; never fail the export for it
         mark = RLImage(str(logo_path), width=0.42 * inch, height=0.42 * inch * 304 / 360)
         brand = Table([[mark, Paragraph("<font name='Times-Bold' size='14'>Ashline</font>", small)]],
                       colWidths=[0.5 * inch, 2 * inch], hAlign="LEFT")
         brand.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("LEFTPADDING", (0, 0), (-1, -1), 0)]))
         story += [brand, Spacer(1, 0.18 * inch)]
-    story += [Paragraph(f"Contents inventory: {case.get('name') or 'Home'}", title),
+    except Exception:
+        pass
+    story += [Paragraph(f"Contents inventory: {esc(case.get('name') or 'Home')}", title),
               Table([[""]], colWidths=[6.8 * inch], rowHeights=[2], hAlign="LEFT",
                     style=TableStyle([("BACKGROUND", (0, 0), (-1, -1), red)]))]
     facts = [["Items listed", str(sum(int(r['qty'] or 1) for r in rows))],
@@ -184,7 +194,7 @@ def export_pdf(case_id: str, store: Store | None = None, include_suggested: bool
              ["Backed by a photo, scan or receipt", money(m["backed"])],
              ["From memory only", money(m["memory"])]]
     if case.get("address"):
-        facts.insert(0, ["Address", case["address"]])
+        facts.insert(0, ["Address", Paragraph(esc(case["address"]), small)])
     if case.get("loss_date"):
         facts.insert(1 if case.get("address") else 0, ["Date of loss", case["loss_date"][:10]])
     if m["limit"]:
@@ -218,14 +228,14 @@ def export_pdf(case_id: str, store: Store | None = None, include_suggested: bool
         if photo and Path(photo["path"]).exists():
             try:
                 thumb = picture(crop_item(photo["path"], item["bbox"], max_side=220), 0.8 * inch, 0.8 * inch)
-            except OSError:
+            except Exception:                               # one unreadable photo must not sink the PDF
                 thumb = ""
-        brand = f" ({row['brand_model']})" if row["brand_model"] else ""
-        data.append([thumb, Paragraph(f"{row['item']}{brand}<br/><font color='#6C6863'>{row['category']}</font>", small),
-                     Paragraph(row["room"], small), row["qty"],
+        brand = f" ({esc(row['brand_model'])})" if row["brand_model"] else ""
+        data.append([thumb, Paragraph(f"{esc(row['item'])}{brand}<br/><font color='#6C6863'>{esc(row['category'])}</font>", small),
+                     Paragraph(esc(row["room"]), small), row["qty"],
                      money(row["rcv_low"]) if row["rcv_low"] != "" else "", money(row["rcv_mid"]) if row["rcv_mid"] != "" else "",
                      money(row["rcv_high"]) if row["rcv_high"] != "" else "",
-                     Paragraph(f"{row['evidence']}<br/><font color='#6C6863'>{row['contributor']}</font>", small)])
+                     Paragraph(f"{esc(row['evidence'])}<br/><font color='#6C6863'>{esc(row['contributor'])}</font>", small)])
     table = Table(data, colWidths=[0.9 * inch, 2.1 * inch, 1.0 * inch, 0.4 * inch, 0.6 * inch, 0.6 * inch, 0.6 * inch, 1.3 * inch],
                   repeatRows=1)
     table.setStyle(TableStyle([("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 8.5),
@@ -250,9 +260,13 @@ def export_pdf(case_id: str, store: Store | None = None, include_suggested: bool
             boxes = [{"n": n, "bbox": i["bbox"], "status": "listed"} for n, i in enumerate(items, 1)]
             when = photo.get("taken") or photo.get("captured") or ""
             who = "3D scan" if photo.get("added_by") == "scan" else (photo.get("added_by") or "")
-            story += [picture(annotate(photo["path"], boxes, max_side=1100), 5.2 * inch),
-                      Paragraph(" · ".join(x for x in (photo_id, who, when) if x), note),
-                      Paragraph(" · ".join(f"{n} {i['label']}" for n, i in enumerate(items, 1)), small),
+            try:                                            # tall photos are fitted to the page height
+                shot = picture(annotate(photo["path"], boxes, max_side=1100), 5.2 * inch, 6.6 * inch)
+            except Exception:
+                continue
+            story += [shot,
+                      Paragraph(esc(" · ".join(x for x in (photo_id, who, when) if x)), note),
+                      Paragraph(esc(" · ".join(f"{n} {i['label']}" for n, i in enumerate(items, 1))), small),
                       Spacer(1, 0.25 * inch)]
         if len(by_photo) > max_appendix_photos:
             story.append(Paragraph(f"{len(by_photo) - max_appendix_photos} more evidence photos are available on request.", note))

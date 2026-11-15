@@ -44,3 +44,11 @@ def test_meter_json_follows_an_answer_and_matches_the_page(case):
 def test_meter_json_wrong_token_is_404(case):
     client, _, _ = case
     assert client.get("/p/nope/meter.json").status_code == 404
+
+
+def test_item_sheet_wording(case):
+    client, store, ids = case
+    store.update_item("fam1", ids["sofa"], price_low=1230.4, price_mid=1300, price_high=1449.6)
+    detail = client.get(f"/p/owner-token/item/{ids['sofa']}.json").json()
+    assert "rough allowance for uncertainty" not in detail["price_basis"]
+    assert [p["shown"] for p in detail["price_sources"]] == ["$1,230–$1,450"]   # whole dollars, not "$1.2–1.4k"

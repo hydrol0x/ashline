@@ -202,8 +202,17 @@ def price_stack(item: dict) -> list[dict]:
                      else "A typical price for this kind of thing" if source == "typical price"
                      else "A rough allowance for buying it new today",
                      "amount": money_range(guess.get("low"), guess.get("high")), "links": []})
+    def whole(low, high=None):                             # $1,200–$1,400: whole dollars, the same way on every row
+        high = low if high is None else high
+        return f"${low:,.0f}" if round(low) == round(high) else f"${low:,.0f}–${high:,.0f}"
+    cents = float((paid or {}).get("amount") or 0)
+    spans = {"family": (item.get("price_mid"),), "paid": (cents,) if cents == round(cents) else (),   # keep real cents
+             "online": ((online or {}).get("low"), (online or {}).get("high")),
+             "estimate": ((guess or {}).get("low"), (guess or {}).get("high"))}
     for row in rows:
         row["in_use"] = row["kind"] == using
+        span = [float(v) for v in spans.get(row["kind"], ()) if v is not None]
+        row["shown"] = whole(*span) if span else row["amount"]           # what the item sheet's price rows show
     return rows
 
 
@@ -469,7 +478,7 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
         view = item_view(item, sightings, case)
         calibrated = load_calibration()["calibrated"]
         basis = {"set by family": "Price set by the family.",
-                 "category default": "A rough figure for this kind of item. Set the price if you know it.",
+                 "category default": "A usual figure for this kind of item. Set the price if you know it.",
                  "typical price": "A typical price for this kind of thing. Set the price if you know it."}.get(
             item.get("price_source") or "", "Estimate of buying it new today, at a typical mid-range price.")
         source = item.get("price_source") or ""
@@ -482,7 +491,7 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
             basis = "Price of the closest match found online today."
         elif item.get("price_mid") and source != "set by family":
             basis += (" The range covers 90% of similar items in our test set." if calibrated
-                      else " The range is a rough allowance for uncertainty.")
+                      else " The range is a rough allowance.")
         where = None                                      # its room and spot on the plan, for the small locator
         try:
             from . import layout
@@ -498,7 +507,7 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
             "price_sources": price_stack(item),
             "price_mid": item.get("price_mid"), "editable": role == "owner",
             "sightings": [{
-                "id": s["item_id"], "source": SOURCE_NAMES.get(s["source"], s["source"]),
+                "id": s["item_id"], "source": _title(SOURCE_NAMES.get(s["source"], s["source"])),   # "Family photo", as on the cards
                 "by": "3D scan" if s.get("added_by") == "scan" else s.get("added_by"),
                 "date": s.get("evidence_date"), "label": s["label"],
                 "image": f"/p/{token}/sighting/{s['item_id']}.jpg" if s.get("photo_id") and s.get("bbox") else None,

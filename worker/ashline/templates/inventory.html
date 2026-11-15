@@ -76,7 +76,7 @@
   .key i { flex: none; width: 12px; height: 12px; border-radius: 3px; margin-top: 5px; }
   .key i.pending { border: 1.5px dashed var(--wait); border-radius: 50%; }
   .key span { flex: 1 1 auto; min-width: 0; color: var(--ink-2); }
-  .key span small { color: var(--muted); font-size: 13px; margin-left: 6px; white-space: nowrap; }
+  .key span small { display: block; color: var(--muted); font-size: 13px; white-space: nowrap; }
   .key b { font-weight: 700; font-variant-numeric: tabular-nums; }
   .fine { border-top: 1px solid var(--card-line); margin-top: 14px; padding-top: 10px; display: grid; gap: 6px; font-size: 14px; color: var(--muted); }
   .due { font-size: 14px; color: var(--red-deep); font-weight: 600; }
@@ -353,7 +353,7 @@
       </div>
       <div class="body">
         <div class="name">{{ i.title }}</div>
-        <div class="line">{{ i.room }} · {{ i.category|capitalize }}{% if i.brand %} · {{ i.brand }}{% endif %}</div>
+        <div class="line">{{ i.room }}{% if i.category|lower != i.room|lower %} · {{ i.category|capitalize }}{% endif %}{% if i.brand %} · {{ i.brand }}{% endif %}</div>
         {% if i.price %}<div class="price"><i class="pi {{ i.price_from or 'estimate' }}">{{ icon(i.price_from) }}</i><b>{{ i.price }}</b>{% if i.price_from %}<small>{{ i.price_from }}</small>{% endif %}</div>{% endif %}
         {% if i.acv_text %}<div class="acv">about {{ i.acv_text }} depreciated</div>{% endif %}
         {% set photos = i.badges.photo %}
@@ -906,7 +906,7 @@
     titleRow.appendChild(el('h2', d.title));
     titleRow.appendChild(el('span', { confirmed: '✓ On your list', suggested: 'Waiting for OK', rejected: 'Removed' }[d.status] || '', 'state ' + d.status));
     sheet.appendChild(titleRow);
-    var category = d.category ? d.category.charAt(0).toUpperCase() + d.category.slice(1) : '';
+    var category = d.category && d.category.toLowerCase() !== (d.room || '').toLowerCase() ? d.category.charAt(0).toUpperCase() + d.category.slice(1) : '';
     sheet.appendChild(el('p', [d.room, category, d.brand].filter(Boolean).join(' · '), 'muted'));
     if (d.price) sheet.appendChild(el('p', d.price, 'price-line'));
     if (d.acv_text) sheet.appendChild(el('p', 'About ' + d.acv_text + ' depreciated, which is what flood insurance pays (an estimate).', 'muted small'));
@@ -934,7 +934,7 @@
           var a = document.createElement('a'); a.href = l.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
           a.textContent = l.text; left.appendChild(a);
         });
-        right.appendChild(el('b', p.amount)); if (p.in_use) right.appendChild(el('span', 'In use'));
+        right.appendChild(el('b', p.shown || p.amount)); if (p.in_use) right.appendChild(el('span', 'In use'));
         row.appendChild(ico); row.appendChild(left); row.appendChild(right); stack.appendChild(row);
       });
       sheet.appendChild(stack);
@@ -955,7 +955,8 @@
       });
       sheet.appendChild(shops);
     }
-    if (d.sightings.length > 1) sheet.appendChild(el('p', 'Seen in ' + d.sightings.length + ' photos. Swipe to see each one.', 'muted small'));
+    if (d.sightings.length > 1) sheet.appendChild(el('p', 'Seen in ' + d.sightings.length + ' photos. ' + (matchMedia('(pointer: coarse)').matches
+      ? 'Swipe to see each one.' : 'Click a photo, then use the arrows to see each one.'), 'muted small'));
 
     if (d.editable) {
       var main = el('div', null, 'decide'), row = el('div', null, 'row'), editor = el('form', null, 'editor');

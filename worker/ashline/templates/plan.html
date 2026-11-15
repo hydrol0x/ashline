@@ -9,103 +9,129 @@
 <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png?v={{ v }}">
 <link rel="stylesheet" href="/static/brand.css?v={{ v }}">
 <style>
-  :root { --room: #F2F3F5; --room-on: #F9DDD7; --wall: #171615; }
-  main { max-width: 1160px; margin: 0 auto; padding: 0 18px 60px; }
-  .masthead { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--rule); margin-bottom: 22px; }
+  /* The brand's colours and type, in the shapes of the family's mockups: soft cards, pills, dashed
+     outlines for anything rough or waiting, a count in a circle per room, haloed dots. */
+  :root { --room: #F5F5F3; --room-on: #FBE4DF; --wall: #2B2927; --card-line: #E3E0DB; --r: 18px; }
+  main { max-width: 1200px; margin: 0 auto; padding: 0 18px 60px; }
+  .masthead { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; border-bottom: 1px solid var(--rule); margin-bottom: 18px; }
   .masthead .brand img { height: 26px; }
   .masthead .brand span { font-size: 19px; }
-  .masthead a.back { color: var(--muted); font-size: 14px; text-decoration: none; }
-  .masthead a.back:hover { color: var(--ink); }
-  h1 { font: 700 clamp(26px, 4.2vw, 38px)/1.05 var(--sans); letter-spacing: -0.025em; margin: 0 0 6px; }
-  .sub { color: var(--muted); font-size: 14px; margin: 0 0 16px; display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
-  .tag { border: 1.5px solid var(--rule); padding: 3px 10px; font-size: 13px; color: var(--ink-2); white-space: nowrap; }
-  .tag.rough { border-style: dashed; }
-  .chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 2px 0 14px; }
-  .chip { padding: 6px 12px; border-radius: 3px; border: 1.5px solid var(--rule); background: var(--paper);
-          font: inherit; font-size: 13.5px; cursor: pointer; white-space: nowrap; color: inherit; }
+  .masthead small { color: var(--muted); font-size: 13px; }
+  a.back { color: var(--red); font-weight: 600; font-size: 14px; text-decoration: none; }
+  a.back:hover { text-decoration: underline; }
+  .head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 8px 0 16px; }
+  h1 { font: 700 clamp(26px, 4vw, 34px)/1.1 var(--sans); letter-spacing: -0.02em; margin: 0; }
+  .pill { display: inline-flex; align-items: center; gap: 7px; border: 1.5px solid var(--card-line); border-radius: 999px;
+          padding: 5px 13px; font-size: 13.5px; color: var(--ink-2); white-space: nowrap; background: var(--paper); }
+  .pill.rough { border-style: dashed; border-color: #8C8882; }
+  .pill svg { width: 13px; height: 13px; flex: none; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; margin-left: auto; }
+  .chip { display: inline-flex; align-items: center; padding: 8px 15px; border-radius: 999px; border: 1.5px solid var(--card-line);
+          background: var(--paper); font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; white-space: nowrap; color: inherit; }
   .chip:hover { border-color: var(--ink); }
-  .chip i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; }
-  .chip[aria-pressed=false] { opacity: 0.4; }
+  .chip i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; }
+  .chip[aria-pressed=true] { background: var(--ink); border-color: var(--ink); color: #fff; }
+  @media (max-width: 899px) { .chips { margin-left: 0; width: 100%; } }
+
   .layout { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
-  @media (min-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr) 330px; align-items: start; } }
-  .canvas { position: relative; background: var(--paper); border: 1.5px solid var(--ink); overflow: hidden; }
-  .canvas svg { display: block; width: 100%; min-height: 260px; max-height: 72vh; touch-action: none; cursor: grab; }
+  @media (min-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr) 350px; align-items: start; } }
+  .card { background: var(--paper); border: 1.5px solid var(--card-line); border-radius: var(--r); }
+  .canvas { position: relative; overflow: hidden; padding: 6px; }
+  .canvas svg { display: block; width: 100%; min-height: 280px; max-height: 68vh; touch-action: none; cursor: grab; }
   .canvas svg.dragging { cursor: grabbing; }
-  .zoom { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 6px; }
-  .zoom button { width: 34px; height: 34px; border-radius: 3px; border: 1.5px solid var(--rule); background: var(--paper);
-                 font-size: 18px; line-height: 1; cursor: pointer; color: var(--ink); }
+  .under { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; border-top: 1px solid var(--card-line); padding: 12px 12px 8px; margin-top: 4px; }
+  .under .why { color: var(--muted); font-size: 13px; flex: 1 1 220px; }
+  .zoom { display: flex; gap: 8px; margin-left: auto; }
+  .zoom button { width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid var(--card-line); background: var(--paper);
+                 font-size: 20px; line-height: 1; cursor: pointer; color: var(--ink); }
   .zoom button:hover { border-color: var(--ink); }
+
   .room { fill: var(--room); stroke: var(--wall); stroke-width: 2; vector-effect: non-scaling-stroke; cursor: pointer; }
-  .room:hover { fill: #E7E9EC; }
+  .room.sketch { fill: var(--paper); stroke-dasharray: 7 5; stroke-width: 1.7; }
+  .room:hover { fill: #EEEDEA; }
+  .room.on, .room.sketch.on { fill: var(--room-on); stroke: var(--red); stroke-width: 2.2; }
   .door { stroke: var(--paper); stroke-width: 4; vector-effect: non-scaling-stroke; pointer-events: none; }
-  .room.on { fill: var(--room-on); }
-  .room.sketch { stroke-dasharray: 7 5; stroke-width: 1.6; }
-  .bubble circle { fill: var(--paper); stroke: var(--ink); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
-  .bubble text { font-size: calc(var(--u) * 0.9px); font-weight: 700; fill: var(--ink); text-anchor: middle; dominant-baseline: central; }
+  .name { font-size: calc(var(--us, var(--u)) * 1px); fill: var(--ink); pointer-events: none; font-weight: 700; }
+  .about { font-size: calc(var(--us, var(--u)) * 0.78px); fill: var(--muted); pointer-events: none; }
+  .name.mid, .about.mid { text-anchor: middle; }
+  .floor { font-size: calc(var(--us, var(--u)) * 1.05px); fill: var(--muted); font-weight: 600; }
   .bubble { pointer-events: none; }
-  .bubble.hide, .pin.hide { display: none; }
-  .name { font-size: calc(var(--u) * 1px); fill: var(--ink); text-anchor: middle; pointer-events: none; font-weight: 700; }
-  .count { font-size: calc(var(--u) * 0.75px); fill: var(--muted); text-anchor: middle; pointer-events: none; }
-  .floor { font-size: calc(var(--u) * 1.1px); fill: var(--muted); }
-  .pin { stroke: #fff; stroke-width: 1.5; vector-effect: non-scaling-stroke; cursor: pointer; }
-  .pin.suggested { fill-opacity: 0.8; }
-  .pin.dim { opacity: 0.12; pointer-events: none; }
-  .pin.on { stroke: var(--ink); stroke-width: 2.5; }
-  .side { border-top: 2px solid var(--ink); padding: 14px 0 0; }
-  .side h2 { font: 700 20px/1.2 var(--sans); letter-spacing: -0.01em; margin: 0 0 2px; }
-  .side .muted { color: var(--muted); font-size: 14px; margin: 0 0 10px; }
-  .side ul { list-style: none; margin: 0; padding: 0; max-height: 56vh; overflow: auto; }
-  .side li { display: flex; gap: 10px; align-items: center; padding: 8px 4px; border-top: 1px solid var(--rule); cursor: pointer; font-size: 14.5px; }
-  .side li:hover, .side li.on { background: var(--panel); }
-  .side li img, .side li .blank { width: 44px; height: 44px; object-fit: cover; flex: none; background: var(--panel); }
-  .side li .what { flex: 1 1 auto; min-width: 0; }
-  .side li .what b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .side li .what span { color: var(--muted); font-size: 12.5px; }
-  .side li .price { flex: none; font-weight: 600; font-size: 14px; }
-  .side a { color: var(--red); font-weight: 600; }
-  .side a.back { font-size: 14px; text-decoration: none; }
-  .big { width: 100%; max-height: 300px; object-fit: contain; margin: 10px 0; display: block; background: var(--panel); }
-  .note { color: var(--muted); font-size: 13px; margin-top: 16px; }
-  .tip { position: absolute; pointer-events: none; background: var(--ink); color: #fff; font-size: 13px; padding: 5px 9px;
-         border-radius: 3px; white-space: nowrap; transform: translate(-50%, -140%); z-index: 2; }
-  .tip.card { background: var(--paper); color: var(--ink); border: 1.5px solid var(--ink); padding: 6px 10px 6px 6px;
-              display: flex; gap: 9px; align-items: center; transform: translate(-50%, -118%); }
-  .tip.card img { width: 46px; height: 46px; object-fit: cover; background: var(--panel); }
-  .tip.card b { display: block; font-size: 13.5px; max-width: 190px; overflow: hidden; text-overflow: ellipsis; }
-  .tip.card span { color: var(--muted); font-size: 12.5px; }
+  .bubble circle { fill: var(--paper); stroke: var(--ink); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
+  .bubble text { font-size: calc(var(--u) * 0.95px); font-weight: 700; fill: var(--ink); text-anchor: middle; dominant-baseline: central; }
+  .halo { fill: #C9CCD1; fill-opacity: 0.55; pointer-events: none; }
+  .pin { stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; cursor: pointer; }
+  .pin.suggested { fill-opacity: 0.85; }
+  .pin.on { stroke: var(--ink); stroke-width: 2.6; }
+  .hide { display: none; }
+
+  .tip { position: absolute; pointer-events: none; background: var(--ink); color: #fff; font-size: 13px; padding: 6px 11px;
+         border-radius: 999px; white-space: nowrap; transform: translate(-50%, -150%); z-index: 2; }
+  .tip.thing { background: var(--paper); color: var(--ink); border: 1.5px solid var(--ink); border-radius: 14px; padding: 7px 14px 7px 7px;
+               display: flex; gap: 10px; align-items: center; transform: translate(-50%, -116%); box-shadow: 0 6px 18px rgba(23, 22, 21, .10); }
+  .tip.thing img { width: 54px; height: 44px; object-fit: cover; border-radius: 9px; background: var(--panel); }
+  .tip.thing b { display: block; font-size: 14px; max-width: 200px; overflow: hidden; text-overflow: ellipsis; }
+  .tip.thing span { color: var(--muted); font-size: 13px; }
+
+  .side { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+  .side .card { padding: 16px 16px 10px; min-width: 0; }
+  .side h2 { font: 700 17px/1.2 var(--sans); margin: 0 0 10px; }
+  .side .row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .side .row a, .side a.more { color: var(--red); font-weight: 700; font-size: 14px; text-decoration: none; cursor: pointer; }
   .side table { width: 100%; border-collapse: collapse; font-size: 14.5px; font-variant-numeric: tabular-nums; }
-  .side th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 6px 4px; border-bottom: 1.5px solid var(--ink); }
-  .side td { padding: 9px 4px; border-bottom: 1px solid var(--rule); }
+  .side th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 4px 8px 8px; }
+  .side td { padding: 9px 8px; border-top: 1px solid var(--card-line); }
   .side th.n, .side td.n { text-align: right; }
-  .side tbody tr { cursor: pointer; }
-  .side tbody tr:hover { background: var(--panel); }
-  .side tr.total td { font-weight: 700; border-bottom: 0; border-top: 1.5px solid var(--ink); cursor: default; }
-  .side li .price small { display: block; font-weight: 500; color: var(--muted); font-size: 12px; text-align: right; }
+  .side tbody tr.go { cursor: pointer; }
+  .side tbody tr.go:hover td { background: var(--panel); }
+  .side tbody tr.on td { background: var(--room-on); font-weight: 700; }
+  .side tr.total td { font-weight: 700; border-top: 1.5px solid var(--ink); }
+  .side ul { list-style: none; margin: 0; padding: 0; }
+  .side li { display: flex; gap: 12px; align-items: center; padding: 8px 6px; border-radius: 12px; cursor: pointer; font-size: 14.5px; }
+  .side li:hover, .side li.on { background: var(--panel); }
+  .side li img, .side li .blank { width: 50px; height: 42px; object-fit: cover; flex: none; background: var(--panel); border-radius: 9px; }
+  .side li .what { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .side li .price { flex: none; text-align: right; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .side li .price small { display: block; font-weight: 500; color: var(--muted); font-size: 12px; }
+  .side .big { width: 100%; max-height: 260px; object-fit: cover; border-radius: 14px; margin: 0 0 12px; display: block; background: var(--panel); }
+  .side .muted { color: var(--muted); font-size: 14px; margin: 2px 0 8px; }
+  .side .state { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 3px 11px; font-size: 13px; font-weight: 600;
+                 background: var(--panel); white-space: nowrap; }
+  .side .state.wait { background: none; border: 1.5px dashed #8C8882; color: var(--ink-2); }
+  .side .open { display: flex; justify-content: center; margin: 12px 0 6px; padding: 11px 16px; border: 1.5px solid var(--red); border-radius: 14px;
+                color: var(--red); font-weight: 700; text-decoration: none; }
+  .side .open:hover { background: var(--red); color: #fff; }
+  .empty { color: var(--muted); font-size: 15px; }
 </style>
 </head>
 <body>
 <main>
-  <div class="masthead"><a class="brand" href="/"><img src="/static/img/logo.png?v={{ v }}" alt=""><span>Ashline</span></a><a class="back" href="/p/{{ token }}">← Back to the inventory</a></div>
-  <h1>{{ name }}: where things were</h1>
-  <p class="sub">
-    <span class="tag{{ ' rough' if layout.kind == 'sketch' else '' }}">{{ 'Sketch from your photos · not to scale' if layout.kind == 'sketch' else 'Room outlines from the 3D scan' }}</span>
-    {% if layout.unplaced %}<span class="tag rough">{{ layout.unplaced }} item{{ '' if layout.unplaced == 1 else 's' }} with no room yet</span>{% endif %}
-    <span>Tap a room to see what was in it.</span>
-  </p>
+  <div class="masthead"><a class="brand" href="/"><img src="/static/img/logo.png?v={{ v }}" alt=""><span>Ashline</span></a><small>{{ name }}</small></div>
+  <a class="back" href="/p/{{ token }}">Back to the list</a>
+  <div class="head">
+    <h1>Where things were</h1>
+    {% if layout.kind == 'sketch' %}
+    <span class="pill rough"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M11 2.5l2.5 2.5L6 12.5 3 13l.5-3z"/></svg>Sketch from your photos · not to scale</span>
+    {% else %}
+    <span class="pill">Rooms measured by the 3D scan</span>
+    {% endif %}
+    {% if layout.rooms %}<div class="chips" id="chips"></div>{% endif %}
+  </div>
 
   {% if layout.rooms %}
-  <div class="chips" id="chips"></div>
   <div class="layout">
-    <div class="canvas">
+    <div class="card canvas">
       <svg id="plan" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Plan of the home"></svg>
-      <div class="zoom"><button id="in" aria-label="Zoom in">+</button><button id="out" aria-label="Zoom out">−</button><button id="fit" aria-label="Show everything">⤢</button></div>
       <div class="tip" id="tip" hidden></div>
+      <div class="under">
+        <span class="why">{{ layout.note }}</span>
+        {% if layout.unplaced %}<span class="pill rough">{{ layout.unplaced }} item{{ '' if layout.unplaced == 1 else 's' }} with no room yet</span>{% endif %}
+        <div class="zoom"><button id="out" aria-label="Zoom out">−</button><button id="in" aria-label="Zoom in">+</button><button id="fit" aria-label="Show everything">⤢</button></div>
+      </div>
     </div>
     <aside class="side" id="side"></aside>
   </div>
-  <p class="note">{{ layout.note }}</p>
   {% else %}
-  <p class="sub">There is no plan yet. Send photos or a video walking through the home, and tell Ashline which rooms it had.</p>
+  <p class="empty">There is no plan yet. Send photos or a video walking through the home, and tell Ashline which rooms it had.</p>
   {% endif %}
 </main>
 
@@ -129,7 +155,8 @@
 
   const pad = 0.8, full = {x: -pad, y: -pad, w: L.width + 2 * pad, h: L.height + 2 * pad};
   let view = Object.assign({}, full);
-  const apply = () => svg.setAttribute("viewBox", [view.x, view.y, view.w, view.h].join(" "));
+  let resize = () => {};                                               // set once the drawing exists
+  const apply = () => { svg.setAttribute("viewBox", [view.x, view.y, view.w, view.h].join(" ")); resize(); };
   apply();
   svg.style.aspectRatio = full.w + " / " + full.h;
   const unit = Math.min(Math.max(full.w / 62, 0.3), 0.7);              // text and dots grow with the size of the home
@@ -137,92 +164,116 @@
 
   const placed = L.pins.filter(p => p.x != null), loose = L.pins.filter(p => p.x == null);
   const rough = L.kind === "sketch";
-  let room = null, pinOn = null;
-  const off = new Set();
-  const shownIn = id => placed.filter(p => p.room_id === id && !off.has(p.category));
+  let room = null, pinOn = null, only = null, more = false;            // the open room, the lit dot, one category or all
+  const seen = p => only === null || p.category === only;
+  const shownIn = id => placed.filter(p => p.room_id === id && seen(p));
   const worth = pins => pins.reduce((s, p) => s + p.value, 0);
+  const priced = p => p.value ? money(p.value) : "";
 
   const gRooms = svg.appendChild(el("g")), gDoors = svg.appendChild(el("g")), gText = svg.appendChild(el("g")),
-        gPins = svg.appendChild(el("g"));
+        gHalo = svg.appendChild(el("g")), gPins = svg.appendChild(el("g"));
   L.floors.forEach(f => gText.appendChild(el("text", {x: f.x, y: -0.25 * unit, class: "floor"}, f.label ? "Floor " + f.label : "")));
-  const roomNodes = {}, pinNodes = {}, bubbles = {};
+  const roomNodes = {}, pinNodes = {}, haloNodes = {}, labels = {};
   L.rooms.forEach(r => {
     const node = el("polygon", {points: r.points.map(p => p.join(",")).join(" "), class: "room" + (rough ? " sketch" : "")});
     node.addEventListener("click", () => { if (!moved) select(room === r.id ? null : r.id); });
     gRooms.appendChild(node); roomNodes[r.id] = node;
     (r.doors || []).forEach(d => gDoors.appendChild(el("line", {x1: d[0][0], y1: d[0][1], x2: d[1][0], y2: d[1][1], class: "door"})));
-    const named = r.name && r.area >= 2;
-    if (named) gText.appendChild(el("text", {x: r.label_at[0], y: r.label_at[1], class: "name"}, r.name));
-    // A count in a circle stands for the room's things until the room is opened.
-    const g = gText.appendChild(el("g", {class: "bubble", transform: "translate(" + r.label_at[0] + "," + (r.label_at[1] + (named ? unit * 1.5 : 0)) + ")"}));
-    g.appendChild(el("circle", {r: unit * 0.95}));
-    bubbles[r.id] = {g: g, text: g.appendChild(el("text", {}, ""))};
+    const xs = r.points.map(p => p[0]), ys = r.points.map(p => p[1]);
+    const x0 = Math.min(...xs), y0 = Math.min(...ys), wide = Math.max(...xs) - x0, tall = Math.max(...ys) - y0;
+    const label = labels[r.id] = {r: r, x0: x0, y0: y0, small: r.area < 5 || wide < unit * 7 || tall < unit * 5};
+    if (rough) {                                                        // a sketched room: its name in the corner, as on a drawing
+      label.name = gText.appendChild(el("text", {x: x0 + unit * 0.6, y: y0 + unit * 1.5, class: "name"}, r.name));
+      label.about = gText.appendChild(el("text", {x: x0 + unit * 0.6, y: y0 + unit * 2.6, class: "about"}, ""));
+      label.at = label.small ? null : [x0 + wide / 2, y0 + tall / 2 + unit * 0.8];
+    } else {                                                            // a measured room can be any shape: label where it is widest
+      if (r.name && r.area >= 2) label.name = gText.appendChild(el("text", {x: r.label_at[0], y: r.label_at[1], class: "name mid"}, r.name));
+      label.at = [r.label_at[0], r.label_at[1] + (label.name ? unit * 1.5 : 0)];
+    }
+    if (label.at) {                                                     // a count in a circle stands for the room's things until it is opened
+      const g = gText.appendChild(el("g", {class: "bubble", transform: "translate(" + label.at[0] + "," + label.at[1] + ")"}));
+      g.appendChild(el("circle", {r: unit * 1.05}));
+      label.bubble = g; label.count = g.appendChild(el("text", {}, ""));
+    }
   });
   placed.forEach(p => {
-    const node = el("circle", {cx: p.x, cy: p.y, r: unit * 0.36, fill: colour(p.category), class: "pin " + p.status});
-    node.addEventListener("click", ev => { ev.stopPropagation(); if (!moved) show(p, node); });
-    node.addEventListener("pointerenter", () => { if (!tip.classList.contains("card")) hint(p, node); });
-    node.addEventListener("pointerleave", () => { if (!tip.classList.contains("card")) tip.hidden = true; });
+    haloNodes[p.id] = gHalo.appendChild(el("circle", {cx: p.x, cy: p.y, r: unit * 0.62, class: "halo"}));
+    const node = el("circle", {cx: p.x, cy: p.y, r: unit * 0.34, fill: colour(p.category), class: "pin " + p.status});
+    node.addEventListener("click", ev => { ev.stopPropagation(); if (!moved) show(p); });
+    node.addEventListener("pointerenter", () => { if (!tip.classList.contains("thing")) hint(p, node); });
+    node.addEventListener("pointerleave", () => { if (!tip.classList.contains("thing")) tip.hidden = true; });
     gPins.appendChild(node); pinNodes[p.id] = node;
   });
+
+  // Names, counts and dots keep their size on screen however far the plan is zoomed in.
+  resize = () => {
+    const box = svg.getBoundingClientRect(), perUnit = Math.min(box.width / view.w, box.height / view.h) || 1;
+    const u = Math.max(unit * view.w / full.w, 13 / perUnit), z = u / unit;     // never under 13 px a unit: readable, tappable
+    svg.style.setProperty("--us", u);
+    L.rooms.forEach(r => {
+      const label = labels[r.id];
+      if (rough && label.name) {
+        label.name.setAttribute("x", label.x0 + u * 0.6); label.name.setAttribute("y", label.y0 + u * 1.5);
+        label.about.setAttribute("x", label.x0 + u * 0.6); label.about.setAttribute("y", label.y0 + u * 2.6);
+      }
+      if (label.bubble) label.bubble.setAttribute("transform", "translate(" + label.at[0] + "," + label.at[1] + ") scale(" + z + ")");
+    });
+    placed.forEach(p => { pinNodes[p.id].setAttribute("r", u * 0.36); haloNodes[p.id].setAttribute("r", u * 0.66); });
+  };
+  resize();
 
   function place(node) {
     const box = node.getBoundingClientRect(), host = svg.parentNode.getBoundingClientRect();
     tip.hidden = false;
-    const half = tip.offsetWidth / 2 + 6;
+    const half = tip.offsetWidth / 2 + 8;
     tip.style.left = Math.min(Math.max(box.left + box.width / 2 - host.left, half), host.width - half) + "px";
-    tip.style.top = Math.max(box.top - host.top, tip.offsetHeight + 12) + "px";
+    tip.style.top = Math.max(box.top - host.top, tip.offsetHeight + 14) + "px";
   }
-  const priced = p => p.value ? money(p.value) + (p.basis && p.basis !== "estimate" ? " · " + p.basis : "") : "";
-  function hint(p, node) {
-    tip.className = "tip"; tip.textContent = cap(p.label) + (p.value ? " · " + priced(p) : "");
-    place(node);
-  }
-  function card(p, node) {                                              // the thing itself, beside its dot
-    tip.className = "tip card"; tip.textContent = "";
+  function hint(p, node) { tip.className = "tip"; tip.textContent = cap(p.label) + (p.value ? " · " + priced(p) : ""); place(node); }
+  function thing(p, node) {                                             // the thing itself, beside its dot
+    tip.className = "tip thing"; tip.textContent = "";
     if (p.photo) { const img = tip.appendChild(html("img")); img.alt = ""; img.src = "/p/" + token + "/crop/" + p.id + ".jpg"; }
     const words = tip.appendChild(html("div"));
     words.appendChild(html("b", "", cap(p.label)));
-    words.appendChild(html("span", "", priced(p) || p.category));
+    words.appendChild(html("span", "", p.value ? priced(p) + (p.basis ? " · " + p.basis : "") : p.category));
     place(node);
   }
-  function uncard() { tip.className = "tip"; tip.hidden = true; }
+  function unthing() { tip.className = "tip"; tip.hidden = true; }
 
   function refresh() {
     placed.forEach(p => {
-      const node = pinNodes[p.id];
       // Dots show for the open room; things placed outside any room always show.
-      node.classList.toggle("hide", off.has(p.category) || (p.room_id != null && p.room_id !== room));
-      node.classList.toggle("on", pinOn === p.id);
+      const gone = !seen(p) || (p.room_id != null && p.room_id !== room);
+      pinNodes[p.id].classList.toggle("hide", gone); haloNodes[p.id].classList.toggle("hide", gone);
+      pinNodes[p.id].classList.toggle("on", pinOn === p.id);
     });
     L.rooms.forEach(r => {
-      roomNodes[r.id].classList.toggle("on", r.id === room);
-      const n = shownIn(r.id).length;
-      bubbles[r.id].text.textContent = n;
-      bubbles[r.id].g.classList.toggle("hide", !n || r.id === room);
+      const label = labels[r.id], pins = shownIn(r.id), n = pins.length, open = r.id === room;
+      roomNodes[r.id].classList.toggle("on", open);
+      if (label.bubble) { label.count.textContent = n; label.bubble.classList.toggle("hide", !n || open); }
+      if (label.about) label.about.textContent = !n ? "" : label.small ? n + (n === 1 ? " item" : " items")
+        : open ? n + (n === 1 ? " item" : " items") + (worth(pins) ? " · about " + money(worth(pins)) : "")
+        : (worth(pins) ? "about " + money(worth(pins)) : "");
     });
   }
 
-  function rooms() {                                                    // nothing open: every room, what it held
-    side.textContent = "";
-    side.appendChild(html("h2", "", "Rooms"));
-    side.appendChild(html("p", "muted", rough ? "Tap a room. Sizes and positions are approximate." : "Tap a room to see where things stood."));
-    const table = side.appendChild(html("table")), head = table.appendChild(html("thead")).appendChild(html("tr"));
+  function roomsCard() {                                                // every room and what it held; the open one is marked
+    const card = side.appendChild(html("div", "card"));
+    card.appendChild(html("h2", "", "Rooms"));
+    const table = card.appendChild(html("table")), head = table.appendChild(html("thead")).appendChild(html("tr"));
     head.appendChild(html("th", "", "Room")); head.appendChild(html("th", "n", "Items")); head.appendChild(html("th", "n", "Rough allowance"));
     const body = table.appendChild(html("tbody"));
-    const rows = L.rooms.map(r => ({r: r, pins: shownIn(r.id)})).filter(x => x.pins.length)
-                        .sort((a, b) => worth(b.pins) - worth(a.pins));
+    const rows = L.rooms.map(r => ({r: r, pins: shownIn(r.id)})).filter(x => x.pins.length).sort((a, b) => worth(b.pins) - worth(a.pins));
     rows.forEach(x => {
-      const tr = body.appendChild(html("tr"));
+      const tr = body.appendChild(html("tr", "go" + (x.r.id === room ? " on" : "")));
       tr.appendChild(html("td", "", x.r.name || "Room")); tr.appendChild(html("td", "n", x.pins.length));
       tr.appendChild(html("td", "n", money(worth(x.pins)) || "—"));
-      tr.addEventListener("click", () => select(x.r.id));
+      tr.addEventListener("click", () => select(x.r.id === room ? null : x.r.id));
     });
-    const outside = placed.filter(p => p.room_id == null && !off.has(p.category));
-    const nowhere = loose.filter(p => !off.has(p.category));
+    const outside = placed.filter(p => p.room_id == null && seen(p)), nowhere = loose.filter(seen);
     [["Outside the rooms", outside], ["No room yet", nowhere]].forEach(([name, pins]) => {
       if (!pins.length) return;
-      const tr = body.appendChild(html("tr")); tr.style.cursor = "default";
+      const tr = body.appendChild(html("tr"));
       tr.appendChild(html("td", "", name)); tr.appendChild(html("td", "n", pins.length)); tr.appendChild(html("td", "n", money(worth(pins)) || "—"));
     });
     const everything = rows.flatMap(x => x.pins).concat(outside, nowhere);
@@ -230,84 +281,97 @@
     foot.appendChild(html("td", "", "All")); foot.appendChild(html("td", "n", everything.length)); foot.appendChild(html("td", "n", money(worth(everything))));
   }
 
-  function list(r) {                                                    // one room open: its things, dearest first
-    const pins = shownIn(r.id), total = worth(pins);
-    side.textContent = "";
-    const back = side.appendChild(html("a", "back", "← All rooms"));
-    back.href = "#"; back.addEventListener("click", ev => { ev.preventDefault(); select(null); });
-    side.appendChild(html("h2", "", r.name || "Room"));
-    side.appendChild(html("p", "muted", pins.length + (pins.length === 1 ? " item" : " items") + (total ? " · about " + money(total) : "") +
-                                        (L.kind === "scan" ? " · " + Math.round(r.area * 10.764) + " sq ft" : "")));
-    const ul = side.appendChild(html("ul"));
-    pins.slice().sort((a, b) => b.value - a.value).forEach(p => {
+  function listCard(r) {                                                // the open room's things, dearest first
+    const pins = shownIn(r.id).sort((a, b) => b.value - a.value), card = side.appendChild(html("div", "card things"));
+    const top = card.appendChild(html("div", "row"));
+    top.appendChild(html("h2", "", "In the " + (r.name || "room").toLowerCase()));
+    if (pins.length > 6) {
+      const all = top.appendChild(html("a", "", more ? "Show fewer" : "See all " + pins.length));
+      all.addEventListener("click", () => { more = !more; draw(); });
+    }
+    const ul = card.appendChild(html("ul"));
+    (more ? pins : pins.slice(0, 6)).forEach(p => {
       const li = ul.appendChild(html("li"));
       if (p.photo) { const img = li.appendChild(html("img")); img.loading = "lazy"; img.alt = ""; img.src = "/p/" + token + "/crop/" + p.id + ".jpg"; }
       else li.appendChild(html("div", "blank"));
-      const what = li.appendChild(html("div", "what"));
-      what.appendChild(html("b", "", cap(p.label)));
-      what.appendChild(html("span", "", (p.qty > 1 ? p.qty + " × · " : "") + p.category + (p.status === "confirmed" ? " · on your list" : "")));
-      const price = li.appendChild(html("div", "price", money(p.value)));
+      li.appendChild(html("div", "what", (p.qty > 1 ? p.qty + " × " : "") + cap(p.label)));
+      const price = li.appendChild(html("div", "price", priced(p)));
       if (p.value && p.basis) price.appendChild(html("small", "", p.basis));
-      li.addEventListener("click", () => show(p, pinNodes[p.id]));
+      li.addEventListener("click", () => show(p));
       li.addEventListener("pointerenter", () => { pinOn = p.id; refresh(); });
       li.addEventListener("pointerleave", () => { pinOn = null; refresh(); });
     });
+    if (!pins.length) card.appendChild(html("p", "muted", "Nothing of this kind was recorded here."));
   }
 
-  function select(id) {
-    room = id; pinOn = null; uncard();
-    const r = L.rooms.find(x => x.id === id);
-    if (r) {                                                            // bring the room into view
+  function itemCard(p) {
+    const card = side.appendChild(html("div", "card thing"));
+    const r = L.rooms.find(x => x.id === p.room_id);
+    const back = card.appendChild(html("a", "back", r ? "Back to the " + (r.name || "room").toLowerCase() : "Back to the rooms"));
+    back.href = "#"; back.style.display = "block"; back.style.marginBottom = "10px";
+    back.addEventListener("click", ev => { ev.preventDefault(); pinOn = null; delete side.dataset.item; unthing(); draw(); refresh(); });
+    if (p.photo) { const img = card.appendChild(html("img", "big")); img.alt = ""; img.src = "/p/" + token + "/crop/" + p.id + ".jpg"; }
+    const top = card.appendChild(html("div", "row"));
+    top.appendChild(html("h2", "", cap(p.label)));
+    top.appendChild(html("span", "state" + (p.status === "confirmed" ? "" : " wait"), p.status === "confirmed" ? "On your list" : "Waiting for OK"));
+    card.appendChild(html("p", "muted", [p.room, cap(p.category), p.qty > 1 ? "quantity " + p.qty : ""].filter(Boolean).join(" · ")));
+    if (p.value) card.appendChild(html("p", "muted", priced(p) + (p.basis ? " · " + p.basis : "")));
+    card.appendChild(html("p", "muted", p.exact ? "Placed where it stood on the floor in the scan." : "Its place on the plan is approximate."));
+    const link = card.appendChild(html("a", "open", "Open in the list"));
+    link.href = "/p/" + token + "#item-" + p.id;
+  }
+
+  function draw() {                                                     // the side: rooms always, then the open room or the open thing
+    side.textContent = "";
+    roomsCard();
+    const p = side.dataset.item ? L.pins.find(x => String(x.id) === side.dataset.item) : null, r = L.rooms.find(x => x.id === room);
+    if (p) itemCard(p); else if (r) listCard(r);
+  }
+
+  function frame(r) {                                                   // bring a room into view, or the whole home
+    view = Object.assign({}, full);
+    if (r) {
       const xs = r.points.map(p => p[0]), ys = r.points.map(p => p[1]);
       const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
       const k = Math.max(w / full.w, h / full.h) * 1.5;
       if (k < 0.8) view = {x: (Math.min(...xs) + Math.max(...xs)) / 2 - full.w * k / 2,
                            y: (Math.min(...ys) + Math.max(...ys)) / 2 - full.h * k / 2, w: full.w * k, h: full.h * k};
-      else view = Object.assign({}, full);
-    } else view = Object.assign({}, full);
+    }
     apply();
-    if (r) list(r); else rooms();
-    refresh();
   }
 
-  function show(p, node) {
-    const changed = p.room_id != null && p.room_id !== room;
-    if (changed) select(p.room_id);
-    pinOn = p.id;
-    side.textContent = "";
-    const r = L.rooms.find(x => x.id === room);
-    const back = side.appendChild(html("a", "back", "← " + (r ? (r.name || "Room") : "All rooms")));
-    back.href = "#"; back.addEventListener("click", ev => { ev.preventDefault(); select(room); });
-    if (p.photo) { const img = side.appendChild(html("img", "big")); img.alt = ""; img.src = "/p/" + token + "/crop/" + p.id + ".jpg"; }
-    side.appendChild(html("h2", "", cap(p.label)));
-    side.appendChild(html("p", "muted", [p.room, p.category, p.qty > 1 ? "quantity " + p.qty : "",
-                                        p.status === "confirmed" ? "on your list" : "waiting for your OK"].filter(Boolean).join(" · ")));
-    if (p.value) side.appendChild(html("p", "", money(p.value) + (p.basis ? " · " + p.basis : "")));
-    side.appendChild(html("p", "muted", p.exact ? "Placed where it stood on the floor in the scan."
-                                                : "Position is approximate."));
-    const link = side.appendChild(html("a", "", "Open in the inventory"));
-    link.href = "/p/" + token + "#item-" + p.id;
-    refresh();
-    if (node) requestAnimationFrame(() => card(p, node));              // after any zoom to its room
+  function select(id) {
+    room = id; pinOn = null; more = false; delete side.dataset.item; unthing();
+    frame(L.rooms.find(x => x.id === id));
+    draw(); refresh();
   }
 
-  // Category chips
+  function show(p) {
+    if (p.room_id != null && p.room_id !== room) { room = p.room_id; more = false; frame(L.rooms.find(x => x.id === room)); }
+    pinOn = p.id; side.dataset.item = String(p.id);
+    draw(); refresh();
+    requestAnimationFrame(() => thing(p, pinNodes[p.id]));              // after any move to its room
+  }
+
+  // One kind of thing at a time, or all of them
   const chips = document.getElementById("chips");
-  [...new Set(L.pins.map(p => p.category))].sort().forEach(c => {
+  const kinds = [...new Set(L.pins.map(p => p.category))].sort();
+  [null].concat(kinds).forEach(c => {
     const b = chips.appendChild(html("button", "chip"));
-    b.type = "button"; b.setAttribute("aria-pressed", "true");
-    const dot = b.appendChild(html("i")); dot.style.background = colour(c);
-    b.appendChild(document.createTextNode(cap(c)));
-    b.addEventListener("click", () => { off.has(c) ? off.delete(c) : off.add(c);
-      b.setAttribute("aria-pressed", String(!off.has(c))); select(room); });
+    b.type = "button"; b.dataset.kind = c || "";
+    if (c) { const dot = b.appendChild(html("i")); dot.style.background = colour(c); }
+    b.appendChild(document.createTextNode(c ? cap(c) : "All"));
+    b.addEventListener("click", () => { only = only === c ? null : c; mark(); pinOn = null; delete side.dataset.item; unthing(); draw(); refresh(); });
   });
+  function mark() { chips.querySelectorAll(".chip").forEach(b => b.setAttribute("aria-pressed", String((b.dataset.kind || null) === only))); }
+  mark();
 
   // Zoom and drag
   function zoom(factor, cx, cy) {
     const w = Math.min(Math.max(view.w * factor, full.w / 12), full.w * 1.2), k = w / view.w;
     cx = cx == null ? view.x + view.w / 2 : cx; cy = cy == null ? view.y + view.h / 2 : cy;
     view = {x: cx - (cx - view.x) * k, y: cy - (cy - view.y) * k, w: w, h: view.h * k};
-    apply(); uncard();
+    apply(); unthing();
   }
   const toPlan = ev => { const b = svg.getBoundingClientRect();
     const s = Math.max(view.w / b.width, view.h / b.height);          // preserveAspectRatio: meet
@@ -315,16 +379,17 @@
             y: view.y + view.h / 2 + (ev.clientY - b.top - b.height / 2) * s, s: s}; };
   document.getElementById("in").addEventListener("click", () => zoom(0.7));
   document.getElementById("out").addEventListener("click", () => zoom(1.4));
-  document.getElementById("fit").addEventListener("click", () => { view = Object.assign({}, full); apply(); });
+  document.getElementById("fit").addEventListener("click", () => { view = Object.assign({}, full); apply(); unthing(); });
   svg.addEventListener("wheel", ev => { ev.preventDefault(); const p = toPlan(ev); zoom(ev.deltaY > 0 ? 1.15 : 0.87, p.x, p.y); }, {passive: false});
   let drag = null, moved = false;
   svg.addEventListener("pointerdown", ev => { drag = {x: ev.clientX, y: ev.clientY, vx: view.x, vy: view.y}; moved = false; });
   svg.addEventListener("pointermove", ev => {
     if (!drag) return;
     const s = toPlan(ev).s, dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
-    if (Math.abs(dx) + Math.abs(dy) > 4) { moved = true; svg.classList.add("dragging"); uncard(); }
+    if (Math.abs(dx) + Math.abs(dy) > 4) { moved = true; svg.classList.add("dragging"); unthing(); }
     if (moved) { view.x = drag.vx - dx * s; view.y = drag.vy - dy * s; apply(); }
   });
+  window.addEventListener("resize", resize);
   window.addEventListener("pointerup", () => { drag = null; svg.classList.remove("dragging"); setTimeout(() => { moved = false; }, 0); });
 
   select(null);

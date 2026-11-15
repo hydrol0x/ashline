@@ -97,15 +97,25 @@
   .sheet .small { font-size: 13.5px; }
   .sheet.loading { opacity: .45; pointer-events: none; transition: opacity .12s; }
   .price-line { font-weight: 700; font-size: 19px !important; font-variant-numeric: tabular-nums; }
-  .prices { display: grid; gap: 8px; margin: 10px 0 6px; }
-  .pricerow { display: flex; justify-content: space-between; gap: 14px; padding: 10px 12px; border: 1.5px solid var(--rule); }
-  .pricerow.used { border-color: var(--ink); }
+  /* Every price an item has, as in the family's mockup: the one in use is outlined, the estimate dashed. */
+  .prices { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin: 12px 0 8px; }
+  .pricerow { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border: 1.5px solid var(--rule); border-radius: 14px; }
+  .pricerow.used { border: 2px solid var(--red); }
   .pricerow.estimate { border-style: dashed; }
-  .pricerow b { display: block; font-size: 14.5px; font-weight: 700; }
-  .pricerow span, .pricerow a { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
-  .pricerow a { color: var(--red); }
-  .pricerow .amt { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .pricerow .ico { flex: none; width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; border: 1.5px solid var(--ink); color: var(--ink); }
+  .pricerow.used .ico { background: var(--red); border-color: var(--red); color: #fff; }
+  .pricerow.estimate .ico { border-style: dashed; }
+  .pricerow .ico svg { width: 17px; height: 17px; }
+  .pricerow .what { flex: 1 1 auto; min-width: 0; overflow: hidden; }
+  .pricerow b { display: block; font-size: 15px; font-weight: 700; }
+  .pricerow span, .pricerow a { display: block; font-size: 13px; color: var(--muted); margin-top: 2px; }
+  .pricerow a { color: var(--red); text-decoration: underline; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pricerow .amt { flex: none; text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .pricerow .amt b { font-size: 16px; }
   .pricerow .amt span { color: var(--red-deep); font-weight: 700; }
+  .prices-head { display: flex; justify-content: space-between; align-items: baseline; margin-top: 14px; }
+  .prices-head b { font-size: 15px; }
+  .prices-head span { font-size: 13px; color: var(--muted); }
   .item .price small { font-weight: 500; color: var(--muted); font-size: 12.5px; margin-left: 4px; }
   .progress { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: var(--muted); padding-bottom: 12px; margin: 0 0 14px; border-bottom: 1px solid var(--rule); }
   .progress .count { text-align: center; flex: 1; }
@@ -452,9 +462,19 @@
     var kinds = (d.price_sources || []).map(function (p) { return p.kind; });
     if (kinds.length > 1 || (kinds.length === 1 && kinds[0] !== 'estimate')) {
       // Every price this item has: what was paid, what it sells for online, the estimate. The strongest is in use.
+      var ICONS = {
+        paid: '<rect x="2.5" y="5" width="15" height="10" rx="2"/><path d="M2.5 9h15"/>',
+        online: '<path d="M8.5 11.5a3 3 0 0 0 4.2 0l2.6-2.6a3 3 0 0 0-4.2-4.2l-.9.9"/><path d="M11.5 8.5a3 3 0 0 0-4.2 0l-2.6 2.6a3 3 0 0 0 4.2 4.2l.9-.9"/>',
+        estimate: '<path d="M4 8c2-2.2 4-2.2 6 0s4 2.2 6 0"/><path d="M4 12.5c2-2.2 4-2.2 6 0s4 2.2 6 0"/>',
+        family: '<path d="M13 3.5l3.5 3.5L7 16.5l-4 .5.5-4z"/>'
+      };
+      var head = el('div', null, 'prices-head'); head.appendChild(el('b', 'Price')); head.appendChild(el('span', 'The strongest source is used'));
+      sheet.appendChild(head);
       var stack = el('div', null, 'prices');
       d.price_sources.forEach(function (p) {
-        var row = el('div', null, 'pricerow ' + p.kind + (p.in_use ? ' used' : '')), left = el('div'), right = el('div', null, 'amt');
+        var row = el('div', null, 'pricerow ' + p.kind + (p.in_use ? ' used' : '')), ico = el('div', null, 'ico'),
+            left = el('div', null, 'what'), right = el('div', null, 'amt');
+        ico.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (ICONS[p.kind] || ICONS.estimate) + '</svg>';
         left.appendChild(el('b', p.title)); left.appendChild(el('span', p.detail));
         (p.links || []).forEach(function (l) {
           if (!l.url) { left.appendChild(el('span', l.text)); return; }
@@ -462,7 +482,7 @@
           a.textContent = l.text; left.appendChild(a);
         });
         right.appendChild(el('b', p.amount)); if (p.in_use) right.appendChild(el('span', 'In use'));
-        row.appendChild(left); row.appendChild(right); stack.appendChild(row);
+        row.appendChild(ico); row.appendChild(left); row.appendChild(right); stack.appendChild(row);
       });
       sheet.appendChild(stack);
     } else sheet.appendChild(el('p', d.price_basis, 'muted small'));

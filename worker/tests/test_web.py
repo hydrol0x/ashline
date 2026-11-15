@@ -124,7 +124,7 @@ def test_exports(case):
     assert lines[0].startswith("room,category,item,qty,brand_model,age,rcv_low,rcv_mid,rcv_high,source,evidence")
     assert len(lines) == 4 and "floor lamp" not in csv_text                      # confirmed items only
     assert "Living room,furniture,blue velvet sofa,1,,,720.0,1200.0,1800.0,photo,Family photo" in csv_text
-    assert "From memory (voice call), needs proof" in csv_text and '"Dad, Maya"' in csv_text
+    assert "From memory, needs proof" in csv_text and '"Dad, Maya"' in csv_text
     xlsx = client.get("/p/owner-token/export.xlsx")
     assert xlsx.status_code == 200 and xlsx.content[:2] == b"PK"
     from openpyxl import load_workbook

@@ -242,7 +242,7 @@ def test_plan_page(monkeypatch):
     client = TestClient(create_app(lambda: f.store))
     token = f.store.get_case(f.case_id)["owner_token"]
     page = client.get(f"/p/{token}/plan")
-    assert page.status_code == 200 and "where things were" in page.text and "blue velvet sofa" in page.text
+    assert page.status_code == 200 and "Where things were" in page.text and "blue velvet sofa" in page.text
     data = client.get(f"/p/{token}/plan.json").json()
     assert data["kind"] == "sketch" and len(data["pins"]) == 3
     assert f'href="/p/{token}/plan"' in client.get(f"/p/{token}").text

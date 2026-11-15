@@ -30,7 +30,7 @@ def evidence_text(source: str, date: str | None) -> str:
     return {
         "scan": f"3D scan of the home{when}",
         "aerial": f"Aerial image{when}",
-        "voice": "From memory (voice call), needs proof",
+        "voice": "From memory, needs proof",
         "photo": f"Family photo{' taken ' + date if date else ''}",
         "receipt": f"Receipt{' dated ' + date if date else ''}",
     }.get(source, source)

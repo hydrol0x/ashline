@@ -208,9 +208,14 @@ def scan_link(store: Store, case_id: str, item: dict) -> str | None:
 
 
 def shop_search(item: dict) -> list[dict]:
-    """Search links for the same or a similar thing: [{text, url}]. A search, not a listing we found."""
+    """Search links for the same or a similar thing: [{text, url}]. A search, not a listing we found.
+
+    Searches what a shopper would type when the online lookup saved one (its first query), else
+    the brand and the whole label."""
     from urllib.parse import quote_plus
-    words = " ".join(filter(None, [item.get("brand_guess"), re.sub(r"\(.*?\)|,.*$", "", item.get("label") or "")])).strip()
+    queries = (price_sources(item).get("online") or {}).get("queries") or []
+    saved = str(queries[0]).strip() if isinstance(queries, list) and queries else ""
+    words = saved or " ".join(filter(None, [item.get("brand_guess"), (item.get("label") or "").strip()])).strip()
     if not words:
         return []
     query = quote_plus(words[:120])

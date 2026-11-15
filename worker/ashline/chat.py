@@ -1321,7 +1321,8 @@ class Engine:
         if low in ("pause", "not today", "stop", "not now") and not member["state"].get("memory"):
             self.store.set_member(member["member_id"], paused=1)
             return [Outbound(chat_id, "Okay. I'll stay quiet until you write again.")]
-        if low in ("list", "show me everything", "show everything", "the list", "link"):
+        if low in ("list", "show me everything", "show everything", "the list", "link") or re.fullmatch(
+                r"(?:show (?:me )?|see |send |what'?s on |what is on )?(?:the |my |our )?(?:whole |full )?list", low):
             return [Outbound(chat_id, f"Here is everything so far: {self.link(case, member)}")]
         if re.fullmatch(r"(check |look (at|in|through) |search )?(my |the |our )?(bank|card|credit card|purchases?|statements?)"
                         r"( records?| statements?| purchases?)?", low):
@@ -1331,7 +1332,10 @@ class Engine:
         if re.fullmatch(r"(how much( so far)?|total|progress|how are we doing|where are we)", low):
             m = meter(case_id, self.store)
             out = [Outbound(chat_id, meter_line(m))]
-            if owner and not inbound.is_group and not m["limit"] and not case.get("coverage_skipped"):
+            sent = json.loads(case.get("reminders") or "{}")      # per-home notes; "coverage_asked": asked once already
+            if owner and not inbound.is_group and not m["limit"] and not case.get("coverage_skipped") \
+                    and not sent.get("coverage_asked"):
+                self.store.set_case(case_id, reminders=json.dumps({**sent, "coverage_asked": True}))
                 self.store.set_member(member["member_id"], state={**member["state"], "step": "coverage"})
                 out.append(Outbound(chat_id, "If you tell me the contents coverage limit on the policy, I can show how "
                                              "much is left to document. Or say skip."))

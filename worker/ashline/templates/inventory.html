@@ -454,7 +454,7 @@
     {% if plan %}
     <div class="mini {{ plan.kind }}">
       <svg id="mini-plan" viewBox="{{ plan.box }}" role="group" aria-label="Plan of the home. Tap a room to show only its things.">
-        {% for r in plan.rooms %}<polygon class="rm{% if r.name %} go{% endif %}" data-id="{{ r.id }}" points="{{ r.points }}"{% if r.name %} data-room="{{ r.name }}" tabindex="0" role="button" aria-label="{{ r.name }}"{% endif %}><title>{{ r.name or 'Room' }}</title></polygon>{% endfor %}
+        {% for r in plan.rooms %}<polygon class="rm{% if r.name %} go{% endif %}" data-id="{{ r.id }}" points="{{ r.points }}"{% if r.name %} data-room="{{ r.name }}" tabindex="0" role="button" aria-label="{{ r.name }}"{% endif %}>{% if r.name %}<title>{{ r.name }}</title>{% endif %}</polygon>{% endfor %}
       </svg>
       <a class="fullplan" href="/p/{{ token }}/plan">Open the full plan</a>
     </div>

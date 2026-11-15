@@ -103,6 +103,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--case", required=True, help="the home's id in that folder")
     p.add_argument("--as", dest="new_id", help="the id to give it here (default: the same id)")
 
+    p = sub.add_parser("photos-check", help="why a photo gave few items: the detector in use and what it returned")
+    p.add_argument("--case", help="only this home (default: the newest family photos of every home)")
+    p.add_argument("--photo", help="run the detector on this image file now and print what it finds")
+    p.add_argument("--last", type=int, default=5, help="how many recent photos to show")
+
     p = sub.add_parser("delete", help="delete every stored row of a case")
     p.add_argument("--case", required=True)
 
@@ -280,6 +285,8 @@ def _run(args, parser) -> None:
         print(f"{got['name'] or got['case_id']}: {got['items']} items and {got['photos']} photos copied as {got['case_id']}.")
         print(f"owner:  {base}/p/{got['owner_token']}\nfamily: {base}/p/{got['member_token']}")
         print(f"code:   {got['invite_code']}   (post it in a chat with Ashline to join this home)")
+    elif args.cmd == "photos-check":
+        photos_check(args)
     elif args.cmd == "delete":
         _known(args.case, parser)
         Store().delete_case(args.case)
@@ -362,5 +369,58 @@ def simulate(phone: str, name: str | None, url: str | None, lines=None, out=prin
             show(engine.handle(Inbound(group or phone, phone, line, [], bool(group), name, now())))
 
 
+
+def photos_check(args) -> None:
+    """Where items go missing: the detector settings, the photo size, what the model listed, and
+    what was left after folding repeats in the same photo."""
+    from PIL import Image
+
+    from . import detect as detect_mod
+    from .dedupe import dedupe_in_photo
+    from .detect import drop_fixtures
+    from .pipeline import detection_path
+    from .store import Store
+    config.load_env()
+    kind = config.env("ASHLINE_DETECTOR") or detect_mod.default_detector_kind()
+    print(f"detector: {kind}", end="")
+    if kind == "claude":
+        print(f"  model={config.env('ASHLINE_CLAUDE_MODEL', '(default)')}  effort={config.env('ASHLINE_CLAUDE_EFFORT', 'medium')}")
+    else:
+        print("  <- not Claude: ANTHROPIC_API_KEY is not set in the .env this machine reads, so a weaker model is used")
+    print(f".env read from: {config.REPO_ROOT / '.env'}  data: {config.data_dir()}")
+
+    def show(path, items):
+        try:
+            with Image.open(path) as im:
+                size = f"{im.width}x{im.height}"
+        except Exception as exc:
+            size = f"unreadable ({exc.__class__.__name__})"
+        kept = dedupe_in_photo(drop_fixtures(items))
+        print(f"\n{path}\n  size {size} · model listed {len(items)} · kept {len(kept)}")
+        for item in items:
+            print(f"    - {item.get('label')}")
+
+    if args.photo:
+        show(args.photo, detect_mod.get_detector().detect(args.photo, None))
+        return
+    store = Store()
+    rows = []
+    for case in store.list_cases():
+        if args.case and case["case_id"] != args.case:
+            continue
+        for photo in store.get_photos(case["case_id"]):
+            if photo.get("source") == "scan":
+                continue
+            path = detection_path(case["case_id"], photo["photo_id"])
+            if path.exists():
+                rows.append((path.stat().st_mtime, case["case_id"], photo, path))
+    if not rows:
+        print("No family photos with detections yet.")
+    for _, case_id, photo, path in sorted(rows, key=lambda r: r[0])[-args.last:]:
+        print(f"\n[{case_id}]", end="")
+        show(photo["path"], json.loads(path.read_text()))
+
+
 if __name__ == "__main__":
     main()
+

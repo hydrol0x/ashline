@@ -121,6 +121,10 @@ line as the one photographed in the dining room.
   an item known only from memory. Nessie holds mock data, so `ashline bank --case demo --seed-demo 5`
   first writes purchases for the five most valuable items. Works with Nessie v2 (`nsk_` keys, run
   live on 15 Nov 2026) and with the classic API (older keys, tested against a fake only).
+- `ashline orders --case demo Retail.OrderHistory.1.csv` does the same with an Amazon order history
+  (`orders.py`; "Request my data" and the older order reports), and `--apply` uses the matches as the
+  prices. The parser was written from documented column names and tested on synthetic files only:
+  no real export has been tried yet.
 
 ## Plan of the home
 

@@ -141,8 +141,8 @@ def price_stack(item: dict) -> list[dict]:
                      "amount": money(item.get("price_mid")), "links": []})
     paid = kept.get("paid")
     if paid and paid.get("amount"):
-        where = (f"{'Receipt from' if paid.get('receipt') else 'Card purchase at'} {paid.get('merchant') or 'a store'}"
-                 + (f", {paid['date']}" if paid.get("date") else ""))
+        proof = ("Order from" if paid.get("order") else "Receipt from" if paid.get("receipt") else "Card purchase at")
+        where = f"{proof} {paid.get('merchant') or 'a store'}" + (f", {paid['date']}" if paid.get("date") else "")
         rows.append({"kind": "paid", "title": "What you paid", "detail": where + (f" · for all {qty}" if qty > 1 else ""),
                      "amount": f"${float(paid['amount']):,.2f}", "links": []})
     online = kept.get("online")
@@ -169,6 +169,17 @@ def price_stack(item: dict) -> list[dict]:
     for row in rows:
         row["in_use"] = row["kind"] == using
     return rows
+
+
+def shop_search(item: dict) -> list[dict]:
+    """Search links for the same or a similar thing: [{text, url}]. A search, not a listing we found."""
+    from urllib.parse import quote_plus
+    words = " ".join(filter(None, [item.get("brand_guess"), re.sub(r"\(.*?\)|,.*$", "", item.get("label") or "")])).strip()
+    if not words:
+        return []
+    query = quote_plus(words[:120])
+    return [{"text": "Search Amazon for this", "url": f"https://www.amazon.com/s?k={query}"},
+            {"text": "Search Google Shopping", "url": f"https://www.google.com/search?tbm=shop&q={query}"}]
 
 
 def price_evidence(item: dict) -> list[dict]:
@@ -318,7 +329,7 @@ def create_app(store_factory=Store) -> FastAPI:
         if source.startswith("bank record"):
             basis = "What the family paid, from their card purchases."
         elif source.startswith("receipt:"):
-            basis = "What the family paid, from a receipt they sent."
+            basis = "What the family paid, from a receipt or order record they sent."
         elif source.startswith("web:"):
             basis = "Price of the closest match found online today."
         elif item.get("price_mid") and source != "set by family":
@@ -326,6 +337,7 @@ def create_app(store_factory=Store) -> FastAPI:
                       else " The range is a rough allowance for uncertainty.")
         return JSONResponse({
             **view, "label": item["label"], "price_basis": basis, "price_evidence": evidence,
+            "shop_search": shop_search(item),
             "price_sources": price_stack(item),
             "price_mid": item.get("price_mid"), "editable": role == "owner",
             "sightings": [{

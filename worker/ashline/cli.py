@@ -84,6 +84,11 @@ def main(argv: list[str] | None = None) -> None:
     p.add_argument("--seed-demo", type=int, metavar="N",
                    help="demo only: first write purchases for the N most valuable items into the mock bank")
 
+    p = sub.add_parser("orders", help="match the lines of an Amazon order-history CSV to inventory items")
+    p.add_argument("--case", required=True)
+    p.add_argument("file", help="the order-history file, e.g. Retail.OrderHistory.1.csv")
+    p.add_argument("--apply", action="store_true", help="use the matched order lines as the items' prices")
+
     p = sub.add_parser("plan", help="draw the 2D plan of a case: from its scan, or sketched from its photos")
     p.add_argument("--case", required=True)
     p.add_argument("--png", help="also save the plan as an image at this path")
@@ -189,6 +194,26 @@ def _run(args, parser) -> None:
             print(f"Prices updated on {bank.apply_matches(store, args.case, matches)} item(s).")
         elif matches:
             print("Run again with --apply to use these as the prices, or text 'check my bank' to Ashline.")
+    elif args.cmd == "orders":
+        from . import bank, orders
+        store = Store()
+        if not store.get_case(args.case):
+            parser.exit(1, f"No case {args.case!r}.\n")
+        try:
+            data = open(args.file, "rb").read()
+        except OSError as exc:
+            parser.exit(1, f"Could not read {args.file}: {exc.strerror}\n")
+        if not orders.looks_like_orders(args.file, data):
+            parser.exit(1, f"{args.file} does not look like an order history: no order id and product name columns.\n")
+        lines = orders.read_orders(data)
+        matches = orders.find_matches(args.case, store, lines)
+        print(f"Read {len(lines)} paid order line(s). {len(matches)} match items on the list" + (":" if matches else "."))
+        for match in matches:
+            print(f"  {bank.describe(match)}")
+        if args.apply and matches:
+            print(f"Prices updated on {bank.apply_matches(store, args.case, matches)} item(s).")
+        elif matches:
+            print("Run again with --apply to use these as the prices.")
     elif args.cmd == "plan":
         from . import layout, sketch_claude
         store = Store()

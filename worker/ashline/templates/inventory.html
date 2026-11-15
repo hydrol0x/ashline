@@ -516,6 +516,15 @@
       });
       sheet.appendChild(stack);
     } else sheet.appendChild(el('p', d.price_basis, 'muted small'));
+    if ((d.shop_search || []).length) {                                  // look for the same or a similar thing
+      var shops = el('p', null, 'muted small shops');
+      d.shop_search.forEach(function (l, n) {
+        if (n) shops.appendChild(document.createTextNode(' · '));
+        var a = document.createElement('a'); a.href = l.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.textContent = l.text;
+        a.style.color = 'var(--red)'; shops.appendChild(a);
+      });
+      sheet.appendChild(shops);
+    }
     if (d.sightings.length > 1) sheet.appendChild(el('p', 'Seen in ' + d.sightings.length + ' photos. Swipe to see each one.', 'muted small'));
 
     if (d.editable) {

@@ -246,7 +246,7 @@ def record_price(store, case_id: str, item_id: int, kind: str, data: dict | None
     if in_use(item) != "family":
         if "paid" in kept:
             each = kept["paid"].get("each")
-            proof = "receipt" if kept["paid"].get("receipt") else "bank record"
+            proof = "receipt" if kept["paid"].get("receipt") or kept["paid"].get("order") else "bank record"
             fields.update(price_low=each, price_mid=each, price_high=each,
                           price_source=f"{proof}: {str(kept['paid'].get('merchant') or 'purchase')[:60]}")
         elif "online" in kept:

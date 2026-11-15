@@ -136,7 +136,7 @@
 <main>
   <div class="masthead"><a class="brand" href="/"><img src="/static/img/logo.png?v={{ v }}" alt=""><span>Ashline</span></a><small>Private to your family</small></div>
   <h1>{{ name }} <span class="count">{{ items|length }} item{{ '' if items|length == 1 else 's' }}</span></h1>
-  <p class="sub">Updated {{ updated }}{% if members %} · {{ members }} family member{{ '' if members == 1 else 's' }} contributing{% endif %}</p>
+  <p class="sub">Updated {{ updated }}{% if members %} · {{ members }} family member{{ '' if members == 1 else 's' }} contributing{% endif %} · <a href="/p/{{ token }}/plan" style="color: var(--accent)">See where things were</a></p>
 
   <section class="meter" aria-label="Progress">
     {% if meter.target %}
@@ -558,6 +558,8 @@
     });
     document.getElementById('skip').addEventListener('click', function () { post('/coverage', { skip: true }).then(function () { location.reload(); }); });
   }
+  var linked = /^#item-(\d+)$/.exec(location.hash);       // a link from the plan page opens that item
+  if (linked) open(Number(linked[1]));
 })();
 </script>
 </body>

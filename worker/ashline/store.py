@@ -77,6 +77,7 @@ class Store:
             root.mkdir(parents=True, exist_ok=True)
             path = str(root / "ashline.sqlite")
         # The LangChain agent runs its tools on worker threads; callers serialize their use of a Store.
+        self.path = path
         self.db = sqlite3.connect(path, check_same_thread=False)
         self.db.row_factory = sqlite3.Row
         self.db.executescript(SCHEMA)

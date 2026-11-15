@@ -1,0 +1,203 @@
+"""The 2D plan: real outlines from a scan, a sketch without one, and a pin per inventory line."""
+import json
+import math
+
+import pytest
+from PIL import Image
+from shapely.geometry import Polygon
+
+from ashline import layout, sketch_claude
+from ashline.store import Store
+from test_chat import MOM, Family, photo, texts
+
+
+def edge(a, b):
+    return {"vertices": [{"id": f"{a[0]},{a[1]}", "position": {"x": a[0], "y": a[1]}},
+                         {"id": f"{b[0]},{b[1]}", "position": {"x": b[0], "y": b[1]}}]}
+
+
+def box_room(room_id, x0, y0, x1, y1, floor="f1"):
+    corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    edges = [edge(corners[n], corners[(n + 1) % 4]) for n in (2, 0, 3, 1)]          # deliberately out of order
+    return {"id": room_id, "floor": {"id": floor}, "boundary": {"edges": edges}}
+
+
+def quaternion(yaw):
+    return {"x": 0, "y": 0, "z": math.sin(yaw / 2), "w": math.cos(yaw / 2)}
+
+
+MODEL = {
+    "floors": [{"id": "f1", "label": "1", "sequence": 0}],
+    "rooms": [box_room("living", 0, 0, 6, 4), box_room("kitchen", 6, 0, 9, 4)],
+    "panoLocations": [{"id": "p1", "position": {"x": 3, "y": 2, "z": 1.5}, "rotation": quaternion(0),
+                       "anchor": {"room": {"id": "living"}, "floor": {"id": "f1"}}}],
+}
+
+
+def test_wall_segments_join_into_one_outline():
+    points = layout.ring(box_room("r", 0, 0, 6, 4)["boundary"]["edges"])
+    assert len(points) == 4 and Polygon(points).area == pytest.approx(24)
+    assert layout.ring([]) == []
+
+
+def test_scan_plan_reads_rooms_and_cameras():
+    plan = layout.scan_plan(MODEL)
+    assert [r["id"] for r in plan["rooms"]] == ["living", "kitchen"]
+    assert plan["cameras"]["p1"]["yaw"] == pytest.approx(0) and plan["cameras"]["p1"]["room"] == "living"
+    assert layout.scan_plan({"rooms": [{"id": "x", "boundary": None}]})["rooms"] == []      # no geometry: no room
+
+
+def test_an_item_is_placed_where_its_foot_meets_the_floor():
+    camera = {"x": 3.0, "y": 2.0, "yaw": 0.0}
+    room = Polygon([(0, 0), (6, 0), (6, 4), (0, 4)])
+    # Face 1 looks along +x. The box's bottom edge is three quarters of the way down: 45 degrees below... half way
+    # between horizon and bottom edge is b = 0.5, so the floor point is height / 0.5 ahead.
+    x, y, exact = layout.floor_spot(camera, 1, [900, 800, 1148, 1536], (2048, 2048), room, height=1.0)
+    assert exact and (x, y) == (pytest.approx(5.0), pytest.approx(2.0))
+    # Face 2 is a quarter turn to the right: it looks along -y.
+    x, y, exact = layout.floor_spot(camera, 2, [900, 800, 1148, 2048], (2048, 2048), room, height=1.0)
+    assert exact and (x, y) == (pytest.approx(3.0), pytest.approx(1.0))
+    # Something on the right of face 1 is to the right of the camera's line of sight.
+    x, y, _ = layout.floor_spot(camera, 1, [1536, 800, 2048, 2048], (2048, 2048), room, height=1.0)
+    assert x == pytest.approx(4.0) and y == pytest.approx(1.25)
+
+
+def test_a_picture_on_the_wall_goes_to_the_wall_not_through_it():
+    camera = {"x": 3.0, "y": 2.0, "yaw": 0.0}
+    room = Polygon([(0, 0), (6, 0), (6, 4), (0, 4)])
+    x, y, exact = layout.floor_spot(camera, 1, [900, 300, 1148, 700], (2048, 2048), room)     # above the horizon
+    assert not exact and x == pytest.approx(3 + 3 * layout.WALL_MARGIN) and y == pytest.approx(2.0)
+    x, y, exact = layout.floor_spot(camera, 1, [900, 900, 1148, 1100], (2048, 2048), room)    # "floor point" 20 m away
+    assert not exact and x < 6
+    # Seen through a doorway into the kitchen next door: the floor point there is kept.
+    kitchen = Polygon([(6, 0), (9, 0), (9, 4), (6, 4)])
+    x, y, exact = layout.floor_spot(camera, 1, [900, 900, 1148, 1400], (2048, 2048), room, others=[room, kitchen])
+    assert exact and 6 < x < 9
+
+
+@pytest.fixture
+def scanned(tmp_path):
+    store = Store()
+    store.upsert_case("c1")
+    store.set_rooms("c1", [{"room_id": "living", "label": "living room", "name": "Living room", "area_m2": 24},
+                           {"room_id": "kitchen", "label": "kitchen", "name": "Kitchen", "area_m2": 12}])
+    layout.plan_path("c1").parent.mkdir(parents=True, exist_ok=True)
+    layout.plan_path("c1").write_text(json.dumps(layout.scan_plan(MODEL)))
+    path = tmp_path / "face.jpg"
+    Image.new("RGB", (2048, 2048)).save(path)
+    shot = {"photo_id": "scan-1-f1", "path": str(path), "source": "scan", "room_id": "living",
+            "room_label": "Living room", "pano_id": "p1", "face": 1, "x": 3, "y": 2, "z": 1.5}
+    store.add_photos("c1", [shot])
+    sofa = store.add_item("c1", {"label": "grey sofa", "category": "furniture", "bbox": [900, 800, 1148, 1536]},
+                          source="scan", photo=shot)
+    store.update_item("c1", sofa, price_mid=900)
+    mixer = store.add_item("c1", {"label": "stand mixer", "category": "kitchen", "room_label": "Kitchen"}, source="voice")
+    lost = store.add_item("c1", {"label": "bicycle", "category": "sports"}, source="voice")
+    return store, sofa, mixer, lost
+
+
+def test_build_draws_the_scan_with_a_pin_per_line(scanned):
+    store, sofa, mixer, lost = scanned
+    drawn = layout.build("c1", store)
+    assert drawn["kind"] == "scan" and (drawn["width"], drawn["height"]) == (9, 4)
+    assert [(r["name"], r["area"]) for r in drawn["rooms"]] == [("Living room", 24.0), ("Kitchen", 12.0)]
+    pins = {p["id"]: p for p in drawn["pins"]}
+    assert pins[sofa]["exact"] and pins[sofa]["room_id"] == "living" and pins[sofa]["value"] == 900
+    assert pins[sofa]["x"] == pytest.approx(3 + layout.CAMERA_HEIGHT / 0.5) and pins[sofa]["y"] == pytest.approx(2.0)
+    # Known only by its room: somewhere inside that room. No room at all: listed, not drawn.
+    assert not pins[mixer]["exact"] and 6 < pins[mixer]["x"] < 9 and 0 < pins[mixer]["y"] < 4
+    assert pins[lost]["x"] is None and drawn["unplaced"] == 1
+    store.set_item_status("c1", sofa, "rejected")
+    assert sofa not in {p["id"] for p in layout.build("c1", store)["pins"]}
+
+
+def test_the_drawing_is_not_mirrored(scanned):
+    """The scan's y axis points up, a page's points down: a room at the top of the scan is drawn at the top."""
+    store = scanned[0]
+    plan = layout.scan_plan({**MODEL, "rooms": MODEL["rooms"] + [box_room("porch", 0, 4, 6, 6)]})
+    layout.plan_path("c1").write_text(json.dumps(plan))
+    rooms = {r["id"]: r for r in layout.build("c1", store)["rooms"]}
+    assert rooms["porch"]["label_at"][1] < rooms["living"]["label_at"][1]
+
+
+def test_without_a_scan_rooms_are_sketched_in_the_order_seen():
+    f = Family().setup()
+    f.say(MOM, photos=[photo(656), photo(640)])              # kitchen first, then the living room
+    f.wait()
+    drawn = layout.build(f.case_id, f.store)
+    assert drawn["kind"] == "sketch" and "approximate" in drawn["note"]
+    names = [r["name"] for r in drawn["rooms"]]
+    assert names[:2] == ["Kitchen", "Living room"] and "Garage" in names and len(names) == len(set(names))
+    rooms = {r["name"]: Polygon(r["points"]) for r in drawn["rooms"]}
+    assert all(not a.intersection(b).area > 0.01 for n, a in rooms.items() for m, b in rooms.items() if n != m)
+    assert rooms["Garage"].area > rooms["Kitchen"].area
+    for pin in drawn["pins"]:
+        assert rooms[pin["room"]].contains(Polygon([(pin["x"], pin["y"]), (pin["x"] + .01, pin["y"]), (pin["x"], pin["y"] + .01)]))
+    table = next(p for p in drawn["pins"] if "coffee table" in p["label"])
+    x0, y0, x1, y1 = rooms["Living room"].bounds
+    assert abs(table["y"] - (y0 + y1) / 2) < 0.01               # a coffee table stands in the middle, not on a wall
+
+
+def test_a_model_sketch_sets_sizes_neighbours_and_item_spots():
+    f = Family().setup()
+    f.say(MOM, photos=[photo(656), photo(640)])
+    f.wait()
+    sofa = next(i for i in f.store.get_items(f.case_id) if "sofa" in i["label"])
+
+    class Sketcher:
+        def draw(self, request):
+            self.request = request
+            rooms = [{"name": n, "width_m": 4.0, "depth_m": 3.0, "x_m": 4.0 * k, "y_m": 0.0}
+                     for k, n in enumerate(request["rooms"])]
+            rooms[0].update(name="kitchen", width_m=5.0, depth_m=2.5)        # case differs; too wide: overlaps the next
+            return {"rooms": rooms + [{"name": "Wine cellar", "width_m": 9, "depth_m": 9, "x_m": 50, "y_m": 0}],
+                    "items": [{"id": sofa["item_id"], "u": 1.0, "v": 0.5}, {"id": 999999, "u": 0.5, "v": 0.5}]}
+
+    sketcher = Sketcher()
+    drawn = sketch_claude.refresh(f.case_id, f.store, sketcher)
+    assert f"{sofa['item_id']} | Living room | photo 2 | blue velvet sofa" in sketcher.request["prompt"]
+    assert [r["name"] for r in drawn["rooms"]][:2] == ["Kitchen", "Living room"]           # the inventory's own names
+    assert "Wine cellar" not in {r["name"] for r in drawn["rooms"]}                         # no invented rooms
+    assert [i["id"] for i in drawn["items"]] == [sofa["item_id"]]                           # no invented items
+
+    built = layout.build(f.case_id, f.store)
+    rooms = {r["name"]: Polygon(r["points"]) for r in built["rooms"]}
+    assert rooms["Kitchen"].area == pytest.approx(12.5)                                     # the model's size is used
+    assert all(not a.intersection(b).area > 0.01 for n, a in rooms.items() for m, b in rooms.items() if n != m)
+    pin = next(p for p in built["pins"] if p["id"] == sofa["item_id"])
+    x0, y0, x1, y1 = rooms["Living room"].bounds
+    assert pin["x"] > x0 + 0.8 * (x1 - x0)                                                   # against the right wall
+
+    # Nothing changed: the kept sketch is reused without asking again.
+    class Never:
+        def draw(self, request):
+            raise AssertionError("asked again")
+    assert sketch_claude.refresh(f.case_id, f.store, Never())["digest"] == drawn["digest"]
+
+
+def test_the_map_command_sends_a_picture_and_the_link():
+    f = Family().setup()
+    assert "nothing to put on a plan yet" in texts(f.say(MOM, "map"))[0]
+    f.say(MOM, photos=[photo(640)])
+    f.wait()
+    out = f.say(MOM, "show me the floor plan")
+    assert len(out) == 1 and out[0].image.endswith("plan.png") and Image.open(out[0].image).width == 1400
+    assert "3 items where they were recorded" in out[0].text and "approximate" in out[0].text
+    assert out[0].text.endswith("/plan") and "https://ashline.example/p/" in out[0].text
+
+
+def test_plan_page(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from ashline.web import create_app
+    f = Family().setup()
+    f.say(MOM, photos=[photo(640)])
+    f.wait()
+    client = TestClient(create_app(lambda: f.store))
+    token = f.store.get_case(f.case_id)["owner_token"]
+    page = client.get(f"/p/{token}/plan")
+    assert page.status_code == 200 and "where things were" in page.text and "blue velvet sofa" in page.text
+    data = client.get(f"/p/{token}/plan.json").json()
+    assert data["kind"] == "sketch" and len(data["pins"]) == 3
+    assert f'href="/p/{token}/plan"' in client.get(f"/p/{token}").text
+    assert client.get("/p/not-a-token/plan").status_code == 404

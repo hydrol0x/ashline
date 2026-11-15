@@ -78,6 +78,11 @@ def main(argv: list[str] | None = None) -> None:
     sub.add_parser("photon", help="run the conversation on Photon 2.0 (iMessage)")
     sub.add_parser("telegram", help="run the conversation on Telegram (works in family group chats)")
 
+    p = sub.add_parser("plan", help="draw the 2D plan of a case: from its scan, or sketched from its photos")
+    p.add_argument("--case", required=True)
+    p.add_argument("--png", help="also save the plan as an image at this path")
+    p.add_argument("--redraw", action="store_true", help="ask the model for a new sketch even if nothing changed")
+
     p = sub.add_parser("page", help="print the inventory page links of a case")
     p.add_argument("--case", required=True)
 
@@ -150,6 +155,31 @@ def _run(args, parser) -> None:
     elif args.cmd == "telegram":
         from .bridge_telegram import TelegramBridge
         TelegramBridge().run()
+    elif args.cmd == "plan":
+        from . import layout, sketch_claude
+        store = Store()
+        case = store.get_case(args.case)
+        if not case:
+            parser.exit(1, f"No case {args.case!r}.\n")
+        home = store.get_home(args.case) or {}
+        if home.get("sid") and not (layout.load_plan(args.case) or {}).get("rooms"):
+            try:
+                layout.fetch_scan_plan(home["sid"], args.case)
+            except Exception as exc:
+                print(f"Could not read the scan's room outlines ({exc}); sketching from photos instead.")
+        if sketch_claude.available():
+            try:
+                sketch_claude.refresh(args.case, store, force=args.redraw)
+            except sketch_claude.SketchError as exc:
+                print(f"{exc} Using the simple sketch.")
+        drawn = layout.build(args.case, store)
+        print(f"{drawn['kind']} plan: {len(drawn['rooms'])} rooms, {len(drawn['pins']) - drawn['unplaced']} items placed"
+              + (f", {drawn['unplaced']} with no known room" if drawn["unplaced"] else ""))
+        if args.png:
+            print(f"saved {layout.render_png(drawn, args.png)}")
+        if case.get("owner_token"):
+            base = (config.env("ASHLINE_PUBLIC_URL") or "http://127.0.0.1:8000").rstrip("/")
+            print(f"page: {base}/p/{case['owner_token']}/plan")
     elif args.cmd == "page":
         store = Store()
         case = store.get_case(args.case)

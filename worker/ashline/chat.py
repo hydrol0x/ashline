@@ -54,6 +54,7 @@ HELP = ("Send me photos from inside the home, from any year, and I'll list what'
         "• list: the full inventory\n"
         "• how much so far\n"
         "• show photo 3\n"
+        "• map: where things were in the home\n"
         "• call me: remember things no photo shows\n"
         "• export: spreadsheet and PDF\n"
         "• undo · pause")
@@ -501,6 +502,34 @@ class Engine:
         self._save(inbound.chat_id, context)
         return out + ([note] if unreadable else []) + ([Outbound(inbound.chat_id, video_note)] if video_note else [])
 
+    def _plan(self, case: dict, chat_id: str, member: dict) -> list[Outbound]:
+        """The plan of the home as a picture, with the link to the page where it can be explored."""
+        from . import layout
+        drawn = layout.build(case["case_id"], self.store)
+        placed = len(drawn["pins"]) - drawn["unplaced"]
+        if not drawn["rooms"] or not placed:
+            return [Outbound(chat_id, "There's nothing to put on a plan yet. Send photos or a video walking through "
+                                      "the home and I'll draw one.")]
+        image = layout.render_png(drawn, config.case_dir(case["case_id"]) / "plan.png")
+        kind = "from the 3D scan" if drawn["kind"] == "scan" else "sketched from your photos, so it is approximate"
+        return [Outbound(chat_id, f"Here is the home with {placed} item{'s' if placed != 1 else ''} where "
+                                  f"{'they were' if placed != 1 else 'it was'} recorded ({kind}). Tap around it here: "
+                                  f"{self.link(case, member)}/plan", image=str(image))]
+
+    def _sketch_later(self, case_id: str) -> None:
+        """Redraw the plan sketch in the background after new photos, when a model is available."""
+        from . import layout, sketch_claude
+        if not sketch_claude.available() or (layout.load_plan(case_id) or {}).get("rooms"):
+            return
+        import threading
+
+        def work():
+            try:
+                sketch_claude.refresh(case_id, type(self.store)(self.store.path))
+            except Exception as exc:                        # the plan falls back to the simple sketch
+                print(f"ashline: plan sketch not drawn ({exc})")
+        threading.Thread(target=work, daemon=True).start()
+
     def _expand_videos(self, case_id: str, attachments: list) -> tuple[list, dict, str | None]:
         """Videos become stills that go through the photo pipeline.
 
@@ -659,6 +688,7 @@ class Engine:
             print(f"ashline: merge by model failed ({exc}); using rules")
             merged = merge_into_inventory(self.store, case_id, new_ids, None)
         price_items(case_id, self.store, self.pricer)
+        self._sketch_later(case_id)
         lines = [self.store.get_item(case_id, i) for i in merged["new_lines"]]
         lines.sort(key=lambda i: -((i.get("price_mid") or 0) * (i.get("qty") or 1)))
 
@@ -865,6 +895,8 @@ class Engine:
             return [Outbound(chat_id, "Okay. I'll stay quiet until you write again.")]
         if low in ("list", "show me everything", "show everything", "the list", "link"):
             return [Outbound(chat_id, f"Here is everything so far: {self.link(case, member)}")]
+        if re.fullmatch(r"(show (me )?)?(the )?(map|plan|floor ?plan|layout)( of the (home|house))?", low):
+            return self._plan(case, chat_id, member)
         if re.fullmatch(r"(how much( so far)?|total|progress|how are we doing|where are we)", low):
             m = meter(case_id, self.store)
             out = [Outbound(chat_id, meter_line(m))]

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 
-from . import config, detect as detect_mod
+from . import config, detect as detect_mod, layout
 from .costar import listing as listing_mod, matterport, vexcel
 from .costar.index import home_lookup
 from .dedupe import cluster_scan_items
@@ -107,6 +107,10 @@ def inside(case_id: str, sid: str, captured: str | None = None, run_detection: b
     rooms = matterport.scan_rooms(sid, client)
     store.set_rooms(case_id, rooms["rooms"], source="scan")
     store.set_home(case_id, sid=sid, scan_captured=captured, capture_notes=rooms["capture_notes"])
+    try:                                                    # room outlines for the plan view; the inventory works without
+        layout.fetch_scan_plan(sid, case_id, client)
+    except Exception as exc:
+        print(f"ashline: no plan geometry from the scan ({exc})")
 
     shots = matterport.scan_photos(sid, case_id, max_faces=max_faces, captured=captured, client=client)
     store.add_photos(case_id, shots["photos"], added_by="scan")

@@ -176,6 +176,20 @@ def create_app(store_factory=Store) -> FastAPI:
         data = page_data(case["case_id"], store, role)
         return TEMPLATES.get_template("inventory.html").render(token=token, **data)
 
+    @app.get("/p/{token}/plan", response_class=HTMLResponse)
+    def plan(token: str):
+        """A 2D plan of the home with a dot where each item was recorded."""
+        from . import layout
+        store, case, _ = resolve(token)
+        return TEMPLATES.get_template("plan.html").render(
+            token=token, name=case.get("name") or "Your home", layout=layout.build(case["case_id"], store))
+
+    @app.get("/p/{token}/plan.json")
+    def plan_json(token: str):
+        from . import layout
+        store, case, _ = resolve(token)
+        return layout.build(case["case_id"], store)
+
     @app.get("/p/{token}/crop/{item_id}.jpg")
     def crop(token: str, item_id: int):
         store, case, _ = resolve(token)

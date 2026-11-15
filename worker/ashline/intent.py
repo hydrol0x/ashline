@@ -41,6 +41,7 @@ last numbered list, X is text the person gave):
 - 2                  (answer "different item"; also "no" to a yes/no question)
 - list               (send the link to the full inventory page)
 - how much so far    (the running total)
+- map                (a plan of the home showing where each item was)
 - show photo N       (send photo N back with its numbered boxes)
 - show X             (photos of a room, e.g. show kitchen)
 - review             (go through new items waiting for approval)
@@ -67,7 +68,7 @@ Rules:
 - Choose "delete my case" only when the person clearly asks to delete or erase their case, list or data.
   It does not delete anything by itself: Ashline asks them to confirm first."""
 
-ALLOWED = ("new", "1", "2", "list", "how much so far", "review", "ok", "undo", "export", "call me", "pause", "help",
+ALLOWED = ("new", "1", "2", "list", "map", "how much so far", "review", "ok", "undo", "export", "call me", "pause", "help",
            "delete my case")
 PREFIXES = ("show ", "remove ", "split ", "price ")
 

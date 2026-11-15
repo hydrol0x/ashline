@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>{{ name }} · Plan · Ashline</title>
+<style>
+  [hidden] { display: none !important; }
+  :root {
+    --bg: #FAF7F2; --card: #FFFFFF; --ink: #2A2826; --muted: #7C766D; --line: #E8E1D6;
+    --accent: #1F6F6B; --room: #F3EEE5; --room-on: #DDEBE9; --wall: #4A4640;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 15px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; }
+  main { max-width: 1120px; margin: 0 auto; padding: 20px 16px 60px; }
+  h1 { font-size: 22px; font-weight: 600; margin: 4px 0 2px; letter-spacing: -0.01em; }
+  .sub { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+  a { color: var(--accent); }
+  .back { font-size: 13.5px; text-decoration: none; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; padding: 2px 0 12px; }
+  .chip { padding: 6px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--card);
+          font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; color: inherit; }
+  .chip i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; }
+  .chip[aria-pressed=false] { opacity: 0.45; }
+  .layout { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
+  @media (min-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr) 320px; align-items: start; } }
+  .canvas { position: relative; background: var(--card); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; }
+  .canvas svg { display: block; width: 100%; min-height: 260px; max-height: 72vh; touch-action: none; cursor: grab; }
+  .canvas svg.dragging { cursor: grabbing; }
+  .zoom { position: absolute; right: 10px; top: 10px; display: flex; flex-direction: column; gap: 6px; }
+  .zoom button { width: 34px; height: 34px; border-radius: 9px; border: 1px solid var(--line); background: var(--card);
+                 font-size: 18px; line-height: 1; cursor: pointer; color: var(--ink); }
+  .room { fill: var(--room); stroke: var(--wall); stroke-width: 2.2; vector-effect: non-scaling-stroke; cursor: pointer; }
+  .room:hover { fill: #ECE5D8; }
+  .room.on { fill: var(--room-on); }
+  .name { font-size: calc(var(--u) * 1px); fill: var(--ink); text-anchor: middle; pointer-events: none; font-weight: 600; }
+  .count { font-size: calc(var(--u) * 0.75px); fill: var(--muted); text-anchor: middle; pointer-events: none; }
+  .floor { font-size: calc(var(--u) * 1.1px); fill: var(--muted); }
+  .pin { stroke: #fff; stroke-width: 1.5; vector-effect: non-scaling-stroke; cursor: pointer; }
+  .pin.suggested { fill-opacity: 0.55; }
+  .pin.dim { opacity: 0.12; pointer-events: none; }
+  .pin.on { stroke: var(--ink); stroke-width: 2.5; }
+  .side { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; }
+  .side h2 { font-size: 16px; margin: 0 0 2px; }
+  .side .muted { color: var(--muted); font-size: 13px; margin: 0 0 10px; }
+  .side ul { list-style: none; margin: 0; padding: 0; max-height: 52vh; overflow: auto; }
+  .side li { display: flex; gap: 10px; align-items: center; padding: 7px 4px; border-top: 1px solid var(--line); cursor: pointer; font-size: 13.5px; }
+  .side li:hover, .side li.on { background: #F6F2EA; }
+  .side li img, .side li .blank { width: 44px; height: 44px; border-radius: 8px; object-fit: cover; flex: none; background: #F1ECE3; }
+  .side li .what { flex: 1 1 auto; min-width: 0; }
+  .side li .what b { display: block; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .side li .what span { color: var(--muted); font-size: 12px; }
+  .side li .price { flex: none; color: var(--muted); font-size: 13px; }
+  .big { width: 100%; max-height: 300px; object-fit: contain; border-radius: 12px; margin: 8px 0; display: block; background: #F1ECE3; }
+  .note { color: var(--muted); font-size: 12.5px; margin-top: 14px; }
+  .tip { position: absolute; pointer-events: none; background: var(--ink); color: #fff; font-size: 12.5px; padding: 5px 9px;
+         border-radius: 8px; white-space: nowrap; transform: translate(-50%, -140%); z-index: 2; }
+</style>
+</head>
+<body>
+<main>
+  <a class="back" href="/p/{{ token }}">← Inventory</a>
+  <h1>{{ name }} · where things were</h1>
+  <p class="sub">{{ layout.pins|length - layout.unplaced }} item{{ '' if layout.pins|length - layout.unplaced == 1 else 's' }} on the plan{% if layout.unplaced %} · {{ layout.unplaced }} not placed (no room known){% endif %}. Tap a room or a dot.</p>
+
+  {% if layout.rooms %}
+  <div class="chips" id="chips"></div>
+  <div class="layout">
+    <div class="canvas">
+      <svg id="plan" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Plan of the home"></svg>
+      <div class="zoom"><button id="in" aria-label="Zoom in">+</button><button id="out" aria-label="Zoom out">−</button><button id="fit" aria-label="Show everything">⤢</button></div>
+      <div class="tip" id="tip" hidden></div>
+    </div>
+    <aside class="side" id="side"></aside>
+  </div>
+  <p class="note">{{ layout.note }}</p>
+  {% else %}
+  <p class="sub">There is no plan yet. Send photos or a video walking through the home, and tell Ashline which rooms it had.</p>
+  {% endif %}
+</main>
+
+<script>
+(function () {
+  const L = {{ layout|tojson }};
+  const token = {{ token|tojson }};
+  if (!L.rooms.length) return;
+  const COLOURS = {furniture: "#8A5A2B", electronics: "#2F6FB0", appliances: "#5B6B7A", kitchen: "#B0562F",
+                   decor: "#8C4FA0", lighting: "#C79A1E", bedding: "#4E7FA8", clothing: "#3D8F6D", tools: "#6B6B3A",
+                   sports: "#C0504D", toys: "#D17BA5", outdoor: "#5A8F3C", office: "#44546A", other: "#77726A"};
+  const colour = c => COLOURS[c] || COLOURS.other;
+  const money = v => v ? "$" + Math.round(v).toLocaleString() : "";
+  const cap = s => s ? s[0].toUpperCase() + s.slice(1) : "";
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.getElementById("plan"), side = document.getElementById("side"), tip = document.getElementById("tip");
+  const el = (tag, attrs, text) => { const n = document.createElementNS(NS, tag);
+    for (const k in attrs) n.setAttribute(k, attrs[k]); if (text != null) n.textContent = text; return n; };
+  const html = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls;
+    if (text != null) n.textContent = text; return n; };
+
+  const pad = 0.8, full = {x: -pad, y: -pad, w: L.width + 2 * pad, h: L.height + 2 * pad};
+  let view = Object.assign({}, full);
+  const apply = () => svg.setAttribute("viewBox", [view.x, view.y, view.w, view.h].join(" "));
+  apply();
+  svg.style.aspectRatio = full.w + " / " + full.h;
+  const unit = Math.min(Math.max(full.w / 62, 0.3), 0.7);              // text and dots grow with the size of the home
+  svg.style.setProperty("--u", unit);
+
+  const placed = L.pins.filter(p => p.x != null);
+  const inRoom = {};
+  placed.forEach(p => (inRoom[p.room_id] = inRoom[p.room_id] || []).push(p));
+  let room = null, pinOn = null;
+  const off = new Set();
+
+  const gRooms = svg.appendChild(el("g")), gText = svg.appendChild(el("g")), gPins = svg.appendChild(el("g"));
+  L.floors.forEach(f => gText.appendChild(el("text", {x: f.x, y: -0.25 * unit, class: "floor"}, f.label ? "Floor " + f.label : "")));
+  const roomNodes = {}, pinNodes = {};
+  L.rooms.forEach(r => {
+    const node = el("polygon", {points: r.points.map(p => p.join(",")).join(" "), class: "room"});
+    node.addEventListener("click", () => { if (!moved) select(room === r.id ? null : r.id); });
+    gRooms.appendChild(node); roomNodes[r.id] = node;
+    if (r.name && r.area >= 2) {
+      gText.appendChild(el("text", {x: r.label_at[0], y: r.label_at[1], class: "name"}, r.name));
+      const n = (inRoom[r.id] || []).length;
+      if (n) gText.appendChild(el("text", {x: r.label_at[0], y: r.label_at[1] + unit * 1.05, class: "count"}, n + (n === 1 ? " item" : " items")));
+    }
+  });
+  placed.forEach(p => {
+    const node = el("circle", {cx: p.x, cy: p.y, r: unit * 0.36, fill: colour(p.category), class: "pin " + p.status});
+    node.addEventListener("click", ev => { ev.stopPropagation(); if (!moved) show(p); });
+    node.addEventListener("pointerenter", () => hint(p, node));
+    node.addEventListener("pointerleave", () => { tip.hidden = true; });
+    gPins.appendChild(node); pinNodes[p.id] = node;
+  });
+
+  function hint(p, node) {
+    const box = node.getBoundingClientRect(), host = svg.parentNode.getBoundingClientRect();
+    tip.textContent = cap(p.label) + (p.value ? " · " + money(p.value) : "");
+    tip.hidden = false;
+    const half = tip.offsetWidth / 2 + 6;
+    tip.style.left = Math.min(Math.max(box.left + box.width / 2 - host.left, half), host.width - half) + "px";
+    tip.style.top = Math.max(box.top - host.top, 34) + "px";
+  }
+
+  function refresh() {
+    placed.forEach(p => {
+      const node = pinNodes[p.id];
+      node.classList.toggle("dim", off.has(p.category) || (room !== null && p.room_id !== room));
+      node.classList.toggle("on", pinOn === p.id);
+    });
+    for (const id in roomNodes) roomNodes[id].classList.toggle("on", id === room);
+  }
+
+  function list(pins, title, sub) {
+    side.textContent = "";
+    side.appendChild(html("h2", "", title));
+    side.appendChild(html("p", "muted", sub));
+    const ul = side.appendChild(html("ul"));
+    pins.slice().sort((a, b) => b.value - a.value).forEach(p => {
+      const li = ul.appendChild(html("li"));
+      if (p.photo) { const img = li.appendChild(html("img")); img.loading = "lazy"; img.alt = ""; img.src = "/p/" + token + "/crop/" + p.id + ".jpg"; }
+      else li.appendChild(html("div", "blank"));
+      const what = li.appendChild(html("div", "what"));
+      what.appendChild(html("b", "", cap(p.label)));
+      what.appendChild(html("span", "", (p.qty > 1 ? p.qty + " × · " : "") + p.category + (p.status === "confirmed" ? " · confirmed" : "")));
+      li.appendChild(html("div", "price", money(p.value)));
+      li.addEventListener("click", () => show(p));
+      li.addEventListener("pointerenter", () => { pinOn = p.id; refresh(); });
+      li.addEventListener("pointerleave", () => { pinOn = null; refresh(); });
+    });
+  }
+
+  function select(id) {
+    room = id; pinOn = null;
+    const shown = placed.filter(p => !off.has(p.category) && (id === null || p.room_id === id));
+    const total = shown.reduce((s, p) => s + p.value, 0);
+    const r = L.rooms.find(x => x.id === id);
+    if (r) {                                                            // bring the room into view
+      const xs = r.points.map(p => p[0]), ys = r.points.map(p => p[1]);
+      const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
+      const k = Math.max(w / full.w, h / full.h) * 1.5;
+      if (k < 0.8) view = {x: (Math.min(...xs) + Math.max(...xs)) / 2 - full.w * k / 2,
+                           y: (Math.min(...ys) + Math.max(...ys)) / 2 - full.h * k / 2, w: full.w * k, h: full.h * k};
+    } else view = Object.assign({}, full);
+    apply();
+    list(shown, r ? (r.name || "Room") : "Whole home",
+         shown.length + (shown.length === 1 ? " item" : " items") + (total ? " · about " + money(total) : "") +
+         (r && L.kind === "scan" ? " · " + Math.round(r.area * 10.764) + " sq ft" : ""));
+    refresh();
+  }
+
+  function show(p) {
+    pinOn = p.id; room = p.room_id || room;
+    side.textContent = "";
+    const back = side.appendChild(html("a", "back", "← " + (p.room || "All items")));
+    back.href = "#"; back.addEventListener("click", ev => { ev.preventDefault(); select(room); });
+    if (p.photo) { const img = side.appendChild(html("img", "big")); img.alt = ""; img.src = "/p/" + token + "/crop/" + p.id + ".jpg"; }
+    side.appendChild(html("h2", "", cap(p.label)));
+    side.appendChild(html("p", "muted", [p.room, p.category, p.qty > 1 ? "quantity " + p.qty : "",
+                                        p.status === "confirmed" ? "confirmed" : "not yet confirmed"].filter(Boolean).join(" · ")));
+    if (p.value) side.appendChild(html("p", "", "About " + money(p.value)));
+    side.appendChild(html("p", "muted", p.exact ? "Placed where it stood on the floor in the scan."
+                                                : "Position is approximate."));
+    const link = side.appendChild(html("a", "", "Open in the inventory"));
+    link.href = "/p/" + token + "#item-" + p.id;
+    refresh();
+  }
+
+  // Category chips
+  const chips = document.getElementById("chips");
+  [...new Set(placed.map(p => p.category))].sort().forEach(c => {
+    const b = chips.appendChild(html("button", "chip"));
+    b.type = "button"; b.setAttribute("aria-pressed", "true");
+    const dot = b.appendChild(html("i")); dot.style.background = colour(c);
+    b.appendChild(document.createTextNode(cap(c)));
+    b.addEventListener("click", () => { off.has(c) ? off.delete(c) : off.add(c);
+      b.setAttribute("aria-pressed", String(!off.has(c))); select(room); });
+  });
+
+  // Zoom and drag
+  function zoom(factor, cx, cy) {
+    const w = Math.min(Math.max(view.w * factor, full.w / 12), full.w * 1.2), k = w / view.w;
+    cx = cx == null ? view.x + view.w / 2 : cx; cy = cy == null ? view.y + view.h / 2 : cy;
+    view = {x: cx - (cx - view.x) * k, y: cy - (cy - view.y) * k, w: w, h: view.h * k};
+    apply();
+  }
+  const toPlan = ev => { const b = svg.getBoundingClientRect();
+    const s = Math.max(view.w / b.width, view.h / b.height);          // preserveAspectRatio: meet
+    return {x: view.x + view.w / 2 + (ev.clientX - b.left - b.width / 2) * s,
+            y: view.y + view.h / 2 + (ev.clientY - b.top - b.height / 2) * s, s: s}; };
+  document.getElementById("in").addEventListener("click", () => zoom(0.7));
+  document.getElementById("out").addEventListener("click", () => zoom(1.4));
+  document.getElementById("fit").addEventListener("click", () => { view = Object.assign({}, full); apply(); });
+  svg.addEventListener("wheel", ev => { ev.preventDefault(); const p = toPlan(ev); zoom(ev.deltaY > 0 ? 1.15 : 0.87, p.x, p.y); }, {passive: false});
+  let drag = null, moved = false;
+  svg.addEventListener("pointerdown", ev => { drag = {x: ev.clientX, y: ev.clientY, vx: view.x, vy: view.y}; moved = false; });
+  svg.addEventListener("pointermove", ev => {
+    if (!drag) return;
+    const s = toPlan(ev).s, dx = ev.clientX - drag.x, dy = ev.clientY - drag.y;
+    if (Math.abs(dx) + Math.abs(dy) > 4) { moved = true; svg.classList.add("dragging"); tip.hidden = true; }
+    if (moved) { view.x = drag.vx - dx * s; view.y = drag.vy - dy * s; apply(); }
+  });
+  window.addEventListener("pointerup", () => { drag = null; svg.classList.remove("dragging"); setTimeout(() => { moved = false; }, 0); });
+
+  select(null);
+})();
+</script>
+</body>
+</html>

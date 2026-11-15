@@ -33,6 +33,7 @@ from .pricing import money, money_range, price_items
 from .store import Store
 
 BATCH_SECONDS = 60                      # wait this long after the last photo of a burst
+ANNOTATE_UP_TO = 5                       # bursts this small get every photo back annotated
 QUESTION_HOURS = 4                      # an unanswered "same item?" expires after this
 CODE = re.compile(r"\b(HOME-\d{4})\b", re.I)
 ADDRESSED = re.compile(r"^\s*@?ashline\b[,:]?\s*", re.I)
@@ -226,6 +227,9 @@ class Engine:
                  or self._memory_answer(inbound, member, case, text))
         if reply is not None:
             return reply
+        if re.fullmatch(r"(?:ok(?:ay)?|k|cool|nice|great|thanks?|thank you|ty|got it|perfect|awesome|sounds good|"
+                        r"👍|❤️|🙏)[ .!]*", text.strip().lower()):
+            return [Outbound(inbound.chat_id, "Anytime. Send more photos whenever you have them.")]
         return [Outbound(inbound.chat_id, "I'm not sure what you'd like me to do with that. " + HELP)]
 
     # ----------------------------------------------------------- onboarding
@@ -379,6 +383,7 @@ class Engine:
         folder = config.case_dir(case_id) / "photos"
         folder.mkdir(parents=True, exist_ok=True)
         saved = 0
+        caption_room = self._caption_room(case_id, inbound.text)
         for name, data in inbound.attachments:
             photo = normalize_photo(data)
             if photo is None:
@@ -390,6 +395,7 @@ class Engine:
             self.store.add_photos(case_id, [{
                 "photo_id": photo_id, "path": str(path), "source": "photo", "number": number,
                 "taken": photo["taken"], "captured": photo["taken"], "status": "queued", "chat_id": inbound.chat_id,
+                "room_label": caption_room,
                 "added_by": member.get("name") or inbound.sender_name or "family"}])
             burst["photos"].append(photo_id)
             saved += 1
@@ -455,6 +461,22 @@ class Engine:
         self.store.set_case(case["case_id"], reminders=json.dumps(sent))
         return [Outbound(owner["dm_chat"], text)]
 
+    def _caption_room(self, case_id: str, text: str) -> str | None:
+        """The room a photo's caption names ('kitchen', 'this is the garage'), if any.
+
+        Matches one of the home's rooms first; a short caption that names no known room is used as
+        the room name itself, so 'dorm room' or 'Maya's bedroom' still keeps photos apart.
+        """
+        caption = (text or "").strip(" .!").lower()
+        if not caption:
+            return None
+        for name in sorted(self._room_names(case_id), key=len, reverse=True):
+            if re.search(rf"\b{re.escape(name.lower())}\b", caption):
+                return name
+        if len(caption.split()) <= 3 and not re.search(r"\d", caption):
+            return caption[:1].upper() + caption[1:]
+        return None
+
     def _digest(self, case: dict, chat_id: str, burst: dict, now: datetime) -> list[Outbound]:
         case_id = case["case_id"]
         photos = [self.store.get_photo(case_id, pid) for pid in burst["photos"]]
@@ -472,7 +494,9 @@ class Engine:
                 self.store.set_photo(case_id, photo["photo_id"], status="failed")
                 return [Outbound(chat_id, f"I couldn't look through those just now ({exc}). I've kept them and will "
                                           "try again when you send the next one.")]
-            room = next((i.get("room") for i in items if i.get("room")), None)
+            # A room the family named with the photo wins over the detector's guess, so a chair in the
+            # bedroom is never merged with the one in the kitchen.
+            room = photo.get("room_label") or next((i.get("room") for i in items if i.get("room")), None)
             self.store.set_photo(case_id, photo["photo_id"], status="done", room_label=room)
             photo = {**photo, "room_label": room}
             for item in items:
@@ -490,6 +514,7 @@ class Engine:
         lines.sort(key=lambda i: -((i.get("price_mid") or 0) * (i.get("qty") or 1)))
 
         out: list[Outbound] = []
+        shots: list[Outbound] = []
         context = self._context(chat_id)
         if len(photos) == 1:                                # one photo on its own: the annotated version
             out.append(self._annotated(case_id, chat_id, photos[0], context,
@@ -504,6 +529,12 @@ class Engine:
             if top:
                 text += " Biggest finds: " + ", ".join(top) + "."
             out.append(Outbound(chat_id, text))
+            if len(photos) <= ANNOTATE_UP_TO:                # a few photos: each comes back annotated too,
+                for p in photos:                             # after the summary and any question
+                    shot = self._annotated(case_id, chat_id, p, context)
+                    if not shot.text.startswith("I couldn't"):
+                        shot.text = f"Photo {p.get('number') or ''}: {shot.text}".replace("Photo : ", "")
+                        shots.append(shot)
 
         heard = context.pop("heard", [])
         if heard:                                           # never a quote, only the item
@@ -521,7 +552,7 @@ class Engine:
         self._save(chat_id, context)
         # After a digest of several photos only: a single annotated photo is left to stand on its own.
         ask = self._directed_ask(case_id, chat_id, sender, now) if len(out) == 1 and len(photos) > 1 else None
-        return out + ([ask] if ask else [])
+        return out + ([ask] if ask else []) + shots
 
     def _directed_ask(self, case_id: str, chat_id: str, member: dict | None, now: datetime) -> Outbound | None:
         """One specific request to the person who just sent photos. At most once a day per person."""

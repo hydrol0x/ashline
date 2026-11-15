@@ -37,7 +37,7 @@ def load_env() -> None:
             if value[:1] in ("'", '"') and value[:1] in value[1:]:
                 value = value[1:value.index(value[0], 1)]        # quoted: keep everything inside
             else:
-                value = value.split(" #", 1)[0].strip()         # unquoted: " #" starts a comment
+                value = "" if value.startswith("#") else value.split(" #", 1)[0].strip()   # " #" starts a comment
             if value:
                 os.environ.setdefault(key.strip(), value)
 

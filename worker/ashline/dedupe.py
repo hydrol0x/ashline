@@ -47,7 +47,7 @@ SYNONYMS = {
 COLOR_FAMILIES = [
     {"black", "charcoal", "gray", "silver"},
     {"white", "cream", "ivory", "beige"},
-    {"brown", "tan", "bronze", "beige"},
+    {"brown", "tan", "bronze", "beige", "oak", "walnut", "maple", "pine", "teak", "mahogany", "honey", "cherry"},
     {"yellow", "gold"},
     {"red", "maroon", "orange"},
     {"pink", "magenta", "purple", "lavender"},
@@ -55,6 +55,8 @@ COLOR_FAMILIES = [
     {"green", "teal"},
 ]
 COLORS = set().union(*COLOR_FAMILIES)
+# Shapes that cannot describe the same object: a round table is not a long bench table.
+SHAPE_CONFLICTS = [({"round", "circular", "oval"}, {"rectangular", "long", "square", "bench"})]
 STOPWORDS = {"a", "an", "the", "and", "or", "with", "on", "in", "of", "for", "to", "at", "by", "from",
              "top", "side", "small", "large", "big", "second", "another", "pair", "set", "dark", "light"}
 # Words that end a label without naming the thing: "curtain panel", "loveseat piece".
@@ -145,6 +147,9 @@ def same_thing(a: str, b: str) -> bool:
         return False
     if colors_a and colors_b and not any(colors_a & family and colors_b & family for family in COLOR_FAMILIES):
         return False
+    for one, other in SHAPE_CONFLICTS:
+        if (words_a & one and words_b & other) or (words_a & other and words_b & one):
+            return False
     return len(words_a & words_b) / min(len(words_a), len(words_b)) >= LINK_OVERLAP
 
 

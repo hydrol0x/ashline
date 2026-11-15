@@ -129,6 +129,19 @@ def test_one_photo_comes_back_annotated(fam):
     assert fam.wait() == []                                       # nothing more to say
 
 
+def test_a_room_named_with_the_photo_keeps_items_apart(fam):
+    fam.say(MAYA, "", [photo(640)])                               # detector: living room, a sofa
+    fam.wait()
+    fam.say(MAYA, "this is the bedroom", [photo(648)])            # detector also says living room, another sofa
+    fam.wait()
+    sofas = [i for i in fam.store.get_items(fam.case_id, canonical_only=True) if "sofa" in i["label"]]
+    assert sorted(i["room_label"] for i in sofas) == ["Bedroom", "Living room"]   # two sofas, not one
+    assert fam.store.get_photo(fam.case_id, number=2)["room_label"] == "Bedroom"
+    fam.say(MAYA, "dorm room", [photo(664)])                      # a room that isn't on the list still counts
+    fam.wait()
+    assert fam.store.get_photo(fam.case_id, number=3)["room_label"] == "Dorm room"
+
+
 def test_a_burst_gets_one_ack_and_one_digest(fam):
     fam.say(MAYA, "", [photo(640)])
     fam.wait()
@@ -157,7 +170,7 @@ def test_same_item_question_and_undo(fam):
     fam.say(DAD, fam.code, name="Dad")
     fam.say(DAD, "", [photo(664), photo(656)])
     out = fam.wait()
-    question = out[-1]
+    question = [o for o in out if not o.text.startswith("Photo ")][-1]
     assert question.text == "Same sofa? 1 = same, 2 = different." and question.image.endswith(".jpg")
     assert Image.open(question.image).height == 600
     lines = lambda: len([i for i in fam.store.get_items(fam.case_id, canonical_only=True)])
@@ -439,10 +452,10 @@ def test_one_directed_ask_a_day(fam):
     fam.say(MAYA, "", [photo(640), photo(648)])
     out = fam.wait()
     assert re.fullmatch(r"Maya, there's nothing from the (kitchen|bedroom|garage)( \d)? yet\. "
-                        r"Any birthday or holiday photos taken there\?", texts(out)[-1])
+                        r"Any birthday or holiday photos taken there\?", [t for t in texts(out) if not t.startswith("Photo ")][-1])
     fam.say(MAYA, "", [photo(656), photo(672)])
     out = fam.wait()
-    assert len(out) == 1 and "Any birthday" not in out[0].text                  # already asked today
+    assert not any("Any birthday" in t for t in texts(out))                       # already asked today
     fam.now += timedelta(days=1)
     fam.say(MAYA, "", [photo(664), photo(672)])
     asked = [t for t in texts(fam.wait()) if "photos taken there" in t]

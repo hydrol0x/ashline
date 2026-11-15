@@ -20,7 +20,7 @@
   .masthead .brand img { height: 38px; }
   .masthead .brand span { font-size: 23px; }
   .masthead small { color: var(--muted); font-size: 13px; }
-  a.back { color: var(--red); font-weight: 600; font-size: 14px; text-decoration: none; }
+  a.back { color: var(--red); font-weight: 600; font-size: 14px; text-decoration: none; display: inline-block; padding: 11px 0; }
   a.back:hover { text-decoration: underline; }
   .head { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 8px 0 16px; }
   h1 { font: 700 clamp(26px, 4vw, 34px)/1.1 var(--sans); letter-spacing: -0.02em; margin: 0; }
@@ -39,6 +39,8 @@
     .chips::-webkit-scrollbar { display: none; }
     .chip { flex: none; min-height: 40px; }
     .canvas svg { min-height: 240px; }
+    .under .why { display: none; }                 /* the pill by the title already says it */
+    .canvas .tip.thing { display: none; }                 /* the thing's card opens right under the plan */
     /* On a phone: the plan, then the open room or the rooms, then the 3D scan. */
     .main { display: contents; }
     .canvas { order: 1; } .side { order: 2; } .tour { order: 3; }
@@ -62,6 +64,7 @@
   .room:hover { fill: #EEEDEA; }
   .room.on, .room.sketch.on { fill: var(--room-on); stroke: var(--red); stroke-width: 2.2; }
   .door { stroke: var(--paper); stroke-width: 4; vector-effect: non-scaling-stroke; pointer-events: none; }
+  .name, .about, .shapename { paint-order: stroke; stroke: rgba(255, 255, 255, .8); stroke-width: calc(var(--us, var(--u)) * 0.24px); stroke-linejoin: round; }
   .name { font-size: calc(var(--us, var(--u)) * 1px); fill: var(--ink); pointer-events: none; font-weight: 700; }
   .about { font-size: calc(var(--us, var(--u)) * 0.78px); fill: var(--muted); pointer-events: none; }
   .name.mid, .about.mid { text-anchor: middle; }
@@ -216,7 +219,7 @@
   const priced = p => p.value ? money(p.value) : "";
 
   const gRooms = svg.appendChild(el("g")), gDoors = svg.appendChild(el("g")), gShapes = svg.appendChild(el("g")),
-        gText = svg.appendChild(el("g")), gHalo = svg.appendChild(el("g")), gPins = svg.appendChild(el("g"));
+        gHalo = svg.appendChild(el("g")), gPins = svg.appendChild(el("g")), gText = svg.appendChild(el("g"));   // names on top
   const SHAPES_AT = 0.72, DOTS_AT = 0.42;                              // how far in before furniture, then everything, appears
   const detail = () => view.w / full.w;                                 // 1 = the whole home, smaller = closer
   L.floors.forEach(f => gText.appendChild(el("text", {x: f.x, y: -0.25 * unit, class: "floor"}, f.label ? "Floor " + f.label : "")));
@@ -250,7 +253,7 @@
     node.addEventListener("pointerleave", () => { if (!tip.classList.contains("thing")) tip.hidden = true; });
     const cx = p.shape.reduce((a, c) => a + c[0], 0) / 4, cy = p.shape.reduce((a, c) => a + c[1], 0) / 4;
     const edge = (a, b) => Math.hypot(p.shape[a][0] - p.shape[b][0], p.shape[a][1] - p.shape[b][1]);
-    shapeNodes[p.id] = {node: node, name: gShapes.appendChild(el("text", {x: cx, y: cy, class: "shapename"}, p.short || "")),
+    shapeNodes[p.id] = {node: node, name: gText.appendChild(el("text", {x: cx, y: cy, class: "shapename"}, p.short || "")),
                         span: Math.max(edge(0, 1), edge(1, 2))};
   });
   placed.forEach(p => {

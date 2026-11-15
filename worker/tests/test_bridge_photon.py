@@ -145,3 +145,12 @@ def test_backlog_from_while_the_bot_was_off_is_not_answered(bridge):
     projects.inbox = [received("old", "hi", at="2026-11-14T15:00:00.000Z"), received("new", "hi", at=now)]
     assert b.poll() == 1
     assert len(sent_text(projects)) >= 1 and "old" in b.state["seen"]
+
+
+def test_polls_the_sms_line_as_well_as_imessage(bridge):
+    b, projects = bridge
+    asked = []
+    real = projects.list_messages
+    projects.list_messages = lambda request: (asked.append(request.query.platform), real(request))[1]
+    b.poll()
+    assert [getattr(p, "root", p) for p in asked] == ["imessage", "sms"]

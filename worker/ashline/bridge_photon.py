@@ -109,8 +109,19 @@ class PhotonBridge:
     def poll(self) -> int:
         """Handle every message received since the last poll. Returns how many."""
         from photon_api.rpc_generated import ListMessagesInput
-        query = {"createdSince": self.state["since"], "direction": "received", "order": "asc", "pageSize": 100,
-                 "platform": "imessage"}
+        since, handled = self.state["since"], 0
+        # iMessage and SMS lines of the same project: ASHLINE_PHOTON_PLATFORMS=imessage,sms (the default).
+        platforms = [p.strip() for p in config.env("ASHLINE_PHOTON_PLATFORMS", "imessage,sms").split(",") if p.strip()]
+        for platform in platforms:
+            handled += self._poll_platform(ListMessagesInput, since, platform)
+        if self.skipped:
+            print(f"ashline: skipped {self.skipped} text(s) that arrived while the bot was off here")
+            self.skipped = 0
+        return handled
+
+    def _poll_platform(self, ListMessagesInput, since: str, platform: str) -> int:
+        query = {"createdSince": since, "direction": "received", "order": "asc", "pageSize": 100,
+                 "platform": platform}
         handled = 0
         while True:
             page = self.photon.projects.list_messages(
@@ -134,9 +145,6 @@ class PhotonBridge:
             if not isinstance(token, str):
                 break
             query["pageToken"] = token
-        if self.skipped:
-            print(f"ashline: skipped {self.skipped} text(s) that arrived while the bot was off here")
-            self.skipped = 0
         return handled
 
     def to_inbound(self, message) -> Inbound | None:

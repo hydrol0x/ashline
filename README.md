@@ -78,13 +78,51 @@ documentation and has not been run against a live project yet.
 What it does: onboarding in a few messages; relatives join with a code; one acknowledgement and one
 digest per burst of photos; a single photo comes back annotated; repeats are merged and a borderline
 match becomes one "same item?" question; commands (`list`, `how much so far`, `show photo 3`,
-`review`, `OK`, `remove 4`, `undo`, `export`, `pause`, `call me`, `delete my case`); a review for the
+`review`, `OK`, `remove 4`, `undo`, `export`, `map`, `check my bank`, `pause`, `call me`, `delete my case`); a review for the
 owner, one room at a time when a lot is waiting; and a memory conversation by text. In a group chat
 it answers photos, messages addressed to it, replies to its own question and command words, and
 otherwise says nothing.
 
 If the address has a 3D scan, onboarding offers to start from it and asks when the fire was, so the
 aerial photo comes from before it.
+
+### Talking in plain language
+
+With `ANTHROPIC_API_KEY` set, a message that is not an exact command goes to a LangChain deep agent
+(`assistant.py`). It can search the inventory, report progress, describe the home, add an item from
+memory and run any of the commands above; a `price-researcher` subagent looks prices up online.
+It only reads and changes the inventory through those tools.
+
+### Video
+
+A video sent in the chat (or `/video walk.mp4` in the simulator) is cut into up to 14 sharp stills
+with `ffmpeg` (`video.py`), which then go through the photo pipeline, so the same sofa seen in five
+frames is one line. `ffmpeg` has to be installed on the machine.
+
+### Prices from what was paid or what it costs today
+
+- `ashline price-check --case demo --top 20` looks the most valuable items up online
+  (`price_search.py`, Claude's web search) and keeps the closest match's price with its link.
+- `check my bank` in the chat, or `ashline bank --case demo`, matches the family's card purchases to
+  items (`bank.py`, Capital One's Nessie mock bank, `NESSIE_API_KEY`). The owner sees the matches and
+  says yes before any price changes; the purchase is kept as a bank record and counts as proof for
+  an item known only from memory. Nessie holds mock data, so `ashline bank --case demo --seed-demo 5`
+  first writes purchases for the five most valuable items. Written from Nessie's documentation and
+  tested against a fake; not yet run against the live service.
+
+## Plan of the home
+
+`/p/<token>/plan` (linked from the inventory page, or `map` in the chat) shows the home from above
+with a dot where each item was recorded. Tap a room to list what was in it, tap a dot for the item.
+
+- With a 3D scan, the rooms are the scan's own outlines and each item is placed where it stood on
+  the floor, worked out from the panorama it was seen in (`layout.py`).
+- Without a scan, the rooms are sketched as rectangles in the order the photos or video walked
+  through them. With `ANTHROPIC_API_KEY` set, Claude looks at the photos and refines room sizes,
+  which rooms adjoin and where items stood (`sketch_claude.py`). The page says it is a sketch.
+
+`ashline plan --case demo --png plan.png` draws it from the command line. The scan's geometry is
+kept in the private case folder and is never committed.
 
 ## Inventory page
 

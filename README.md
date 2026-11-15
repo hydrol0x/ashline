@@ -129,8 +129,10 @@ line as the one photographed in the dining room.
 ## Plan of the home
 
 `/p/<token>/plan` (linked from the inventory page, or `map` in the chat) shows the home from above.
-Each room carries a count and the page lists the rooms with what they held; tap a room and its
-things appear as dots where they were recorded, tap a dot for the item.
+Zoomed out, each room carries a count and the page lists the rooms with what they held. Zoom in,
+or tap a room, and the large furniture and appliances appear as footprints, then everything else
+as dots; tap one for the item. A thing is drawn only where its place is known. With a scan, a
+footprint's width is measured from the panorama; in a sketch it is a typical size for the thing.
 
 - With a 3D scan, the rooms are the scan's own outlines, with its doorways, and each item is placed
   where it stood on the floor, worked out from the panorama it was seen in (`layout.py`). An item is

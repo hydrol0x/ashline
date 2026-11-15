@@ -58,6 +58,13 @@
   .bubble { pointer-events: none; }
   .bubble circle { fill: var(--paper); stroke: var(--ink); stroke-width: 1.6; vector-effect: non-scaling-stroke; }
   .bubble text { font-size: calc(var(--u) * 0.95px); font-weight: 700; fill: var(--ink); text-anchor: middle; dominant-baseline: central; }
+  /* Large furniture as a footprint, shown once the plan is zoomed in or its room is open. */
+  .shape { fill: #fff; stroke: var(--ink-2); stroke-width: 1.4; vector-effect: non-scaling-stroke; cursor: pointer; stroke-linejoin: round; }
+  .shape:hover { fill: #FFF6F3; }
+  .shape.on { stroke: var(--red); stroke-width: 2.4; fill: #FFF6F3; }
+  .shape.rough { stroke-dasharray: 5 4; }
+  .shapename { font-size: calc(var(--us, var(--u)) * 0.72px); fill: var(--ink-2); text-anchor: middle; dominant-baseline: central;
+               pointer-events: none; font-weight: 600; }
   .halo { fill: #C9CCD1; fill-opacity: 0.55; pointer-events: none; }
   .pin { stroke: #fff; stroke-width: 2; vector-effect: non-scaling-stroke; cursor: pointer; }
   .pin.suggested { fill-opacity: 0.85; }
@@ -171,10 +178,12 @@
   const worth = pins => pins.reduce((s, p) => s + p.value, 0);
   const priced = p => p.value ? money(p.value) : "";
 
-  const gRooms = svg.appendChild(el("g")), gDoors = svg.appendChild(el("g")), gText = svg.appendChild(el("g")),
-        gHalo = svg.appendChild(el("g")), gPins = svg.appendChild(el("g"));
+  const gRooms = svg.appendChild(el("g")), gDoors = svg.appendChild(el("g")), gShapes = svg.appendChild(el("g")),
+        gText = svg.appendChild(el("g")), gHalo = svg.appendChild(el("g")), gPins = svg.appendChild(el("g"));
+  const SHAPES_AT = 0.72, DOTS_AT = 0.42;                              // how far in before furniture, then everything, appears
+  const detail = () => view.w / full.w;                                 // 1 = the whole home, smaller = closer
   L.floors.forEach(f => gText.appendChild(el("text", {x: f.x, y: -0.25 * unit, class: "floor"}, f.label ? "Floor " + f.label : "")));
-  const roomNodes = {}, pinNodes = {}, haloNodes = {}, labels = {};
+  const roomNodes = {}, pinNodes = {}, haloNodes = {}, shapeNodes = {}, labels = {};
   L.rooms.forEach(r => {
     const node = el("polygon", {points: r.points.map(p => p.join(",")).join(" "), class: "room" + (rough ? " sketch" : "")});
     node.addEventListener("click", () => { if (!moved) select(room === r.id ? null : r.id); });
@@ -196,6 +205,16 @@
       g.appendChild(el("circle", {r: unit * 1.05}));
       label.bubble = g; label.count = g.appendChild(el("text", {}, ""));
     }
+  });
+  placed.filter(p => p.shape).forEach(p => {                           // a footprint for the big things
+    const node = gShapes.appendChild(el("polygon", {points: p.shape.map(c => c.join(",")).join(" "), class: "shape" + (rough ? " rough" : "")}));
+    node.addEventListener("click", ev => { ev.stopPropagation(); if (!moved) show(p); });
+    node.addEventListener("pointerenter", () => { if (!tip.classList.contains("thing")) hint(p, node); });
+    node.addEventListener("pointerleave", () => { if (!tip.classList.contains("thing")) tip.hidden = true; });
+    const cx = p.shape.reduce((a, c) => a + c[0], 0) / 4, cy = p.shape.reduce((a, c) => a + c[1], 0) / 4;
+    const edge = (a, b) => Math.hypot(p.shape[a][0] - p.shape[b][0], p.shape[a][1] - p.shape[b][1]);
+    shapeNodes[p.id] = {node: node, name: gShapes.appendChild(el("text", {x: cx, y: cy, class: "shapename"}, p.short || "")),
+                        span: Math.max(edge(0, 1), edge(1, 2))};
   });
   placed.forEach(p => {
     haloNodes[p.id] = gHalo.appendChild(el("circle", {cx: p.x, cy: p.y, r: unit * 0.62, class: "halo"}));
@@ -242,16 +261,24 @@
   function unthing() { tip.className = "tip"; tip.hidden = true; }
 
   function refresh() {
+    // Whole home: rooms and counts. Closer: the big furniture as footprints. Closer still, or in the
+    // open room: everything else as dots. Things placed outside any room always show.
+    const z = detail(), box = svg.getBoundingClientRect(), perUnit = Math.min(box.width / view.w, box.height / view.h) || 1;
     placed.forEach(p => {
-      // Dots show for the open room; things placed outside any room always show.
-      const gone = !seen(p) || (p.room_id != null && p.room_id !== room);
-      pinNodes[p.id].classList.toggle("hide", gone); haloNodes[p.id].classList.toggle("hide", gone);
+      const open = p.room_id == null || p.room_id === room, shape = shapeNodes[p.id];
+      const asShape = !!shape && seen(p) && (open || z <= SHAPES_AT);
+      const asDot = !asShape && seen(p) && (open || z <= DOTS_AT);
+      if (shape) {
+        shape.node.classList.toggle("hide", !asShape); shape.node.classList.toggle("on", pinOn === p.id);
+        shape.name.classList.toggle("hide", !asShape || shape.span * perUnit < 54);     // a name only where it fits
+      }
+      pinNodes[p.id].classList.toggle("hide", !asDot); haloNodes[p.id].classList.toggle("hide", !asDot);
       pinNodes[p.id].classList.toggle("on", pinOn === p.id);
     });
     L.rooms.forEach(r => {
       const label = labels[r.id], pins = shownIn(r.id), n = pins.length, open = r.id === room;
       roomNodes[r.id].classList.toggle("on", open);
-      if (label.bubble) { label.count.textContent = n; label.bubble.classList.toggle("hide", !n || open); }
+      if (label.bubble) { label.count.textContent = n; label.bubble.classList.toggle("hide", !n || open || z <= SHAPES_AT); }
       if (label.about) label.about.textContent = !n ? "" : label.small ? n + (n === 1 ? " item" : " items")
         : open ? n + (n === 1 ? " item" : " items") + (worth(pins) ? " · about " + money(worth(pins)) : "")
         : (worth(pins) ? "about " + money(worth(pins)) : "");
@@ -323,7 +350,9 @@
     card.appendChild(html("p", "muted", [p.room, cap(p.category), p.qty > 1 ? "quantity " + p.qty : ""].filter(Boolean).join(" · ")));
     if (p.value) card.appendChild(html("p", "muted", priced(p) + (p.basis ? " · " + p.basis : "")));
     card.appendChild(html("p", "muted", p.x == null ? "Known by its room only, so it has no dot on the plan."
-      : p.exact ? "Placed where it stood on the floor in the scan." : "Its place on the plan is approximate."));
+      : p.exact ? "Placed where it stood on the floor in the scan." + (p.wide ? " About " + p.wide + " m wide, measured from the scan." : "")
+      : p.shape ? "Its place is approximate, and its outline is a typical size for this kind of thing."
+      : "Its place on the plan is approximate."));
     const link = card.appendChild(html("a", "open", "Open in the list"));
     link.href = "/p/" + token + "#item-" + p.id;
   }
@@ -357,7 +386,8 @@
     if (p.room_id != null && p.room_id !== room) { room = p.room_id; more = false; frame(L.rooms.find(x => x.id === room)); }
     pinOn = p.id; side.dataset.item = String(p.id);
     draw(); refresh();
-    if (pinNodes[p.id]) requestAnimationFrame(() => thing(p, pinNodes[p.id]));   // after any move to its room
+    const at = shapeNodes[p.id] ? shapeNodes[p.id].node : pinNodes[p.id];
+    if (at) requestAnimationFrame(() => thing(p, at));                  // after any move to its room
     else unthing();
   }
 
@@ -379,7 +409,7 @@
     const w = Math.min(Math.max(view.w * factor, full.w / 12), full.w * 1.2), k = w / view.w;
     cx = cx == null ? view.x + view.w / 2 : cx; cy = cy == null ? view.y + view.h / 2 : cy;
     view = {x: cx - (cx - view.x) * k, y: cy - (cy - view.y) * k, w: w, h: view.h * k};
-    apply(); unthing();
+    apply(); unthing(); refresh();
   }
   const toPlan = ev => { const b = svg.getBoundingClientRect();
     const s = Math.max(view.w / b.width, view.h / b.height);          // preserveAspectRatio: meet
@@ -387,7 +417,7 @@
             y: view.y + view.h / 2 + (ev.clientY - b.top - b.height / 2) * s, s: s}; };
   document.getElementById("in").addEventListener("click", () => zoom(0.7));
   document.getElementById("out").addEventListener("click", () => zoom(1.4));
-  document.getElementById("fit").addEventListener("click", () => { view = Object.assign({}, full); apply(); unthing(); });
+  document.getElementById("fit").addEventListener("click", () => { view = Object.assign({}, full); apply(); unthing(); refresh(); });
   svg.addEventListener("wheel", ev => { ev.preventDefault(); const p = toPlan(ev); zoom(ev.deltaY > 0 ? 1.15 : 0.87, p.x, p.y); }, {passive: false});
   let drag = null, moved = false;
   svg.addEventListener("pointerdown", ev => { drag = {x: ev.clientX, y: ev.clientY, vx: view.x, vy: view.y}; moved = false; });

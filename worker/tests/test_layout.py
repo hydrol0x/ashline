@@ -121,6 +121,38 @@ def test_doorways_and_camera_height_come_from_the_scan():
     assert "h" not in layout.scan_plan(MODEL)["cameras"]["p1"]         # no doorway, no floor height: the default applies
 
 
+def test_only_large_furniture_and_appliances_get_a_footprint():
+    assert layout.typical("gray leather three-seat power reclining sofa")[0] == "Sofa"
+    assert layout.typical("oak coffee table") == ("Coffee table", 1.1, 0.6)          # before the plain "table"
+    assert layout.typical("stainless steel French-door refrigerator")[0] == "Fridge"
+    for small in ("white bed pillow", "brass table lamp", "black countertop microwave oven", "desk mat", "light gray table top",
+                  "red stand mixer", "framed print"):
+        assert layout.typical(small) is None, small
+
+
+def test_a_footprint_stands_against_the_wall_it_is_near_and_stays_in_the_room():
+    room = Polygon([(0, 0), (6, 0), (6, 4), (0, 4)])
+    # A sofa whose front edge is 1 m in front of the bottom wall (y = 0): drawn with its back on that wall.
+    corners = layout.footprint(3.0, 1.0, 2.0, 0.9, room, toward=(0, -1))
+    xs, ys = sorted(c[0] for c in corners), sorted(c[1] for c in corners)
+    assert (xs[0], xs[-1]) == (pytest.approx(2.0), pytest.approx(4.0))               # 2 m along the wall
+    assert ys[0] == pytest.approx(0.04) and ys[-1] == pytest.approx(0.94)            # 0.9 m deep, against the wall
+    # In the middle of a big room it faces the camera instead.
+    hall = Polygon([(0, 0), (20, 0), (20, 20), (0, 20)])
+    corners = layout.footprint(10.0, 10.0, 2.0, 1.0, hall, toward=(1, 0))
+    assert sorted(round(c[0], 2) for c in corners) == [10.0, 10.0, 11.0, 11.0]
+    assert sorted(round(c[1], 2) for c in corners) == [9.0, 9.0, 11.0, 11.0]
+    # A thing too big for where it stands is not drawn through the walls.
+    assert layout.footprint(3.0, 1.0, 9.0, 0.9, room, toward=(0, -1)) is None
+
+
+def test_width_is_measured_from_how_wide_a_thing_looks_and_how_far_it_stands():
+    camera = {"x": 0.0, "y": 0.0, "yaw": 0.0}
+    # Face 1 looks along +x with a 90 degree view: at 2 m ahead the face is 4 m wide, so half the image is 2 m.
+    assert layout.seen_width(camera, 1, [512, 0, 1536, 2048], (2048, 2048), 2.0, 0.0) == pytest.approx(2.0)
+    assert layout.seen_width(camera, 1, [512, 0, 1536, 2048], (2048, 2048), 4.0, 1.0) == pytest.approx(4.0)
+
+
 @pytest.fixture
 def scanned(tmp_path):
     store = Store()
@@ -150,6 +182,8 @@ def test_build_draws_the_scan_with_a_pin_per_line(scanned):
     pins = {p["id"]: p for p in drawn["pins"]}
     assert pins[sofa]["exact"] and pins[sofa]["room_id"] == "living" and pins[sofa]["value"] == 900
     assert pins[sofa]["x"] == pytest.approx(3 + layout.CAMERA_HEIGHT / 0.75, abs=0.01) and pins[sofa]["y"] == pytest.approx(2.0)
+    # 248 of 2048 pixels wide at 1.9 m is a 0.46 m thing: too narrow for a footprint, so it stays a dot.
+    assert "shape" not in pins[sofa]
     # Known only by its room: counted with that room, but no dot, since nobody knows where it stood.
     assert pins[mixer]["room_id"] == "kitchen" and pins[mixer]["x"] is None and not pins[mixer]["exact"]
     # No room at all: listed as not placed.

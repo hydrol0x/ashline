@@ -65,6 +65,26 @@ ROOM_SIZES = [
     (("patio", "deck", "yard", "porch", "balcony"), (4.5, 3.0)),
 ]
 DEFAULT_SIZE = (3.4, 3.0)
+# Large things get a footprint on the plan when it is zoomed in: (words in the label, short name,
+# typical width, typical depth) in metres. With a scan the width is measured and only the depth
+# is typical; in a sketch both are. First match wins, so "coffee table" comes before "table".
+FOOTPRINTS = [
+    (("sectional",), "Sectional", 2.7, 1.6), (("loveseat",), "Loveseat", 1.5, 0.9), (("sofa", "couch"), "Sofa", 2.1, 0.95),
+    (("bunk bed",), "Bunk bed", 2.0, 1.0), (("crib",), "Crib", 1.4, 0.75), (("mattress", "bed"), "Bed", 1.6, 2.0),
+    (("coffee table",), "Coffee table", 1.1, 0.6), (("dining table",), "Dining table", 1.7, 0.95),
+    (("desk",), "Desk", 1.3, 0.65), (("dresser", "chest of drawers"), "Dresser", 1.2, 0.5),
+    (("media console", "tv stand", "console", "credenza", "sideboard", "buffet"), "Console", 1.5, 0.45),
+    (("bookcase", "bookshelf", "shelving"), "Shelves", 0.9, 0.35), (("wardrobe", "armoire"), "Wardrobe", 1.2, 0.6),
+    (("refrigerator", "fridge"), "Fridge", 0.9, 0.75), (("range", "stove", "oven"), "Range", 0.76, 0.68),
+    (("washing machine", "washer"), "Washer", 0.7, 0.7), (("dryer",), "Dryer", 0.7, 0.7), (("freezer",), "Freezer", 0.8, 0.7),
+    (("piano",), "Piano", 1.5, 0.65), (("treadmill",), "Treadmill", 0.9, 1.9), (("recliner", "armchair"), "Armchair", 0.9, 0.9),
+    (("table",), "Table", 1.2, 0.8), (("bench",), "Bench", 1.2, 0.45), (("cabinet",), "Cabinet", 0.9, 0.45),
+]
+NOT_FOOTPRINTS = ("lamp", "pillow", "cushion", "cover", "sheet", "blanket", "throw", "frame", "print", "tray", "mat",
+                  "runner", "cloth", "toy", "remote", "top", "microwave", "toaster", "countertop", "dollhouse", "model")
+#                 "bed pillow", "table lamp", "desk mat", "microwave oven" are not furniture standing on the floor
+MIN_FOOTPRINT = 0.6             # metres: narrower things stay dots
+WALL_SNAP = 0.7                 # metres beyond its own depth within which a thing is drawn standing against the wall
 
 
 # ------------------------------------------------------------------- scan
@@ -278,6 +298,64 @@ def floor_spot(camera: dict, face: int, bbox: list, size: tuple[int, int], outli
     return camera["x"] + unit[0] * distance, camera["y"] + unit[1] * distance, exact
 
 
+def typical(label: str) -> tuple[str, float, float] | None:
+    """(short name, width, depth) for a large piece of furniture or an appliance, by its label; else None."""
+    low = (label or "").lower()
+    words = set(re.findall(r"[a-z]+", low))
+    if words & set(NOT_FOOTPRINTS):
+        return None
+    for keys, short, width, depth in FOOTPRINTS:
+        if any((key in low) if " " in key else (key in words) for key in keys):
+            return short, width, depth
+    return None
+
+
+def seen_width(camera: dict, face: int, bbox: list, size: tuple[int, int], x: float, y: float) -> float:
+    """How wide a thing is, in metres, from how wide it looks and how far away it stands."""
+    angle = camera["yaw"] - (int(face or 1) - 1) * math.pi / 2
+    forward = (math.cos(angle), math.sin(angle))
+    ahead = (x - camera["x"]) * forward[0] + (y - camera["y"]) * forward[1]       # distance along the face's own axis
+    return abs(ahead) * 2 * (bbox[2] - bbox[0]) / size[0]
+
+
+def footprint(x: float, y: float, width: float, depth: float, outline: Polygon | None,
+              toward: tuple[float, float] | None = None) -> list | None:
+    """A rectangle for a thing whose front edge is centred on (x, y): four corners, or None.
+
+    Near a wall it stands against that wall, as furniture does. Otherwise, with `toward` (the
+    direction the camera looked along) it faces the camera; without, it lies square to the page.
+    A rectangle that would leave the room is not drawn.
+    """
+    along, back, centre = (1.0, 0.0), (0.0, 1.0), None
+    if toward:
+        norm = math.hypot(*toward) or 1.0
+        back = (toward[0] / norm, toward[1] / norm)
+        along = (-back[1], back[0])
+    if outline is not None:
+        ring = list(outline.exterior.coords)
+        nearest = min(((LineString([a, b]).distance(Point(x, y)), a, b) for a, b in zip(ring, ring[1:])), default=None)
+        if nearest and nearest[0] <= depth + WALL_SNAP:
+            gap, a, b = nearest
+            length = math.hypot(b[0] - a[0], b[1] - a[1]) or 1.0
+            along = ((b[0] - a[0]) / length, (b[1] - a[1]) / length)
+            t = (x - a[0]) * along[0] + (y - a[1]) * along[1]
+            foot = (a[0] + t * along[0], a[1] + t * along[1])                 # the point on the wall behind the thing
+            inward = (x - foot[0], y - foot[1])
+            norm = math.hypot(*inward)
+            inward = (inward[0] / norm, inward[1] / norm) if norm > 1e-6 else (-along[1], along[0])
+            if not outline.contains(Point(foot[0] + inward[0] * 0.1, foot[1] + inward[1] * 0.1)):
+                inward = (-inward[0], -inward[1])
+            centre = (foot[0] + inward[0] * (depth / 2 + 0.04), foot[1] + inward[1] * (depth / 2 + 0.04))
+            back = inward
+    if centre is None:
+        centre = (x + back[0] * depth / 2, y + back[1] * depth / 2) if toward else (x, y)
+    corners = [(centre[0] + sx * along[0] * width / 2 + sy * back[0] * depth / 2,
+                centre[1] + sx * along[1] * width / 2 + sy * back[1] * depth / 2) for sx, sy in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+    if outline is not None and not outline.buffer(0.25).contains(Polygon(corners)):
+        return None
+    return corners
+
+
 def _to_wall(camera: dict, unit: tuple[float, float], outline: Polygon | None) -> float | None:
     if outline is None:
         return None
@@ -447,8 +525,18 @@ def build(case_id: str, store, drawn: dict | None = None) -> dict:
             same_floor = [o for rid, o in outlines.items() if floor_of.get(rid) == camera.get("floor")]
             x, y, exact = floor_spot(camera, photo.get("face") or 1, bbox, _image_size(photo.get("path"), sizes),
                                      outlines.get(room_id), others=same_floor, doors=doors_of.get(room_id))
-            px, py = to_page(x, y, camera.get("floor") or floor_of.get(room_id))
-            pins.append({**pin, "x": px, "y": py, "exact": exact, "room_id": room_id if room_id in outlines else None})
+            floor = camera.get("floor") or floor_of.get(room_id)
+            px, py = to_page(x, y, floor)
+            pin = {**pin, "x": px, "y": py, "exact": exact, "room_id": room_id if room_id in outlines else None}
+            kind = typical(item["label"]) if exact else None      # only where the floor point is real
+            if kind:
+                wide = min(max(seen_width(camera, photo.get("face") or 1, bbox, _image_size(photo.get("path"), sizes), x, y), 0.3), 4.0)
+                inside = next((o for o in same_floor if o.contains(Point(x, y))), outlines.get(room_id))
+                shape = footprint(x, y, wide, kind[2], inside, toward=(x - camera["x"], y - camera["y"])) \
+                    if wide >= MIN_FOOTPRINT else None
+                if shape:
+                    pin.update(shape=[list(to_page(sx, sy, floor)) for sx, sy in shape], short=kind[0], wide=round(wide, 1))
+            pins.append(pin)
             continue
         room = (next((r for r in rooms if r["id"] == item.get("room_id")), None)
                 or by_name.get(pin["room"].lower()))
@@ -467,8 +555,14 @@ def build(case_id: str, store, drawn: dict | None = None) -> dict:
             spot = drawn_spots.get(pin["id"]) or {}
             if plan["kind"] == "sketch" and all(isinstance(spot.get(k), (int, float)) and 0 <= spot[k] <= 1 for k in ("u", "v")):
                 u, v = 0.08 + spot["u"] * 0.84, 0.08 + spot["v"] * 0.84
-                px, py = to_page(x0 + u * (x1 - x0), y0 + v * (y1 - y0), room["floor"])
-                pins.append({**pin, "x": px, "y": py, "exact": False, "room_id": room["id"]})
+                x, y = x0 + u * (x1 - x0), y0 + v * (y1 - y0)
+                px, py = to_page(x, y, room["floor"])
+                pin = {**pin, "x": px, "y": py, "exact": False, "room_id": room["id"]}
+                kind = typical(pin["label"])
+                shape = footprint(x, y, kind[1], kind[2], outline) if kind else None
+                if shape:                                   # a typical size for the kind of thing: as rough as the sketch
+                    pin.update(shape=[list(to_page(sx, sy, room["floor"])) for sx, sy in shape], short=kind[0])
+                pins.append(pin)
             else:
                 pins.append({**pin, "x": None, "y": None, "exact": False, "room_id": room["id"]})
 

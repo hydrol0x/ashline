@@ -498,9 +498,10 @@ def test_one_object_listed_twice_in_a_photo_is_folded():
     items = [{"label": "gray sofa", "bbox": [0, 0, 400, 200], "confidence": 0.9},
              {"label": "gray fabric sofa", "bbox": [20, 10, 300, 190], "confidence": 0.6},   # the same sofa again
              {"label": "oak chair", "bbox": [500, 0, 600, 200], "confidence": 0.8},
-             {"label": "oak chair", "bbox": [610, 0, 710, 200], "confidence": 0.8}]          # a second chair
+             {"label": "oak chair", "bbox": [610, 0, 710, 200], "confidence": 0.8},          # a second chair
+             {"label": "oak chair", "bbox": [560, 20, 650, 210], "confidence": 0.7}]         # a third, partly behind
     kept = dedupe_in_photo(items)
-    assert [i["label"] for i in kept] == ["gray sofa", "oak chair", "oak chair"]
+    assert [i["label"] for i in kept] == ["gray sofa", "oak chair", "oak chair", "oak chair"]
 
 
 def test_free_text_is_mapped_to_a_real_command_or_a_reply():

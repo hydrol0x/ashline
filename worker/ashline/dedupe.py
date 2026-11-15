@@ -379,12 +379,12 @@ def merge_into_inventory(store, case_id: str, new_ids: list[int], grouper=None) 
     return result
 
 
-def dedupe_in_photo(items: list[dict], overlap: float = 0.6) -> list[dict]:
+def dedupe_in_photo(items: list[dict], overlap: float = 0.85) -> list[dict]:
     """One photo's detections with the same object listed twice folded into one.
 
-    Two entries about the same kind of thing (same noun) whose boxes mostly cover each other are
-    one object described twice, so the more confident entry is kept and its box widened to cover
-    both. Matching objects side by side (two chairs) barely overlap and stay separate.
+    Only an entry whose box lies almost entirely inside another entry's box of the same kind of
+    thing (same noun) is folded: that is one object described twice. Matching objects, even when
+    one stands partly behind the other (two chairs at a table), overlap far less and stay separate.
     """
     def area(b):
         return max(0.0, b[2] - b[0]) * max(0.0, b[3] - b[1])

@@ -31,7 +31,15 @@
   .chip:hover { border-color: var(--ink); }
   .chip i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 8px; }
   .chip[aria-pressed=true] { background: var(--ink); border-color: var(--ink); color: #fff; }
-  @media (max-width: 899px) { .chips { margin-left: 0; width: 100%; } }
+  @media (max-width: 899px) {
+    .chips { margin: 0 -18px; padding: 2px 18px 4px; width: calc(100% + 36px); flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+    .chips::-webkit-scrollbar { display: none; }
+    .chip { flex: none; min-height: 40px; }
+    .canvas svg { min-height: 240px; }
+    /* On a phone: the plan, then the open room or the rooms, then the 3D scan. */
+    .main { display: contents; }
+    .canvas { order: 1; } .side { order: 2; } .tour { order: 3; }
+  }
 
   .layout { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
   @media (min-width: 900px) { .layout { grid-template-columns: minmax(0, 1fr) 350px; align-items: start; } }
@@ -216,7 +224,7 @@
     (r.doors || []).forEach(d => gDoors.appendChild(el("line", {x1: d[0][0], y1: d[0][1], x2: d[1][0], y2: d[1][1], class: "door"})));
     const xs = r.points.map(p => p[0]), ys = r.points.map(p => p[1]);
     const x0 = Math.min(...xs), y0 = Math.min(...ys), wide = Math.max(...xs) - x0, tall = Math.max(...ys) - y0;
-    const label = labels[r.id] = {r: r, x0: x0, y0: y0, small: r.area < 5 || wide < unit * 7 || tall < unit * 5};
+    const label = labels[r.id] = {r: r, x0: x0, y0: y0, wide: wide, small: r.area < 5 || wide < unit * 7 || tall < unit * 5};
     if (rough) {                                                        // a sketched room: its name in the corner, as on a drawing
       label.name = gText.appendChild(el("text", {x: x0 + unit * 0.6, y: y0 + unit * 1.5, class: "name"}, r.name));
       label.about = gText.appendChild(el("text", {x: x0 + unit * 0.6, y: y0 + unit * 2.6, class: "about"}, ""));
@@ -262,6 +270,11 @@
         label.about.setAttribute("x", label.x0 + u * 0.6); label.about.setAttribute("y", label.y0 + u * 2.6);
       }
       if (label.bubble) label.bubble.setAttribute("transform", "translate(" + label.at[0] + "," + label.at[1] + ") scale(" + z + ")");
+      if (label.name) {                                                 // a name that would spill over its neighbours is left off
+        const fits = (r.name || "").length * 0.56 * u <= label.wide * 1.08;
+        label.name.classList.toggle("hide", !fits);
+        if (label.about) label.about.classList.toggle("hide", !fits);
+      }
     });
     placed.forEach(p => { pinNodes[p.id].setAttribute("r", u * 0.36); haloNodes[p.id].setAttribute("r", u * 0.66); });
   };
@@ -423,9 +436,10 @@
     if (r) {
       const xs = r.points.map(p => p[0]), ys = r.points.map(p => p[1]);
       const w = Math.max(...xs) - Math.min(...xs), h = Math.max(...ys) - Math.min(...ys);
-      const k = Math.max(w / full.w, h / full.h) * 1.5;
-      if (k < 0.8) view = {x: (Math.min(...xs) + Math.max(...xs)) / 2 - full.w * k / 2,
-                           y: (Math.min(...ys) + Math.max(...ys)) / 2 - full.h * k / 2, w: full.w * k, h: full.h * k};
+      const box = svg.getBoundingClientRect(), shape = box.width && box.height ? box.width / box.height : full.w / full.h;
+      const vw = Math.max(w * 1.5, h * 1.5 * shape, full.w / 12);       // room for the room and a little of its neighbours
+      if (vw < full.w * 0.85) view = {x: (Math.min(...xs) + Math.max(...xs)) / 2 - vw / 2,
+                                      y: (Math.min(...ys) + Math.max(...ys)) / 2 - vw / shape / 2, w: vw, h: vw / shape};
     }
     apply();
   }

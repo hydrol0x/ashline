@@ -1,3 +1,4 @@
+import re
 """The inventory page and its endpoints, through FastAPI's test client."""
 import io
 
@@ -352,3 +353,13 @@ def test_sighting_full_size_for_zooming(case):
     assert normal.status_code == full.status_code == 200
     assert max(PILImage.open(io.BytesIO(full.content)).size) >= max(PILImage.open(io.BytesIO(normal.content)).size)
     assert 'id="lightbox"' in client.get("/p/owner-token").text
+
+
+def test_exports_are_never_cached_and_previews_ask_for_a_fresh_file(case):
+    client, _, _ = case
+    for kind in ("pdf", "xlsx", "csv"):
+        assert client.get(f"/p/owner-token/export.{kind}").headers["cache-control"] == "no-store"
+    page = client.get("/p/owner-token/view/pdf")
+    assert page.headers["cache-control"] == "no-store"
+    assert re.search(r"/export\.pdf\?inline=1&t=\d+", page.text) and re.search(r"/export\.pdf\?t=\d+", page.text)
+    assert re.search(r"/export\.xlsx\?t=\d+", client.get("/p/owner-token/view/sheet").text)

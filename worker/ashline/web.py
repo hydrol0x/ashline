@@ -20,6 +20,7 @@ import ipaddress
 import json
 import math
 import re
+import time
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -596,7 +597,12 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
             raise HTTPException(status_code=403, detail="Only the case owner can see the exports.")
         if kind not in ("sheet", "pdf"):
             raise HTTPException(status_code=404)
-        return TEMPLATES.get_template(f"preview_{kind}.html").render(**preview_context(token, store, case))
+        html = TEMPLATES.get_template(f"preview_{kind}.html").render(**preview_context(token, store, case))
+        # Each view asks for a fresh file (?t=...), so a copy cached before a change is never shown.
+        stamp = str(int(time.time() * 1000))
+        html = re.sub(r"(/p/[^\"'\s]+/export\.(?:pdf|xlsx|csv))(\?inline=1)?", lambda m: m.group(1) + (
+            m.group(2) + "&t=" if m.group(2) else "?t=") + stamp, html)
+        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
     static_root = (Path(__file__).parent / "static").resolve()
     static_types = {".mjs": "text/javascript", ".js": "text/javascript", ".css": "text/css", ".png": "image/png",
@@ -639,7 +645,9 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
 
         def named(kind_: str, how: str = "attachment") -> dict:
             from urllib.parse import quote
-            return {"Content-Disposition": f"{how}; filename=\"{name}.{kind_}\"; filename*=UTF-8''{quote(real)}.{kind_}"}
+            # no-store: Cloudflare caches .pdf/.xlsx/.csv URLs by default, which served a stale list after edits
+            return {"Content-Disposition": f"{how}; filename=\"{name}.{kind_}\"; filename*=UTF-8''{quote(real)}.{kind_}",
+                    "Cache-Control": "no-store"}
         if kind == "csv":
             return Response(exporter.export_csv(case["case_id"], store).read_bytes(), media_type="text/csv",
                             headers=named("csv"))

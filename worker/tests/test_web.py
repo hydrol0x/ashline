@@ -167,3 +167,9 @@ def test_inbound_runs_the_conversation(case, monkeypatch):
     assert client.post("/tick").status_code == 401
     ok = client.post("/inbound", json={"sender_phone": "+15550002", "text": "help"}, headers={"X-Ashline-Secret": "s3cret"})
     assert ok.status_code == 200
+
+
+def test_room_names_typed_differently_are_one_room():
+    from ashline.rooms import tidy_room
+    assert {tidy_room(r) for r in ("just basement", "Basement", "basement", "the Basement.")} == {"Basement"}
+    assert tidy_room("") is None and tidy_room(None) is None

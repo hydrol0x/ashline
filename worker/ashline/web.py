@@ -27,6 +27,7 @@ from . import config
 from .annotate import annotate, crop_item
 from .meter import DISCLAIMER, meter
 from .pricing import load_calibration, money, money_range
+from .rooms import tidy_room
 from .store import Store
 
 TEMPLATES = Environment(loader=FileSystemLoader(Path(__file__).parent / "templates"),
@@ -71,7 +72,7 @@ def item_view(item: dict, sightings: list[dict]) -> dict:
     return {
         "id": item["item_id"],
         "title": _title(item["label"]),
-        "room": item.get("room_label") or "Unsorted",
+        "room": tidy_room(item.get("room_label")) or "Unsorted",
         "category": item.get("category") or "other",
         "detail": item.get("detail") or "",
         "brand": item.get("brand_guess") or "",

@@ -16,6 +16,7 @@ from pathlib import Path
 
 from . import config
 from .meter import DISCLAIMER, meter
+from .rooms import tidy_room
 from .pricing import money
 from .store import Store
 
@@ -53,7 +54,7 @@ def export_rows(case_id: str, store: Store | None = None, include_suggested: boo
         if base and case.get("member_token") and item.get("photo_id") and item.get("bbox"):
             link = f"{base}/p/{case['member_token']}/sighting/{item['item_id']}.jpg"
         rows.append({
-            "room": item["room_label"] or "", "category": item["category"] or "", "item": item["label"],
+            "room": tidy_room(item["room_label"]) or "", "category": item["category"] or "", "item": item["label"],
             "qty": item["qty"] or 1, "brand_model": item["brand_guess"] or "", "age": "",
             "rcv_low": _number(item.get("price_low")), "rcv_mid": _number(item.get("price_mid")),
             "rcv_high": _number(item.get("price_high")),

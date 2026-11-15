@@ -30,6 +30,7 @@ from .gaps import gap_questions
 from .meter import meter, meter_line
 from .pipeline import detect_cached
 from .pricing import money, money_range, price_items
+from .rooms import tidy_room
 from .store import Store
 
 BATCH_SECONDS = 60                      # wait this long after the last photo of a burst
@@ -543,9 +544,7 @@ class Engine:
         Matches one of the home's rooms first; a short caption that names no known room is used as
         the room name itself, so 'dorm room' or 'Maya's bedroom' still keeps photos apart.
         """
-        caption = (text or "").strip(" .!?").lower()
-        caption = re.sub(r"^(?:(?:just|only|this is|that's|thats|it's|its|here's|heres|in|from|the|our|my|"
-                         r"mom's|dad's|a|an)\s+)+", "", caption).strip()
+        caption = (tidy_room(text) or "").lower()
         if not caption:
             return None
         # Rooms of the home, then rooms earlier photos were given, so "basement" and "Basement" are one room.

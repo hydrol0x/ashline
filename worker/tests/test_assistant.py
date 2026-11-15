@@ -173,8 +173,10 @@ def test_find_and_apply_price(fam):
     sofa = fam.ids["blue velvet sofa"]
     assert apply_price(fam.store, fam.case_id, sofa, found) == \
         "Recorded $1,400 for the blue velvet sofa from Acme Home, range $1,150 to $1,800."
-    refs = json.loads(fam.store.get_item(fam.case_id, sofa)["price_ref"])
+    kept = json.loads(fam.store.get_item(fam.case_id, sofa)["price_ref"])
+    refs = kept["online"]["matches"]
     assert refs[0]["url"] == "https://shop.example/sofa" and len(refs) == 3      # the links are the evidence
+    assert kept["estimate"] == {"low": 540.0, "mid": 900, "high": 1350.0, "source": "claude estimate"}   # kept beside it
     fam.store.update_item(fam.case_id, sofa, price_source="set by family")
     assert "left as it is" in apply_price(fam.store, fam.case_id, sofa, found)   # the family's figure stands
     assert "incomplete" in apply_price(fam.store, fam.case_id, fam.ids["brass floor lamp"], {"price": 0})

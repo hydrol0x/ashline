@@ -134,7 +134,8 @@ def test_checking_the_bank_in_chat_proposes_then_applies_and_undoes(nessie, clie
     after = f.store.get_item(f.case_id, sofa["item_id"])
     assert after["price_mid"] == after["price_low"] == after["price_high"] == 1149.0
     assert after["price_source"] == "bank record: IKEA"
-    assert json.loads(after["price_ref"])[0]["bank_id"] == "p1"
+    kept = json.loads(after["price_ref"])
+    assert kept["paid"]["bank_id"] == "p1" and kept["estimate"]["mid"] == estimate          # the estimate is kept beside it
     assert "found none" in texts(f.say(MOM, "check my bank"))[0]                           # already used
     # A purchase that is already one item's price is not offered for another item.
     twin = f.store.add_item(f.case_id, {"label": "blue velvet sofa", "category": "furniture", "room_label": "Den"},
@@ -185,7 +186,10 @@ def test_a_card_purchase_counts_as_proof_for_a_remembered_item(client):
     token = f.store.get_case(f.case_id)["owner_token"]
     detail = TestClient(create_app(lambda: f.store)).get(f"/p/{token}/item/{item}.json").json()
     assert detail["price_basis"] == "What the family paid, from their card purchases."
-    assert detail["price_evidence"] == [{"text": "$1,149 at IKEA on 2024-03-12: Blue velvet 3-seat sofa", "url": ""}]
+    assert detail["price_evidence"] == [{"text": "$1,149.00 · Card purchase at IKEA, 2024-03-12", "url": ""}]
+    assert [(p["kind"], p["amount"], p["in_use"]) for p in detail["price_sources"]] == [
+        ("paid", "$1,149.00", True), ("estimate", "$600–$1,300", False)]
+    assert detail["basis"] == "paid"
     assert detail["badges"]["receipt"] == 1 and not detail["needs_proof"]
 
 
@@ -214,7 +218,10 @@ def test_a_price_that_was_paid_or_found_is_not_replaced_by_an_estimate(client):
     table = next(i for i in f.store.get_items(f.case_id) if "coffee table" in i["label"])
     found = {"price": 240.0, "low": 200.0, "high": 260.0, "retailer": "Wayfair", "url": "https://example.com/t"}
     assert apply_price(f.store, f.case_id, table["item_id"], found).startswith("Recorded $240")
-    assert "left as it is" in apply_price(f.store, f.case_id, sofa["item_id"], found)       # paid beats found
+    said = apply_price(f.store, f.case_id, sofa["item_id"], found)                           # paid beats found...
+    assert said.startswith("Found $240") and "stays what the family paid" in said
+    kept = json.loads(f.store.get_item(f.case_id, sofa["item_id"])["price_ref"])
+    assert set(kept) == {"paid", "online", "estimate"}                                       # ...and all three are kept
 
     f.say(MOM, photos=[photo(656)])                             # a later burst re-prices the estimates only
     f.wait()
@@ -309,3 +316,51 @@ def test_a_v2_key_talks_to_the_new_api(monkeypatch):
         bank.purchases(bank.NessieClient(key="nsk_wrong", session=nessie))
     with pytest.raises(bank.BankError, match="5000000 cents available"):          # the bank's own words, not a stack trace
         client.buy(made["account_id"], "merc_1", 60_000.0, "a house", "2024-01-01")
+
+
+def test_the_item_sheet_shows_every_price_and_which_is_in_use(client):
+    from fastapi.testclient import TestClient
+
+    from ashline.export import export_rows
+    from ashline.price_search import apply_price
+    from ashline.web import create_app
+    f = Family().setup()
+    f.engine.bank = client
+    f.say(MOM, photos=[photo(640)])
+    f.wait()
+    sofa = next(i for i in f.store.get_items(f.case_id) if "sofa" in i["label"])
+    lamp = next(i for i in f.store.get_items(f.case_id) if "lamp" in i["label"])
+    web = TestClient(create_app(lambda: f.store))
+    token = f.store.get_case(f.case_id)["owner_token"]
+
+    def sheet(item):
+        return web.get(f"/p/{token}/item/{item['item_id']}.json").json()
+
+    assert [p["kind"] for p in sheet(sofa)["price_sources"]] == ["estimate"] and sheet(sofa)["basis"] == "estimate"
+    found = {"price": 1299.0, "low": 1199.0, "high": 1349.0, "retailer": "Acme Home", "matches": [
+        {"title": "Velvet sofa", "price": 1299.0, "retailer": "Acme Home", "url": "https://shop.example/sofa"},
+        {"title": "Another", "price": 1199.0, "retailer": "Other", "url": "javascript:alert(1)"}]}
+    apply_price(f.store, f.case_id, sofa["item_id"], found)
+    stack = sheet(sofa)["price_sources"]
+    assert [(p["kind"], p["in_use"]) for p in stack] == [("online", True), ("estimate", False)]
+    assert stack[0]["amount"] == "$1.2–1.4k" and stack[0]["detail"] == "2 listings for the same kind of thing"
+    assert [l["url"] for l in stack[0]["links"]] == ["https://shop.example/sofa", ""]        # only real links are clickable
+
+    f.say(MOM, "check my bank")
+    f.say(MOM, "yes")
+    stack = sheet(sofa)["price_sources"]
+    assert [(p["kind"], p["in_use"]) for p in stack] == [("paid", True), ("online", False), ("estimate", False)]
+    assert stack[0]["amount"] == "$1,149.00" and stack[0]["detail"] == "Card purchase at IKEA, 2024-03-12"
+    assert sheet(sofa)["price"] == "$1,149" and sheet(sofa)["basis"] == "paid"
+    assert "paid" in web.get(f"/p/{token}").text
+
+    # The family's own figure beats them all; undoing the bank step leaves the online price in use.
+    web.post(f"/p/{token}/item/{lamp['item_id']}", json={"action": "price", "value": "250"})
+    assert [(p["kind"], p["in_use"]) for p in sheet(lamp)["price_sources"]][0] == ("family", True)
+    f.store.mark_undone(f.store.last_event(f.case_id)["event_id"])                           # step over the lamp edit
+    assert texts(f.say(MOM, "undo")) == ["Undone: those prices are back to the estimates."]
+    assert [(p["kind"], p["in_use"]) for p in sheet(sofa)["price_sources"]] == [("online", True), ("estimate", False)]
+
+    f.store.set_item_status(f.case_id, sofa["item_id"], "confirmed")
+    row = next(r for r in export_rows(f.case_id, f.store) if "sofa" in r["item"])
+    assert row["basis"] == "Online: current listings"

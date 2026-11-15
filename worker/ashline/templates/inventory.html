@@ -97,6 +97,16 @@
   .sheet .small { font-size: 13.5px; }
   .sheet.loading { opacity: .45; pointer-events: none; transition: opacity .12s; }
   .price-line { font-weight: 700; font-size: 19px !important; font-variant-numeric: tabular-nums; }
+  .prices { display: grid; gap: 8px; margin: 10px 0 6px; }
+  .pricerow { display: flex; justify-content: space-between; gap: 14px; padding: 10px 12px; border: 1.5px solid var(--rule); }
+  .pricerow.used { border-color: var(--ink); }
+  .pricerow.estimate { border-style: dashed; }
+  .pricerow b { display: block; font-size: 14.5px; font-weight: 700; }
+  .pricerow span, .pricerow a { display: block; font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+  .pricerow a { color: var(--red); }
+  .pricerow .amt { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .pricerow .amt span { color: var(--red-deep); font-weight: 700; }
+  .item .price small { font-weight: 500; color: var(--muted); font-size: 12.5px; margin-left: 4px; }
   .progress { display: flex; justify-content: space-between; align-items: center; font-size: 14px; color: var(--muted); padding-bottom: 12px; margin: 0 0 14px; border-bottom: 1px solid var(--rule); }
   .progress .count { text-align: center; flex: 1; }
   .progress > * { min-width: 70px; }
@@ -204,7 +214,7 @@
       <div class="body">
         <div class="name">{{ i.title }}</div>
         <div class="line">{{ i.room }} · {{ i.category }}{% if i.brand %} · {{ i.brand }}{% endif %}</div>
-        {% if i.price %}<div class="price">{{ i.price }}</div>{% endif %}
+        {% if i.price %}<div class="price">{{ i.price }}{% if i.basis and i.basis != 'estimate' %}<small>{{ i.basis }}</small>{% endif %}</div>{% endif %}
         <div class="foot">
           <span>{{ [(i.badges.photo ~ (' photo' if i.badges.photo == 1 else ' photos')) if i.badges.photo else none, ('from memory' if i.badges.memory else none), ((i.badges.receipt ~ ' receipt') if i.badges.receipt else none)]|select|join(' · ') }}</span>
           <span>{{ i.contributors|join(', ') }}</span>
@@ -223,7 +233,7 @@
       <div class="body">
         <div class="name">{{ i.title }}</div>
         <div class="line">{{ i.room }} · {{ i.category }}{% if i.brand %} · {{ i.brand }}{% endif %}</div>
-        {% if i.price %}<div class="price">{{ i.price }}</div>{% endif %}
+        {% if i.price %}<div class="price">{{ i.price }}{% if i.basis and i.basis != 'estimate' %}<small>{{ i.basis }}</small>{% endif %}</div>{% endif %}
         <div class="foot">
           <span>{{ [(i.badges.photo ~ (' photo' if i.badges.photo == 1 else ' photos')) if i.badges.photo else none, ('from memory' if i.badges.memory else none), ((i.badges.receipt ~ ' receipt') if i.badges.receipt else none)]|select|join(' · ') }}</span>
           <span>{{ i.contributors|join(', ') }}</span>
@@ -342,6 +352,7 @@
     if (d.price) {
       if (!price) { price = el('div', null, 'price'); c.querySelector('.line').after(price); }
       price.textContent = d.price;
+      if (d.basis && d.basis !== 'estimate') price.appendChild(el('small', d.basis));
     }
     c.dataset.value = d.value; c.dataset.name = (d.title || '').toLowerCase();
   }
@@ -438,14 +449,23 @@
     if (d.price) sheet.appendChild(el('p', d.price, 'price-line'));
     if (d.qty > 1 && !d.price) sheet.appendChild(el('p', 'Quantity: ' + d.qty, 'price-line'));
     if (flash) { sheet.appendChild(el('p', flash, 'saved')); flash = ''; }
-    sheet.appendChild(el('p', d.price_basis, 'muted small'));
-    (d.price_evidence || []).forEach(function (e) {                     // where a looked-up price came from
-      var line = el('p', '', 'muted small');
-      if (e.url) { var a = document.createElement('a'); a.href = e.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
-                   a.textContent = e.text; a.style.color = 'var(--red)'; line.appendChild(a); }
-      else line.textContent = e.text;
-      sheet.appendChild(line);
-    });
+    var kinds = (d.price_sources || []).map(function (p) { return p.kind; });
+    if (kinds.length > 1 || (kinds.length === 1 && kinds[0] !== 'estimate')) {
+      // Every price this item has: what was paid, what it sells for online, the estimate. The strongest is in use.
+      var stack = el('div', null, 'prices');
+      d.price_sources.forEach(function (p) {
+        var row = el('div', null, 'pricerow ' + p.kind + (p.in_use ? ' used' : '')), left = el('div'), right = el('div', null, 'amt');
+        left.appendChild(el('b', p.title)); left.appendChild(el('span', p.detail));
+        (p.links || []).forEach(function (l) {
+          if (!l.url) { left.appendChild(el('span', l.text)); return; }
+          var a = document.createElement('a'); a.href = l.url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+          a.textContent = l.text; left.appendChild(a);
+        });
+        right.appendChild(el('b', p.amount)); if (p.in_use) right.appendChild(el('span', 'In use'));
+        row.appendChild(left); row.appendChild(right); stack.appendChild(row);
+      });
+      sheet.appendChild(stack);
+    } else sheet.appendChild(el('p', d.price_basis, 'muted small'));
     if (d.sightings.length > 1) sheet.appendChild(el('p', 'Seen in ' + d.sightings.length + ' photos. Swipe to see each one.', 'muted small'));
 
     if (d.editable) {

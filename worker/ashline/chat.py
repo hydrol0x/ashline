@@ -1175,7 +1175,7 @@ class Engine:
         elif action.startswith("item."):                  # a change made on the inventory page
             before = payload["before"]
             self.store.update_item(case_id, payload["item_id"], **{k: before[k] for k in (
-                "label", "qty", "price_low", "price_mid", "price_high", "price_source")})
+                "label", "qty", "price_low", "price_mid", "price_high", "price_source", "price_ref") if k in before})
             self.store.set_item_status(case_id, payload["item_id"], before["status"])
             text = "Undone: that item is back to how it was."
         else:

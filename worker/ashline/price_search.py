@@ -16,7 +16,7 @@ import re
 import threading
 
 from . import config
-from .pricing import kept_price, money, nice
+from .pricing import in_use, kept_price, money, nice, record_price
 from .store import Store
 
 SEARCH_TOOL = {"type": "web_search_20260209", "name": "web_search", "max_uses": 3}
@@ -142,15 +142,13 @@ def find_price(description: str, brand: str | None = None, searcher=None, image=
 
 def apply_price(store: Store, case_id: str, item_id: int, found: dict, member_id: int | None = None,
                 log: bool = True) -> str:
-    """Put a price found online on an item, keeping the links as evidence. Can be undone, unless
-    `log` is False (a lookup nobody asked for must not become the thing "undo" reverses)."""
+    """Keep a price found online for an item, with the links as evidence. It becomes the item's
+    price unless the family set one or paid one (those are stronger; the found price is still
+    kept and shown beside them). Can be undone, unless `log` is False (a lookup nobody asked for
+    must not become the thing "undo" reverses)."""
     item = store.get_item(case_id, item_id)
     if not item:
         return "That item is not on the list."
-    if item.get("price_source") == "set by family":
-        return "The family set this price themselves, so it was left as it is."
-    if (item.get("price_source") or "").startswith("bank record"):
-        return "This price is what the family paid, from their card purchases, so it was left as it is."
     try:
         price = float(found["price"])
         low, high = float(found.get("low") or price), float(found.get("high") or price)
@@ -164,11 +162,17 @@ def apply_price(store: Store, case_id: str, item_id: int, found: dict, member_id
                                      "url": str(found.get("url") or "")}]
     if log:
         store.log_event(case_id, "item.price", {"item_id": item_id, "before": {k: item.get(k) for k in (
-            "status", "label", "qty", "price_low", "price_mid", "price_high", "price_source")}}, member_id)
-    store.update_item(case_id, item_id, price_low=nice(low), price_mid=nice(price), price_high=nice(high),
-                      price_source=f"web: {retailer}", price_ref=json.dumps(refs[:4]))
+            "status", "label", "qty", "price_low", "price_mid", "price_high", "price_source", "price_ref")}}, member_id)
+    record_price(store, case_id, item_id, "online", {"low": nice(low), "mid": nice(price), "high": nice(high),
+                                                     "retailer": retailer, "matches": refs[:4]})
     span = f", range {money(nice(low))} to {money(nice(high))}" if nice(high) > nice(low) else ""
-    return f"Recorded {money(nice(price))} for the {item['label']} from {retailer}{span}."
+    said = f"{money(nice(price))} for the {item['label']} from {retailer}{span}"
+    stronger = in_use(item)
+    if stronger == "family":
+        return f"Found {said}. The family set this price themselves, so it was left as it is; the listing is kept beside it."
+    if stronger == "paid":
+        return f"Found {said}. The price stays what the family paid; the listing is kept beside it."
+    return f"Recorded {said}."
 
 
 def price_check(case_id: str, store: Store | None = None, top: int = 20, searcher=None, report=None) -> dict:

@@ -30,7 +30,7 @@ import re
 import requests
 
 from . import config
-from .pricing import money, nice
+from .pricing import money, nice, price_sources, record_price
 
 API = "https://api.nessieisreal.com"                 # classic Nessie: key in the URL
 API_V2 = "https://v2-prod-api.nessieisreal.com"      # Nessie v2: key in an Authorization header
@@ -241,15 +241,10 @@ def match_purchases(items: list[dict], bought: list[dict], threshold: float = 0.
 def find_matches(case_id: str, store, client: NessieClient | None = None) -> list[dict]:
     """Purchases that match this case's inventory lines and are not already used as their price."""
     everything = [i for i in store.get_items(case_id, canonical_only=True) if i["status"] != "rejected"]
-    used = set()                                            # purchases that already are some item's price
-    for item in everything:
-        if (item.get("price_source") or "").startswith(SOURCE_PREFIX):
-            try:
-                used |= {ref.get("bank_id") for ref in json.loads(item.get("price_ref") or "[]")}
-            except (ValueError, AttributeError):
-                pass
-    items = [i for i in everything if i.get("price_source") != "set by family"
-             and not (i.get("price_source") or "").startswith(SOURCE_PREFIX)]
+    # Purchases that already are some item's price, and the items that already have one.
+    paid = {i["item_id"]: price_sources(i).get("paid") for i in everything}
+    used = {p.get("bank_id") for p in paid.values() if p}
+    items = [i for i in everything if i.get("price_source") != "set by family" and not paid[i["item_id"]]]
     return match_purchases(items, [p for p in purchases(client) if p["id"] not in used])
 
 
@@ -275,12 +270,9 @@ def apply_matches(store, case_id: str, matches: list[dict], member_id: int | Non
         each = nice(purchase["amount"] / qty) if qty > 1 else round(purchase["amount"], 2)
         before.append({"item_id": item["item_id"], **{k: item.get(k) for k in (
             "price_low", "price_mid", "price_high", "price_source", "price_ref")}})
-        merchant = purchase["merchant"] or "card purchase"
-        store.update_item(case_id, item["item_id"], price_low=each, price_mid=each, price_high=each,
-                          price_source=f"{SOURCE_PREFIX}: {merchant[:60]}",
-                          price_ref=json.dumps([{"title": purchase["description"], "price": purchase["amount"],
-                                                 "retailer": merchant, "date": purchase.get("date"),
-                                                 "bank_id": purchase.get("id"), "url": ""}]))
+        record_price(store, case_id, item["item_id"], "paid", {
+            "amount": purchase["amount"], "each": each, "merchant": purchase["merchant"] or "card purchase",
+            "date": purchase.get("date"), "description": purchase["description"], "bank_id": purchase.get("id")})
         done += 1
     if before:
         store.log_event(case_id, "bank", {"before": before}, member_id)

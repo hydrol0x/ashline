@@ -182,6 +182,84 @@ def _cache_key(item: dict) -> str:
     return "|".join(str(item.get(k) or "").strip().lower() for k in ("label", "category", "brand_guess"))
 
 
+# ------------------------------------------------- every price an item has
+# An item can have up to three prices at once, kept in `price_ref`:
+#   paid      what the family paid, from a card purchase        {amount, each, merchant, date, description, bank_id}
+#   online    the closest listings found for it today           {low, mid, high, retailer, matches: [{title, price, retailer, url}]}
+#   estimate  the model's (or the category's) rough allowance   {low, mid, high, source}
+# The strongest one is the item's price (price_low / price_mid / price_high / price_source). A price
+# the family typed in beats all three and is not kept here: it is the item's price itself.
+STRENGTH = ("paid", "online", "estimate")
+
+
+def price_sources(item: dict) -> dict:
+    """The prices kept for an item, by kind. Reads the older list form too."""
+    try:
+        kept = json.loads(item.get("price_ref") or "null")
+    except (TypeError, ValueError):
+        kept = None
+    if isinstance(kept, dict):
+        return {k: v for k, v in kept.items() if k in STRENGTH and isinstance(v, dict)}
+    out: dict = {}
+    source = item.get("price_source") or ""
+    if isinstance(kept, list) and kept and isinstance(kept[0], dict):
+        if source.startswith("bank record"):
+            ref = kept[0]
+            out["paid"] = {"amount": ref.get("price"), "each": item.get("price_mid"), "merchant": ref.get("retailer"),
+                           "date": ref.get("date"), "description": ref.get("title"), "bank_id": ref.get("bank_id")}
+        else:
+            out["online"] = {"low": item.get("price_low"), "mid": item.get("price_mid"), "high": item.get("price_high"),
+                             "retailer": kept[0].get("retailer"), "matches": kept}
+    return out
+
+
+def in_use(item: dict) -> str:
+    """Which price is the item's price now: family, paid, online, estimate, or '' when it has none."""
+    source = item.get("price_source") or ""
+    if source == "set by family":
+        return "family"
+    if source.startswith("bank record"):
+        return "paid"
+    if source.startswith("web:"):
+        return "online"
+    return "estimate" if item.get("price_mid") else ""
+
+
+def record_price(store, case_id: str, item_id: int, kind: str, data: dict | None) -> dict | None:
+    """Keep one more price for an item (or drop it with data=None) and put the strongest in use.
+
+    The estimate in use when the first better price arrives is kept alongside it, so the page can
+    show all of them. A price the family set stays the item's price whatever else is recorded.
+    """
+    item = store.get_item(case_id, item_id)
+    if not item:
+        return None
+    kept = price_sources(item)
+    if "estimate" not in kept and in_use(item) == "estimate":
+        kept["estimate"] = {"low": item.get("price_low"), "mid": item.get("price_mid"), "high": item.get("price_high"),
+                            "source": item.get("price_source")}
+    if data is None:
+        kept.pop(kind, None)
+    else:
+        kept[kind] = data
+    fields = {"price_ref": json.dumps(kept) if kept else None}
+    if in_use(item) != "family":
+        if "paid" in kept:
+            each = kept["paid"].get("each")
+            fields.update(price_low=each, price_mid=each, price_high=each,
+                          price_source=f"bank record: {str(kept['paid'].get('merchant') or 'card purchase')[:60]}")
+        elif "online" in kept:
+            web = kept["online"]
+            fields.update(price_low=web.get("low"), price_mid=web.get("mid"), price_high=web.get("high"),
+                          price_source=f"web: {str(web.get('retailer') or 'online retailer')[:60]}")
+        elif "estimate" in kept:
+            guess = kept["estimate"]
+            fields.update(price_low=guess.get("low"), price_mid=guess.get("mid"), price_high=guess.get("high"),
+                          price_source=guess.get("source"))
+    store.update_item(case_id, item_id, **fields)
+    return store.get_item(case_id, item_id)
+
+
 def kept_price(item: dict) -> bool:
     """True when the item's price is better than an estimate and must not be replaced by one:
     the family set it, it is what they paid (a bank record), or it was found online."""

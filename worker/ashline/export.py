@@ -18,11 +18,11 @@ from pathlib import Path
 from . import config
 from .meter import DISCLAIMER, meter
 from .rooms import tidy_room
-from .pricing import money
+from .pricing import in_use, money, price_sources
 from .store import Store
 
 COLUMNS = ["room", "category", "item", "qty", "brand_model", "age", "rcv_low", "rcv_mid", "rcv_high",
-           "source", "evidence", "status", "photo_refs", "contributor", "evidence_link"]
+           "source", "evidence", "status", "photo_refs", "contributor", "evidence_link", "basis"]
 
 
 def evidence_text(source: str, date: str | None) -> str:
@@ -37,16 +37,20 @@ def evidence_text(source: str, date: str | None) -> str:
 
 
 def purchase_text(item: dict) -> str:
-    """'card purchase at IKEA on 2024-03-12 ($1,149.00)' for an item priced from a bank record, else ''."""
-    if not (item.get("price_source") or "").startswith("bank record"):
+    """'card purchase at IKEA on 2024-03-12 ($1,149.00)' for an item with a matched card purchase, else ''."""
+    paid = price_sources(item).get("paid")
+    if not paid:
         return ""
     try:
-        ref = json.loads(item.get("price_ref") or "[]")[0]
-        amount = f" (${float(ref['price']):,.2f})"
-    except (ValueError, LookupError, TypeError):
-        return "card purchase record"
-    return (f"card purchase at {ref.get('retailer') or 'a store'}"
-            + (f" on {ref['date']}" if ref.get("date") else "") + amount)
+        amount = f" (${float(paid['amount']):,.2f})"
+    except (KeyError, TypeError, ValueError):
+        amount = ""
+    return (f"card purchase at {paid.get('merchant') or 'a store'}"
+            + (f" on {paid['date']}" if paid.get("date") else "") + amount)
+
+
+BASIS = {"family": "Set by the family", "paid": "Paid: card record", "online": "Online: current listings",
+         "estimate": "Estimate: rough allowance", "": ""}
 
 
 def _number(value) -> float | str:
@@ -81,7 +85,7 @@ def export_rows(case_id: str, store: Store | None = None, include_suggested: boo
             "room": tidy_room(item["room_label"]) or "", "category": item["category"] or "", "item": item["label"],
             "qty": item["qty"] or 1, "brand_model": item["brand_guess"] or "", "age": "",
             "rcv_low": _number(item.get("price_low")), "rcv_mid": _number(item.get("price_mid")),
-            "rcv_high": _number(item.get("price_high")),
+            "rcv_high": _number(item.get("price_high")), "basis": BASIS[in_use(item)],
             "source": item["source"], "evidence": _evidence(item),
             "status": item["status"],
             "photo_refs": ", ".join(dict.fromkeys(s["photo_id"] for s in sightings if s.get("photo_id"))),

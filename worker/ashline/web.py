@@ -28,7 +28,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from . import config
 from .annotate import annotate, crop_item
 from .meter import DISCLAIMER, meter
-from .pricing import load_calibration, money, money_range
+from .pricing import in_use, load_calibration, money, money_range, price_sources
 from .rooms import tidy_room
 from .store import Store
 
@@ -98,27 +98,63 @@ def item_view(item: dict, sightings: list[dict]) -> dict:
         "contributors": contributors,
         "created": item.get("created_at") or "",
         "needs_proof": photo_like == 0 and sources.count("receipt") + bank == 0,
+        "basis": BASIS_WORDS.get(in_use(item), "") if mid else "",     # which price the card shows
     }
 
 
+BASIS_WORDS = {"family": "yours", "paid": "paid", "online": "online", "estimate": "estimate"}
+
+
+def price_stack(item: dict) -> list[dict]:
+    """Every price the item has, strongest first: [{kind, title, detail, amount, in_use, links}].
+
+    What the family typed in, what they paid (a card purchase), what it sells for online today,
+    and the rough estimate. The one in use is the item's price; the others are shown beside it.
+    """
+    kept, using, qty = price_sources(item), in_use(item), int(item.get("qty") or 1)
+    rows = []
+    if using == "family":
+        rows.append({"kind": "family", "title": "Your price", "detail": "Set by the family",
+                     "amount": money(item.get("price_mid")), "links": []})
+    paid = kept.get("paid")
+    if paid and paid.get("amount"):
+        where = f"Card purchase at {paid.get('merchant') or 'a store'}" + (f", {paid['date']}" if paid.get("date") else "")
+        rows.append({"kind": "paid", "title": "What you paid", "detail": where + (f" · for all {qty}" if qty > 1 else ""),
+                     "amount": f"${float(paid['amount']):,.2f}", "links": []})
+    online = kept.get("online")
+    if online and online.get("mid"):
+        matches = [m for m in online.get("matches") or [] if isinstance(m, dict) and m.get("price")]
+        links = []
+        for match in matches[:4]:
+            url = str(match.get("url") or "")
+            links.append({"text": f"{money(match['price'])} at {match.get('retailer') or 'a retailer'}"
+                                  + (f": {str(match['title'])[:70]}" if match.get("title") else ""),
+                          "url": url if url.startswith(("https://", "http://")) else ""})
+        count = len(matches) or 1
+        rows.append({"kind": "online", "title": "Found online",
+                     "detail": f"{count} listing{'s' if count != 1 else ''} for the same kind of thing",
+                     "amount": money_range(online.get("low"), online.get("high")), "links": links})
+    guess = kept.get("estimate") or ({"low": item.get("price_low"), "mid": item.get("price_mid"),
+                                      "high": item.get("price_high"), "source": item.get("price_source")}
+                                     if using == "estimate" else None)
+    if guess and guess.get("mid"):
+        rough = guess.get("source") == "category default"
+        rows.append({"kind": "estimate", "title": "Estimate",
+                     "detail": "A rough figure for this kind of item" if rough else "A rough allowance for buying it new today",
+                     "amount": money_range(guess.get("low"), guess.get("high")), "links": []})
+    for row in rows:
+        row["in_use"] = row["kind"] == using
+    return rows
+
+
 def price_evidence(item: dict) -> list[dict]:
-    """Where a looked-up price came from: [{text, url}] from the item's stored references."""
-    try:
-        refs = json.loads(item.get("price_ref") or "[]")
-    except ValueError:
-        return []
+    """Where a looked-up price came from: [{text, url}], for the price in use and the others kept."""
     out = []
-    for ref in refs if isinstance(refs, list) else []:
-        if not isinstance(ref, dict) or not ref.get("price"):
-            continue
-        url = str(ref.get("url") or "")
-        text = f"{money(ref['price'])} at {ref.get('retailer') or 'a retailer'}"
-        if ref.get("date"):
-            text += f" on {ref['date']}"
-        if ref.get("title"):
-            text += f": {str(ref['title'])[:80]}"
-        out.append({"text": text, "url": url if url.startswith(("https://", "http://")) else ""})
-    return out[:4]
+    for row in price_stack(item):
+        if row["kind"] == "paid":
+            out.append({"text": f"{row['amount']} · {row['detail']}", "url": ""})
+        out += row["links"]
+    return out[:5]
 
 
 def page_data(case_id: str, store: Store, role: str) -> dict:
@@ -260,6 +296,7 @@ def create_app(store_factory=Store) -> FastAPI:
                       else " The range is a rough allowance for uncertainty.")
         return JSONResponse({
             **view, "label": item["label"], "price_basis": basis, "price_evidence": evidence,
+            "price_sources": price_stack(item),
             "price_mid": item.get("price_mid"), "editable": role == "owner",
             "sightings": [{
                 "id": s["item_id"], "source": SOURCE_NAMES.get(s["source"], s["source"]),
@@ -277,7 +314,8 @@ def create_app(store_factory=Store) -> FastAPI:
         item = owned_item(store, case, item_id)
         body = await request.json()
         action, case_id = body.get("action"), case["case_id"]
-        before = {k: item.get(k) for k in ("status", "label", "qty", "price_low", "price_mid", "price_high", "price_source")}
+        before = {k: item.get(k) for k in ("status", "label", "qty", "price_low", "price_mid", "price_high",
+                                           "price_source", "price_ref")}
         if action in ("confirm", "remove", "restore"):
             status = {"confirm": "confirmed", "remove": "rejected", "restore": "suggested"}[action]
             store.set_item_status(case_id, item_id, status)

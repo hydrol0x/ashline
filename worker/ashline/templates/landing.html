@@ -53,6 +53,15 @@
   .again p { margin: 0; font-size: 18px; max-width: 34em; }
   .again b { font-weight: 700; }
 
+  .shots { display: grid; grid-template-columns: repeat(4, 1fr); gap: 22px; margin-top: 36px; }
+  .shots figure { margin: 0; }
+  .shots img { display: block; width: 100%; height: auto; border-radius: 26px; border: 1.5px solid var(--rule);
+               box-shadow: 0 18px 40px -24px rgba(23,22,21,.35); background: #fff; }
+  .shots figcaption { margin-top: 14px; font-size: 15px; color: var(--ink-2); }
+  .shots figcaption b { display: block; color: var(--ink); font-size: 17px; margin-bottom: 2px; }
+  .see h2 { font: 700 clamp(34px, 4vw, 48px)/1.05 var(--sans); letter-spacing: -0.02em; margin: 0; }
+  .see .aside { color: var(--muted); font-size: 17px; margin: 12px 0 0; max-width: 34em; }
+
   footer { border-top: 1px solid var(--rule); padding: 34px 0 48px; color: var(--muted); font-size: 14px; }
   footer .wrap { display: grid; grid-template-columns: auto 1fr; gap: 10px 40px; align-items: start; }
   footer p { margin: 0 0 6px; }
@@ -67,6 +76,8 @@
     dl { grid-template-columns: 1fr; }
     section { padding: 56px 0; }
     footer .wrap { grid-template-columns: 1fr; }
+    .shots { grid-template-columns: repeat(4, 72%); overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 8px; margin-right: -24px; }
+    .shots figure { scroll-snap-align: start; }
     .band blockquote { padding: 56px 18px; }
   }
 </style>
@@ -105,6 +116,17 @@
     <li><span class="n">02</span><div><h3>Ashline circles what it finds</h3><p>Each item is numbered on your own photo with a price range. A couch seen in five pictures is counted once.</p></div></li>
     <li><span class="n">03</span><div><h3>You say yes or no, then send it</h3><p>Nothing goes on the list until you confirm it. Download the spreadsheet and the PDF your adjuster asks for, split by claim when a storm means more than one.</p></div></li>
   </ol>
+</div></section>
+
+<section><div class="wrap see">
+  <h2>What it looks like</h2>
+  <p class="aside">A demo home run through Ashline: the real replies, pages and PDF. Stock photos from Pexels.</p>
+  <div class="shots">
+    <figure><img src="/static/img/preview/chat.jpg?v={{ v }}" alt="A chat with Ashline: a family photo comes back with five numbered items and price ranges" loading="lazy" width="780" height="1688"><figcaption><b>1. Send a photo</b>Each thing is numbered on your own picture, with a price range.</figcaption></figure>
+    <figure><img src="/static/img/preview/review.jpg?v={{ v }}" alt="Reviewing one item: Not ours, or Yes, this was ours" loading="lazy" width="780" height="1688"><figcaption><b>2. Say yes or no</b>One tap per item. Nothing counts until you confirm it.</figcaption></figure>
+    <figure><img src="/static/img/preview/list.jpg?v={{ v }}" alt="The family's list with the total documented so far" loading="lazy" width="780" height="1688"><figcaption><b>3. Watch the list grow</b>One private page the whole family adds to.</figcaption></figure>
+    <figure><img src="/static/img/preview/pdf.jpg?v={{ v }}" alt="The PDF for the insurer, ready to download" loading="lazy" width="780" height="1688"><figcaption><b>4. Send it to your adjuster</b>The PDF and spreadsheet insurers ask for.</figcaption></figure>
+  </div>
 </div></section>
 
 <div class="band"><div class="panel">

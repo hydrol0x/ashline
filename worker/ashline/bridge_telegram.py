@@ -90,6 +90,8 @@ class TelegramBridge:
         self.bot_id, self.username = me["id"], me.get("username") or ""
         if self.username:
             self.engine.telegram_handle = f"@{self.username}"
+            self.state["username"] = self.username          # the website's "Message Ashline on Telegram" link reads it
+            self._save()
 
     def _save(self) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)

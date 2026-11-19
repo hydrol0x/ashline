@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Ashline · rebuild your home inventory after a fire, flood or hurricane</title>
-<meta name="description" content="After a fire, flood or hurricane, insurers ask for a list of everything you owned. Text Ashline your old photos and it builds that list with you.">
+<meta name="description" content="After a fire, flood or hurricane, insurers ask for a list of everything you owned. Send Ashline your old photos and it builds that list with you.">
 <link rel="icon" href="/static/img/favicon.png?v={{ v }}">
 <link rel="apple-touch-icon" href="/static/img/apple-touch-icon.png?v={{ v }}">
 <link rel="stylesheet" href="/static/brand.css?v={{ v }}">
@@ -74,7 +74,7 @@
 <body>
 <header><div class="wrap">
   <a class="brand" href="/"><img src="/static/img/logo.png?v={{ v }}" alt=""><span>Ashline</span></a>
-  {% if number %}<a class="num" href="sms:{{ number }}">{{ number_display }}</a>{% endif %}
+  {% if telegram %}<a class="num" href="https://t.me/{{ telegram }}">@{{ telegram }}</a>{% elif number %}<a class="num" href="sms:{{ number }}">{{ number_display }}</a>{% endif %}
 </div></header>
 
 <div class="hero">
@@ -83,8 +83,11 @@
     <h1>Your insurer wants a list of everything you owned. Your family’s
       <span class="loop">photos<svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><path d="M8 22 C 6 6, 70 2, 92 12 C 104 18, 90 36, 52 36 C 18 36, 2 30, 10 16 C 14 10, 30 6, 46 6"/></svg></span>
       already have it.</h1>
-    <p class="lede">After a fire, a flood or a hurricane, text Ashline the pictures you already have: a birthday in the living room, last year’s holiday table, a listing photo from when you bought the house. It finds each thing, gives it an honest price range, and keeps one list the whole family adds to.</p>
-    {% if number %}<div class="act">
+    <p class="lede">After a fire, a flood or a hurricane, send Ashline the pictures you already have: a birthday in the living room, last year’s holiday table, a listing photo from when you bought the house. It finds each thing, gives it an honest price range, and keeps one list the whole family adds to.</p>
+    {% if telegram %}<div class="act">
+      <a class="btn" href="https://t.me/{{ telegram }}">Message Ashline on Telegram</a>
+      <small>or search <b>@{{ telegram }}</b> in Telegram and press Start. For the family: <a href="https://t.me/{{ telegram }}?startgroup=family">start a group with Ashline</a></small>
+    </div>{% elif number %}<div class="act">
       <a class="btn" href="sms:{{ number }}&body=hi">Text Ashline</a>
       <small>or send <b>hi</b> to <b>{{ number_display }}</b> from iMessage</small>
     </div>{% endif %}
@@ -127,8 +130,8 @@
 
 <section><div class="wrap">
   <div class="again">
-    <p><b>Already started?</b> Your list has its own private link. Text <b>list</b> to Ashline and it sends the link again.</p>
-    {% if number %}<a class="btn quiet" href="sms:{{ number }}&body=list">Get my link</a>{% endif %}
+    <p><b>Already started?</b> Your list has its own private link. Send <b>list</b> to Ashline and it sends the link again.</p>
+    {% if telegram %}<a class="btn quiet" href="https://t.me/{{ telegram }}">Open Ashline in Telegram</a>{% elif number %}<a class="btn quiet" href="sms:{{ number }}&body=list">Get my link</a>{% endif %}
   </div>
 </div></section>
 
@@ -137,7 +140,7 @@
   <div>
     <p class="team">Made at HackPrinceton 2026 by Jacob Ryabinky, Omar Rodriguez, Timoti Kabakov and Bochen Shen.</p>
     <p>Prices are estimates for planning, not legal or insurance advice. Confirm values with your adjuster.</p>
-    <p>Photos and lists are private to your family. Text “delete my case” to remove everything.</p>
+    <p>Photos and lists are private to your family. Send “delete my case” to remove everything.</p>
   </div>
 </div></footer>
 </body>

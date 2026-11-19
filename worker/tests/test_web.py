@@ -226,6 +226,20 @@ def test_landing_page_shows_the_number(monkeypatch):
     assert page.status_code == 200 and "(628) 555-0100" in page.text and 'href="sms:+16285550100&body=hi"' in page.text
 
 
+def test_landing_page_sends_people_to_the_telegram_bot(monkeypatch):
+    import json
+    from fastapi.testclient import TestClient
+    from ashline import config
+    from ashline.web import create_app
+    monkeypatch.setenv("ASHLINE_NUMBER", "+16285550100")
+    config.data_dir().mkdir(parents=True, exist_ok=True)
+    (config.data_dir() / "telegram_state.json").write_text(json.dumps({"username": "AshlineHomeBot"}))
+    page = TestClient(create_app()).get("/").text
+    assert 'href="https://t.me/AshlineHomeBot"' in page and "startgroup=" in page and "sms:" not in page
+    monkeypatch.setenv("TELEGRAM_BOT_USERNAME", "@OtherBot")
+    assert 'href="https://t.me/OtherBot"' in TestClient(create_app()).get("/").text
+
+
 def test_prices_typed_with_symbols():
     from ashline.web import parse_price
     assert parse_price("$450") == 450 and parse_price("1,200") == 1200 and parse_price("1.2k") == 1200

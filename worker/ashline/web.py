@@ -379,7 +379,18 @@ def create_app(store_factory=Store, lookup=None) -> FastAPI:
         match = re.fullmatch(r"\+?1?(\d{3})(\d{3})(\d{4})", digits)
         if match:
             shown = f"({match.group(1)}) {match.group(2)}-{match.group(3)}"
-        return TEMPLATES.get_template("landing.html").render(number=digits, number_display=shown)
+        return TEMPLATES.get_template("landing.html").render(number=digits, number_display=shown,
+                                                             telegram=telegram_username())
+
+    def telegram_username() -> str:
+        """The bot's @name for the landing page: TELEGRAM_BOT_USERNAME, else what `ashline telegram` saved."""
+        name = (config.env("TELEGRAM_BOT_USERNAME") or "").strip().lstrip("@")
+        if not name:
+            try:
+                name = json.loads((config.data_dir() / "telegram_state.json").read_text()).get("username") or ""
+            except (OSError, ValueError):
+                name = ""
+        return name if re.fullmatch(r"[A-Za-z0-9_]{3,64}", name) else ""
 
     def check_view(address: str) -> dict:
         """What /check shows for an address: only plain facts, never a scan id, listing id or coordinate."""

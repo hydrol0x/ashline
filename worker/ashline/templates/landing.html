@@ -36,12 +36,6 @@
   ol.steps h3 { font-size: 20px; margin: 4px 0 6px; font-weight: 700; }
   ol.steps p { margin: 0; color: var(--ink-2); }
 
-  .band { position: relative; overflow: hidden; padding: 0; border-top: 0; }
-  .band .panel { position: relative; overflow: hidden; margin: 0 auto; max-width: 1160px; min-height: 320px; display: flex; align-items: center; justify-content: center; text-align: center; }
-  .band .swoosh { inset: -30% -10%; background-size: 140% 160%; }
-  .band .panel { -webkit-mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent); mask-image: linear-gradient(90deg, transparent, #000 6%, #000 94%, transparent); }
-  .band blockquote { position: relative; margin: 0; padding: 70px 24px; font: 600 clamp(32px, 5vw, 60px)/1.25 var(--sans); letter-spacing: -0.02em; }
-  .band .loop path { stroke: #fff; stroke-width: 2.2; }
 
   .principles { display: grid; grid-template-columns: 1fr 1.25fr; gap: 48px; }
   dl { margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 0 36px; }
@@ -78,8 +72,7 @@
     footer .wrap { grid-template-columns: 1fr; }
     .shots { grid-template-columns: repeat(4, 72%); overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 8px; margin-right: -24px; }
     .shots figure { scroll-snap-align: start; }
-    .band blockquote { padding: 56px 18px; }
-  }
+    }
 </style>
 </head>
 <body>
@@ -128,15 +121,6 @@
     <figure><img src="/static/img/preview/pdf.jpg?v={{ v }}" alt="The PDF for the insurer, ready to download" loading="lazy" width="780" height="1688"><figcaption><b>4. Send it to your adjuster</b>The PDF and spreadsheet insurers ask for.</figcaption></figure>
   </div>
 </div></section>
-
-<div class="band"><div class="panel">
-  <div class="swoosh" aria-hidden="true"></div>
-  <blockquote>We
-    <span class="loop">bend<svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><path d="M6 24 C 4 8, 74 2, 94 14 C 104 22, 86 36, 48 35 C 14 34, 0 26, 12 14"/></svg></span>
-    so we<br>don’t
-    <span class="loop">break.<svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true"><path d="M4 36 C 30 31, 70 31, 98 34 M 12 39 C 40 36, 64 37, 86 38"/></svg></span>
-  </blockquote>
-</div></div>
 
 <section><div class="wrap principles">
   <h2>Built for the week after a disaster</h2>

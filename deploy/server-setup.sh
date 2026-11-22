@@ -8,6 +8,7 @@
 #
 # Safe to run again after a `git pull`: it reinstalls the package and restarts the services.
 set -euo pipefail
+export DEBIAN_FRONTEND=noninteractive   # no package prompts over ssh
 
 APP="${ASHLINE_HOME:-$HOME/ashline}"
 USER_NAME="$(id -un)"
@@ -15,8 +16,8 @@ USER_NAME="$(id -un)"
 [ -f "$APP/.env" ] || echo "Note: $APP/.env is missing. Copy it over before the services can work."
 
 echo "== System packages"
-sudo apt-get update -qq
-sudo apt-get install -y -qq python3 python3-venv python3-pip git ffmpeg curl >/dev/null
+sudo -E apt-get update -qq
+sudo -E apt-get install -y -qq python3 python3-venv python3-pip git ffmpeg curl >/dev/null
 
 echo "== Swap (small servers have 1 GB of memory; this keeps installs from running out)"
 if [ "$(free -m | awk '/Mem:/{print $2}')" -lt 2000 ] && ! swapon --show | grep -q .; then
@@ -36,7 +37,7 @@ if ! command -v cloudflared >/dev/null; then
   curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg | sudo tee /usr/share/keyrings/cloudflare-main.gpg >/dev/null
   echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared any main" \
     | sudo tee /etc/apt/sources.list.d/cloudflared.list >/dev/null
-  sudo apt-get update -qq && sudo apt-get install -y -qq cloudflared >/dev/null
+  sudo -E apt-get update -qq && sudo -E apt-get install -y -qq cloudflared >/dev/null
 fi
 
 echo "== Services"

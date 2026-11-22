@@ -80,11 +80,13 @@ sudo systemctl restart ashline-web ashline-telegram
 
 ## Updating after code changes
 
-On your Mac, `git pull`, then run the same `rsync` command as step 5 **but add `--exclude cases`** so your laptop's old data doesn't overwrite the server's. Then on the server:
+From the repo folder on your Mac, after `git pull` (or your own edits):
 
 ```bash
-bash ~/ashline/deploy/server-setup.sh
+bash deploy/update.sh
 ```
+
+It copies the code (never your laptop's `cases/` data), reinstalls, restarts both services and checks the site. Takes about a minute.
 
 ## Things to know
 
